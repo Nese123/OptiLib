@@ -4,3 +4,4 @@ numpy
 pandas
 pymoo
 scikit-learn
+openpyxl

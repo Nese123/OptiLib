@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from pymoo.operators.sampling.rnd import BinaryRandomSampling
 from pymoo.operators.crossover.pntx import SinglePointCrossover
 from pymoo.operators.crossover.pntx import TwoPointCrossover
+from pathlib import Path
 from pymoo.operators.crossover.ux import UniformCrossover
 
 # ═══════════════════════════════════════════════════════════════
@@ -425,8 +426,12 @@ def select_best_solution(res, problem):
     plot.do()  # Render first so plot.ax exists
     plot.ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:,.0f}'))
 
-    plot.fig.savefig("final_constrained_pareto_front.png", dpi=200, bbox_inches="tight")
-    print("Plot successfully saved as 'final_constrained_pareto_front.png'!")
+    output_dir = Path(__file__).resolve().parent.parent / "output"
+    output_dir.mkdir(exist_ok=True)
+    img_path = output_dir / "final_constrained_pareto_front.png"
+    
+    plot.fig.savefig(str(img_path), dpi=200, bbox_inches="tight")
+    print(f"Plot successfully saved as '{img_path.name}' in {output_dir}!")
 
     # Normalize the PLOTTED values (biological score vs cost) to [0, 1]
     # so the knee-point calculation matches what is visually shown on the Pareto front.
