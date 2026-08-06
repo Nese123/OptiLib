@@ -22,15 +22,13 @@ from pymoo.core.callback import Callback
 #  PATH SETUP — resolve project root so imports work
 # ═══════════════════════════════════════════════════════════════
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PYTHON_DIR = PROJECT_ROOT / "python"
 DATABASE_DIR = PROJECT_ROOT / "database"
 MOLPRICE_DIR = PROJECT_ROOT / "MolPrice"
 
-sys.path.insert(0, str(PYTHON_DIR))
 sys.path.insert(0, str(MOLPRICE_DIR))
 
-from selectivity import generate_selectivity_matrix
-from algorithm import (
+from core.selectivity import generate_selectivity_matrix
+from core.algorithm import (
     DrugLibraryProblem,
     build_smart_init,
     run_optimization,

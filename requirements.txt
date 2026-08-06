@@ -1,0 +1,6 @@
+flask
+xlsxwriter
+numpy
+pandas
+pymoo
+scikit-learn
