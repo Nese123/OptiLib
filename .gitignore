@@ -1,0 +1,27 @@
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+database/chembl_36.db:Zone.Identifier
+database/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# Output and generated files
+webapp/output/
+webapp/final_constrained_pareto_front.png
+
+# IDE and OS specific files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

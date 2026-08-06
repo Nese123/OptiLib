@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="NSGA-II Drug Library Optimization — Upload disease targets, build selectivity matrices, and optimize compound libraries interactively.">
+    <title>OptiDrug</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
+</head>
+
+<body>
+
+    <div class="app-container">
+
+        <header class="app-header">
+            <div class="logo-container">
+                <img src="/static/logo.png" alt="OptiDrug Logo" class="app-logo">
+                <div class="logo-text-container">
+                    <h1><span class="text-teal">Opti</span><span class="text-white">Drug</span></h1>
+                </div>
+            </div>
+            <p class="subtitle">DRUG LIBRARY OPTIMIZATION</p>
+        </header>
+
+        <!-- ═══ Step Indicator ═══ -->
+        <nav class="step-indicator" id="stepIndicator">
+            <div class="step-dot active" data-step="1">1</div>
+            <div class="step-line" id="line-1-2"></div>
+            <div class="step-dot" data-step="2">2</div>
+            <div class="step-line" id="line-2-3"></div>
+            <div class="step-dot" data-step="3">3</div>
+            <div class="step-line" id="line-3-4"></div>
+            <div class="step-dot" data-step="4">4</div>
+        </nav>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!--  STEP 1: Upload Targets                                 -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <section class="step-section active" id="step-1">
+            <div class="card">
+                <h2 class="card-title"><span class="icon">📂</span> Upload Target List</h2>
+
+                <div class="drop-zone" id="dropZone">
+                    <span class="upload-icon">📄</span>
+                    <div class="upload-text">Drag & drop your file here, or click to browse</div>
+                    <div class="upload-hint">CSV or Excel (.xlsx) with a "Target" column · Accepts target names or
+                        ChEMBL IDs</div>
+                    <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" multiple>
+                </div>
+
+                <div id="fileInfo" style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
+                </div>
+
+                <div id="removeAllBtnContainer" style="display: none; margin-top: 0.75rem; text-align: right;">
+                    <button class="btn btn-secondary" id="removeAllBtn"
+                        style="padding: 0.4rem 1rem; font-size: 0.85rem; color: #ff4a4a; border-color: rgba(255, 74, 74, 0.3); background: rgba(255, 74, 74, 0.05);">
+                        Remove All Targets
+                    </button>
+                    <div id="removeAllConfirm"
+                        style="display: none; align-items: center; justify-content: flex-end; gap: 8px;">
+                        <span style="color: #ff4a4a; font-size: 0.9rem;">Are you sure you want to remove all
+                            targets?</span>
+                        <button class="btn btn-primary" id="removeAllYesBtn"
+                            style="padding: 0.25rem 0.75rem; font-size: 0.85rem; min-width: 50px;">Yes</button>
+                        <button class="btn btn-secondary" id="removeAllNoBtn"
+                            style="padding: 0.25rem 0.75rem; font-size: 0.85rem; min-width: 50px;">No</button>
+                    </div>
+                </div>
+
+                <!-- Validation Results -->
+                <div class="validation-summary" id="validationSummary" style="display: none;">
+                    <div class="validation-row matched" id="matchedRow">
+                        <span>✅</span>
+                        <span id="matchedCount">0 targets matched</span>
+                    </div>
+                    <div class="target-list" id="matchedList"></div>
+
+                    <div class="validation-row unmatched" id="unmatchedRow" style="display: none;">
+                        <span>❌</span>
+                        <span id="unmatchedCount">0 targets not found</span>
+                    </div>
+                    <div class="target-list" id="unmatchedList" style="display: none;"></div>
+                </div>
+
+                <!-- Selectivity Threshold -->
+                <div class="threshold-control" id="thresholdControl" style="display: none;">
+                    <div class="form-group">
+                        <div class="label-row">
+                            <label>Minimum Selectivity Threshold <span class="info-icon"
+                                    data-tooltip="Only compounds with selectivity above this threshold will be taken into account in the optimization.">?</span></label>
+                            <span class="value-display" id="thresholdValue">0.5</span>
+                        </div>
+                        <input type="range" id="selectivityThreshold" min="0" max="2" step="0.1" value="0.5">
+                    </div>
+                    <div class="form-group" style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="removeTargets" checked style="margin: 0;">
+                        <label for="removeTargets" style="margin: 0; font-size: 0.9em; cursor: pointer;">Remove targets
+                            with low selectivity
+                            <span class="info-icon"
+                                data-tooltip="Determines if targets for which no drug has a selectivity above the threshold will be removed in addition to the compounds.">?</span></label>
+                    </div>
+                </div>
+
+                <!-- Error -->
+                <div class="error-box" id="uploadError" style="display: none;"></div>
+
+                <div class="btn-row">
+                    <button class="btn btn-primary" id="buildMatrixBtn" disabled>
+                        <span>Build Selectivity Matrix</span>
+                        <span class="btn-icon">→</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!--  STEP 2: Pipeline Progress                              -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <section class="step-section" id="step-2">
+            <div class="card">
+                <h2 class="card-title"><span class="icon">⚙️</span> Building Selectivity Matrix</h2>
+
+                <div class="pipeline-steps" id="pipelineSteps">
+                    <div class="pipeline-step" data-pipeline="1">
+                        <span class="step-icon">⬜</span>
+                        <div>
+                            <div class="step-text">Searching for selective compounds</div>
+                            <div class="step-detail" data-detail="1"></div>
+                        </div>
+                    </div>
+                    <div class="pipeline-step" data-pipeline="2">
+                        <span class="step-icon">⬜</span>
+                        <div>
+                            <div class="step-text">Getting price data</div>
+                            <div class="step-detail" data-detail="2"></div>
+                        </div>
+                    </div>
+                    <div class="pipeline-step" data-pipeline="3">
+                        <span class="step-icon">⬜</span>
+                        <div>
+                            <div class="step-text">Saving matrix</div>
+                            <div class="step-detail" data-detail="3"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="error-box" id="pipelineError" style="display: none;"></div>
+
+                <div class="btn-row">
+                    <button class="btn btn-secondary" id="backToStep1From2Btn">
+                        <span class="btn-icon">←</span>
+                        <span>Back to Uploads</span>
+                    </button>
+                    <button class="btn btn-primary" id="goToConfigBtn" disabled>
+                        <span>Configure & Optimize</span>
+                        <span class="btn-icon">→</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!--  STEP 3: Configuration & Run                            -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <section class="step-section" id="step-3">
+            <div class="card">
+                <h2 class="card-title"><span class="icon">🧬</span> Configure NSGA-II Optimization</h2>
+
+                <!-- Dataset Summary -->
+                <div class="stats-row" id="datasetStats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="statDrugs">—</div>
+                        <div class="stat-label">Compounds</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="statTargets">—</div>
+                        <div class="stat-label">Targets</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="statCost">—</div>
+                        <div class="stat-label">Pool Cost (USD)</div>
+                    </div>
+                </div>
+
+                <!-- Hyperparameters -->
+                <div class="params-grid">
+                    <!-- Weight Mean -->
+                    <div class="form-group">
+                        <div class="label-row">
+                            <label>Mean Selectivity % <span class="info-icon"
+                                    data-tooltip="Determines how much the algorithm ephasizes the mean selectivity of the library opposed to the minimum selectivity. The default value, 50 %, weights mean and min selectivity equally.">?</span></label>
+                            <span class="value-display" id="weightMeanValue">50%</span>
+                        </div>
+                        <input type="range" id="weightMean" min="0" max="100" step="1" value="50">
+                    </div>
+
+                    <!-- Weight Min -->
+                    <div class="form-group">
+                        <div class="label-row">
+                            <label>Min Selectivity % <span class="info-icon"
+                                    data-tooltip="Determines how much the algorithm emphasizes the minimum selectivity of the library opposed to the mean selectivity. The default value, 50 %, weights mean and min selectivity equally.">?</span></label>
+                            <span class="value-display" id="weightMinValue">50%</span>
+                        </div>
+                        <input type="range" id="weightMin" min="0" max="100" step="1" value="50">
+                    </div>
+
+                    <!-- Allowed Miss % -->
+                    <div class="form-group">
+                        <div class="label-row">
+                            <label>Allowed Miss % <span class="info-icon"
+                                    data-tooltip="The maximum percentage of inputted targets that are allowed to have no active compounds in the final optimized library. The default value is 10 %, meaning that the final library has to have compounds for at least 90 % of the original targets.">?</span></label>
+                            <span class="value-display" id="allowedMissValue">10%</span>
+                        </div>
+                        <input type="range" id="allowedMiss" min="0" max="20" step="1" value="10">
+                    </div>
+
+                    <!-- Mutation Multiplier -->
+                    <div class="form-group">
+                        <label>Mutation Multiplier <span class="info-icon"
+                                data-tooltip="Scales the rate of genetic mutation during optimization. Higher values increase exploration but might disrupt good solutions. The default value is 1.0">?</span></label>
+                        <input type="number" id="mutationMultiplier" value="1.0" min="0.1" max="20" step="0.1">
+                    </div>
+
+                    <!-- Population Size -->
+                    <div class="form-group">
+                        <label>Population Size <span class="info-icon"
+                                data-tooltip="The number of candidate libraries evaluated in each generation. Larger populations explore more of the search space but are slower to evaluate. The default value is 100.">?</span></label>
+                        <input type="number" id="popSize" value="100" min="10" max="500" step="10">
+                    </div>
+
+                    <!-- Max Generations -->
+                    <div class="form-group">
+                        <label>Max Generations <span class="info-icon"
+                                data-tooltip="The maximum number of evolutionary cycles the algorithm will run before terminating. The algorithm will stop before that if the solutions don't improve from generation to generation. The default value is 300.">?</span></label>
+                        <input type="number" id="maxGen" value="300" min="10" max="5000" step="10">
+                    </div>
+                </div>
+
+                <!-- Optimization Progress -->
+                <div class="progress-bar-container" id="optProgress" style="display: none;">
+                    <div class="progress-bar-label">
+                        <span class="text">Optimizing...</span>
+                        <span class="value" id="optGenLabel">Gen 0 / 300</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-bar-fill" id="optProgressFill" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="error-box" id="optError" style="display: none;"></div>
+
+                <div class="btn-row">
+                    <button class="btn btn-secondary" id="backToStep1Btn">
+                        <span class="btn-icon">←</span>
+                        <span>Start Over</span>
+                    </button>
+                    <button class="btn btn-primary" id="runOptBtn">
+                        <span>Run Optimization</span>
+                        <span class="btn-icon">▶</span>
+                    </button>
+                    <button class="btn btn-secondary" id="stopOptBtn"
+                        style="display: none; background: #ff4a4a; color: white; border-color: #ff4a4a;">
+                        <span>Stop Optimization</span>
+                        <span class="btn-icon">⏹</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!--  STEP 4: Results Dashboard                              -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <section class="step-section" id="step-4">
+            <div class="results-grid">
+
+                <!-- Pareto Front Chart -->
+                <div class="card">
+                    <h2 class="card-title"><span class="icon">📈</span> Pareto Front <span class="info-icon"
+                            data-tooltip="Displays the trade-off between maximizing selectivity and minimizing cost. Each point represents an optimized library generated during the run. Click a point on the front to see its statistics.">?</span>
+                    </h2>
+                    <div class="chart-container" id="paretoChart" style="height: 420px;"></div>
+                </div>
+
+                <!-- Quality Score + Comparison -->
+                <div class="card">
+                    <h2 class="card-title"><span class="icon">📊</span> Library Comparison</h2>
+
+                    <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
+                        <!-- Quality Score Ring -->
+                        <div class="quality-score-container">
+                            <div class="quality-score-ring">
+                                <svg viewBox="0 0 128 128">
+                                    <defs>
+                                        <linearGradient id="scoreGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                            <stop offset="0%" stop-color="#38d9a9" />
+                                            <stop offset="100%" stop-color="#845ef7" />
+                                        </linearGradient>
+                                    </defs>
+                                    <circle class="bg-ring" cx="64" cy="64" r="56" />
+                                    <circle class="fg-ring" id="scoreRing" cx="64" cy="64" r="56" />
+                                </svg>
+                                <div class="quality-score-value">
+                                    <div class="number" id="qualityScoreNum">—</div>
+                                    <div class="label">Quality</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Comparison Table -->
+                        <div style="flex: 1; min-width: 300px;">
+                            <table class="comparison-table" id="comparisonTable">
+                                <thead>
+                                    <tr>
+                                        <th>Metric</th>
+                                        <th>Original Pool</th>
+                                        <th>Optimized</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="comparisonBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Optimized Compounds List -->
+                    <div style="margin-top: 2rem;">
+                        <h3 style="margin-bottom: 1rem; color: #fff; font-size: 1.1rem;">Optimized Library Compounds
+                        </h3>
+                        <div class="table-container"
+                            style="max-height: 300px; overflow-y: auto; border: 1px solid rgba(120, 120, 255, 0.2); border-radius: 8px;">
+                            <table class="comparison-table" style="margin: 0; width: 100%;">
+                                <thead style="position: sticky; top: 0; background: #1a1a2e; z-index: 1;">
+                                    <tr>
+                                        <th>InChIKey</th>
+                                        <th>ChEMBL ID</th>
+                                        <th>Price (USD/mg)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="compoundsListBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Heatmap -->
+                <div class="card">
+                    <h2 class="card-title"><span class="icon">🗺️</span> Selectivity Heatmap <span class="info-icon"
+                            data-tooltip="Visualizes the selectivity score for each target across the chosen library. Brighter colors indicate higher selectivity for that specific target.">?</span>
+                    </h2>
+                    <div class="chart-container" id="heatmapChart" style="height: 500px;"></div>
+                </div>
+
+                <!-- Distribution -->
+                <div class="card">
+                    <h2 class="card-title"><span class="icon">📈</span> Target Selectivity Distribution <span
+                            class="info-icon"
+                            data-tooltip="Shows the frequency distribution of selectivity scores across all targets. A distribution shifted to the right indicates the library covers many targets with high selectivity.">?</span>
+                    </h2>
+                    <div class="chart-container" id="distributionChart" style="height: 420px;"></div>
+                </div>
+
+                <!-- Downloads -->
+                <div class="card">
+                    <h2 class="card-title"><span class="icon">📥</span> Download Results</h2>
+                    <div class="download-row">
+                        <a class="btn btn-primary" href="/api/download/library" id="downloadLibBtn">
+                            <span class="btn-icon">📄</span>
+                            <span>Winning Library (.xlsx)</span>
+                        </a>
+                        <a class="btn btn-secondary" href="/api/download/matrix" id="downloadMatBtn">
+                            <span class="btn-icon">📄</span>
+                            <span>Original Selectivity Matrix (.xlsx)</span>
+                        </a>
+                    </div>
+                    <div class="btn-row" style="margin-top: 2rem;">
+                        <button class="btn btn-secondary" id="backToStep3Btn">
+                            <span class="btn-icon">←</span>
+                            <span>Re-configure & Run Again</span>
+                        </button>
+                        <button class="btn btn-secondary" id="newRunBtn">
+                            <span class="btn-icon">🔄</span>
+                            <span>New Targets</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <script src="/static/app.js"></script>
+
+</body>
+
+</html>
