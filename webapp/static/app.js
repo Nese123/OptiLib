@@ -1056,21 +1056,23 @@ async function loadDistributionChart(prefetchedData) {
         for (let j = 0; j < numTargets; j++) {
             let col = [];
             for (let i = 0; i < numCompounds; i++) {
-                col.push(data.matrix[i][j]);
+                let val = data.matrix[i][j];
+                if (val !== null && !isNaN(val)) {
+                    col.push(val);
+                }
             }
 
-            let posCol = col.filter(v => v > 0);
-            posCol.sort((a, b) => a - b);
+            col.sort((a, b) => a - b);
 
-            let max = Math.max(...col);
-            let min = posCol.length > 0 ? posCol[0] : 0;
+            let max = col.length > 0 ? col[col.length - 1] : 0;
+            let min = col.length > 0 ? col[0] : 0;
             let median = 0;
-            if (posCol.length > 0) {
-                let mid = Math.floor(posCol.length / 2);
-                if (posCol.length % 2 === 0) {
-                    median = (posCol[mid - 1] + posCol[mid]) / 2;
+            if (col.length > 0) {
+                let mid = Math.floor(col.length / 2);
+                if (col.length % 2 === 0) {
+                    median = (col[mid - 1] + col[mid]) / 2;
                 } else {
-                    median = posCol[mid];
+                    median = col[mid];
                 }
             }
 
@@ -1114,7 +1116,7 @@ async function loadDistributionChart(prefetchedData) {
         const traceMin = {
             x: x,
             y: stats.map(s => s.min),
-            name: 'Min (>0)',
+            name: 'Min',
             type: 'bar',
             marker: { color: 'rgba(56, 217, 169, 0.95)' },
             width: 1,
