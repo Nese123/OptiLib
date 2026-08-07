@@ -5,3 +5,5 @@ pandas
 pymoo
 scikit-learn
 openpyxl
+rdkit
+tqdm

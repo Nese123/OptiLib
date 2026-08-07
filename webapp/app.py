@@ -27,6 +27,7 @@ MOLPRICE_DIR = PROJECT_ROOT / "MolPrice"
 
 sys.path.insert(0, str(MOLPRICE_DIR))
 
+from bin.numpy_predict import NumpyFingerprints
 from core.selectivity import generate_selectivity_matrix
 from core.algorithm import (
     DrugLibraryProblem,
@@ -356,7 +357,11 @@ def _run_pipeline(target_names, chembl_ids, selectivity_threshold, remove_target
             LEFT JOIN compound_structures cs ON cts.molregno = cs.molregno
             LEFT JOIN compound_properties cp ON cts.molregno = cp.molregno
             WHERE ({where_targets})
-              AND cts.selectivity_score > {selectivity_threshold}
+              AND cts.molregno IN (
+                  SELECT molregno 
+                  FROM compound_target_selectivity 
+                  WHERE selectivity_score > {selectivity_threshold}
+              )
               AND cts.molregno IN (
                   SELECT DISTINCT COALESCE(mh.parent_molregno, md2.molregno)
                   FROM target_dictionary td2
@@ -488,19 +493,36 @@ def _run_pipeline(target_names, chembl_ids, selectivity_threshold, remove_target
 
         if missing_count > 0:
             _update_pipeline(2, "Getting price data...",
-                             f"Using fallback prices for {missing_count} compounds not found in database",
-                             summary=f"Found prices. Used fallback for {missing_count} compounds.")
-            
-            # Fallback: median of known prices or $100/mg
-            fallback = final_export_df["Molport_Price"].median()
-            if pd.isna(fallback):
-                fallback = 100.0
-            
-            final_prices = np.where(
-                missing_price_mask,
-                fallback,
-                final_export_df["Molport_Price"]
-            )
+                             f"Predicting prices for {missing_count} compounds not found in database using MolPrice",
+                             summary=f"Found prices. Predicting {missing_count} with MolPrice.")
+
+            # Use MolPrice to predict prices from SMILES for missing compounds
+            try:
+                molprice_weights = str(MOLPRICE_DIR / "models" / "Numpy" / "MP_Morgan_hybrid.pkl")
+                molprice_model = NumpyFingerprints(weights_path=molprice_weights)
+
+                missing_smiles = final_export_df.loc[missing_price_mask, "SMILES"].tolist()
+                predicted_prices = molprice_model.predict_batch_from_smiles(missing_smiles)
+                predicted_prices = [p[0] if hasattr(p, '__len__') else float(p) for p in predicted_prices]
+
+                # Assign predicted prices to missing entries
+                final_prices = final_export_df["Molport_Price"].copy()
+                final_prices.loc[missing_price_mask] = predicted_prices
+                final_prices = final_prices.values
+
+                _update_pipeline(2, "Getting price data...",
+                                 f"MolPrice predicted prices for {missing_count} compounds")
+            except Exception as e:
+                _update_pipeline(2, "Getting price data...",
+                                 f"MolPrice prediction failed ({e}), using median fallback")
+                fallback = final_export_df["Molport_Price"].median()
+                if pd.isna(fallback):
+                    fallback = 100.0
+                final_prices = np.where(
+                    missing_price_mask,
+                    fallback,
+                    final_export_df["Molport_Price"]
+                )
         else:
             _update_pipeline(2, "Getting price data...", "All prices found in database.", summary="All prices found in database.")
             final_prices = final_export_df["Molport_Price"].values
