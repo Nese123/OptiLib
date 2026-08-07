@@ -415,7 +415,7 @@ def _run_pipeline(target_names, chembl_ids, selectivity_threshold, remove_target
             columns="Target_Name",
             values="Selectivity_Score",
             aggfunc="max"
-        ).fillna(0)
+        )
         del df_raw  # Free memory — no longer needed
 
         new_drugs, new_targets = selectivity_df.shape
@@ -424,12 +424,12 @@ def _run_pipeline(target_names, chembl_ids, selectivity_threshold, remove_target
             clean_df = selectivity_df.loc[
                 (selectivity_df.max(axis=1) >= selectivity_threshold),
                 (selectivity_df.max(axis=0) >= selectivity_threshold),
-            ].fillna(0)
+            ]
         else:
             clean_df = selectivity_df.loc[
                 (selectivity_df.max(axis=1) >= selectivity_threshold),
                 :
-            ].fillna(0)
+            ]
 
         del selectivity_df  # Free memory — no longer needed
         final_drugs, final_targets = clean_df.shape
@@ -806,9 +806,15 @@ def _build_comparison(winning_matrix_df, problem):
     lib_prices = winning_matrix_df["Price_USD_per_mg"].to_numpy(dtype=float)
 
     lib_total_cost = float(np.sum(lib_prices))
-    lib_best_per_target = np.max(lib_sel_matrix, axis=0)
-    lib_mean_sel = float(np.mean(lib_best_per_target[lib_best_per_target > 0]))
-    lib_min_sel = float(np.min(lib_best_per_target[lib_best_per_target > 0]))
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        lib_best_per_target = np.nanmax(lib_sel_matrix, axis=0)
+    lib_best_per_target = np.nan_to_num(lib_best_per_target, nan=-1.0)
+    
+    positive_lib_scores = lib_best_per_target[lib_best_per_target > 0]
+    lib_mean_sel = float(np.mean(positive_lib_scores)) if len(positive_lib_scores) > 0 else 0.0
+    lib_min_sel = float(np.min(positive_lib_scores)) if len(positive_lib_scores) > 0 else 0.0
     lib_num_targets = lib_sel_matrix.shape[1]
     lib_num_drugs = lib_sel_matrix.shape[0]
 
@@ -950,7 +956,7 @@ def _build_heatmap_cache(df):
     """Pre-compute the heatmap JSON dict so /api/heatmap-data is instant."""
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
     return {
-        "matrix": df[sel_cols].to_numpy(dtype=float).tolist(),
+        "matrix": df[sel_cols].astype(object).where(pd.notna(df[sel_cols]), None).values.tolist(),
         "compounds": df["SMILES"].tolist() if "SMILES" in df.columns else df.index.tolist(),
         "targets": sel_cols,
     }
@@ -968,7 +974,7 @@ def heatmap_data():
 
     # Fallback: compute on the fly
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
-    matrix = df[sel_cols].to_numpy(dtype=float).tolist()
+    matrix = df[sel_cols].astype(object).where(pd.notna(df[sel_cols]), None).values.tolist()
     compounds = df["SMILES"].tolist() if "SMILES" in df.columns else df.index.tolist()
     targets = sel_cols
 

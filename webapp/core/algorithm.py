@@ -92,11 +92,18 @@ class DrugLibraryProblem(ElementwiseProblem):
 
         # Compute pool-level baselines for normalization and reporting
         self.pool_total_cost = float(np.sum(self.prices))
-        pool_max_scores = np.max(self.matrix, axis=0)
-        self.pool_mean_sel = float(np.mean(pool_max_scores[pool_max_scores > 0]))
-        self.pool_min_sel = float(np.min(pool_max_scores[pool_max_scores > 0]))
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            pool_max_scores = np.nanmax(self.matrix, axis=0)
+        pool_max_scores = np.nan_to_num(pool_max_scores, nan=-1.0)
+
+        positive_pool_scores = pool_max_scores[pool_max_scores > 0]
+        
+        self.pool_mean_sel = float(np.mean(positive_pool_scores)) if len(positive_pool_scores) > 0 else 0.0
+        self.pool_min_sel = float(np.min(positive_pool_scores)) if len(positive_pool_scores) > 0 else 0.0
         if self.use_median:
-            self.pool_baseline_score = float(np.median(pool_max_scores[pool_max_scores > 0]))
+            self.pool_baseline_score = float(np.median(positive_pool_scores)) if len(positive_pool_scores) > 0 else 0.0
         else:
             self.pool_baseline_score = self.weight_mean * self.pool_mean_sel + self.weight_min * self.pool_min_sel
         self.pool_num_targets = self.num_targets
@@ -125,7 +132,11 @@ class DrugLibraryProblem(ElementwiseProblem):
             out["G"] = [self.num_targets]
             return
 
-        target_max_scores = np.max(self.matrix[mask, :], axis=0)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            target_max_scores = np.nanmax(self.matrix[mask, :], axis=0)
+        target_max_scores = np.nan_to_num(target_max_scores, nan=-1.0)
 
         # Constraint 1: The Allowance
         missed_targets = np.sum(target_max_scores <= 0)

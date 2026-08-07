@@ -993,13 +993,18 @@ async function loadHeatmap(prefetchedData) {
             if (!res.ok) return;
         }
 
+        const hoverText = data.matrix.map(row => 
+            row.map(val => val === null ? "NaN" : val.toFixed(3))
+        );
+
         const trace = {
             z: data.matrix,
             x: data.targets,
             y: data.compounds.map((s) => s.length > 30 ? s.substring(0, 27) + '...' : s),
+            text: hoverText,
             type: 'heatmap',
             colorscale: 'Viridis',
-            hovertemplate: 'Target: %{x}<br>Compound: %{y}<br>Selectivity: %{z:.3f}<extra></extra>',
+            hovertemplate: 'Target: %{x}<br>Compound: %{y}<br>Selectivity: %{text}<extra></extra>',
             colorbar: {
                 title: { text: 'Selectivity', font: { size: 12, color: '#9898b8' } },
                 tickfont: { color: '#9898b8' },
@@ -1008,19 +1013,21 @@ async function loadHeatmap(prefetchedData) {
 
         const layout = {
             paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(0,0,0,0.15)',
+            plot_bgcolor: 'rgba(255,255,255,0.1)',
             font: { family: 'Inter, sans-serif', color: '#9898b8', size: 10 },
             xaxis: {
                 showticklabels: false,
+                showgrid: false,
                 title: { text: 'Targets', font: { size: 12, color: '#9898b8' } },
                 side: 'top',
             },
             yaxis: {
                 showticklabels: false,
+                showgrid: false,
                 autorange: 'reversed',
                 title: { text: 'Compounds', font: { size: 12, color: '#9898b8' } },
             },
-            margin: { l: 40, r: 20, t: 40, b: 20 },
+            margin: { l: 40, r: 20, t: 40, b: 40 },
         };
 
         Plotly.newPlot('heatmapChart', [trace], layout, {
