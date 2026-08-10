@@ -126,7 +126,12 @@ _lock = threading.Lock()
 # ═══════════════════════════════════════════════════════════════
 
 @app.route("/")
-def index():
+def home():
+    return render_template("home.html")
+
+
+@app.route("/tool")
+def tool():
     return render_template("index.html")
 
 

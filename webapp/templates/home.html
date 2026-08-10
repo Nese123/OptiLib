@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="OptiDrug — An intelligent drug library optimization platform using NSGA-II to maximize target selectivity while minimizing cost.">
+    <title>OptiDrug — Drug Library Optimization</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%%22 y=%2250%%22 dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2280%22>💊</text></svg>">
+</head>
+
+<body class="home-page">
+
+    <!-- ═══ Navigation Bar ═══ -->
+    <nav class="navbar" id="navbar">
+        <div class="navbar-inner">
+            <a href="/" class="navbar-brand">
+                <img src="/static/logo.png" alt="OptiDrug Logo" class="navbar-logo">
+                <span class="navbar-title"><span class="text-teal">Opti</span><span
+                        class="text-white">Drug</span></span>
+            </a>
+            <div class="navbar-links">
+                <a href="/" class="nav-link active">Home</a>
+                <a href="#how-it-works" class="nav-link">How It Works</a>
+                <a href="#features" class="nav-link">Features</a>
+                <a href="/tool" class="nav-link nav-cta">Launch Tool</a>
+            </div>
+            <button class="navbar-hamburger" id="navHamburger" aria-label="Toggle navigation menu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+        <!-- Mobile menu -->
+        <div class="navbar-mobile-menu" id="navMobileMenu">
+            <a href="/" class="nav-link active">Home</a>
+            <a href="#how-it-works" class="nav-link">How It Works</a>
+            <a href="#features" class="nav-link">Features</a>
+            <a href="/tool" class="nav-link nav-cta">Launch Tool</a>
+        </div>
+    </nav>
+
+    <!-- ═══ Hero Section ═══ -->
+    <section class="hero-section">
+        <!-- Animated background particles -->
+        <div class="hero-particles" id="heroParticles"></div>
+        <div class="hero-glow"></div>
+
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span class="hero-badge-dot"></span>
+                Multi-Objective Optimization
+            </div>
+            <h1 class="hero-title">
+                Optimize Your Drug Library with
+                <span class="hero-gradient-text">Intelligent Algorithms</span>
+            </h1>
+            <p class="hero-subtitle">
+                OptiDrug uses NSGA-II, a powerful multi-objective genetic algorithm, to find the optimal set of
+                compounds that maximizes biological target selectivity while minimizing cost — giving researchers
+                the best possible drug libraries for their studies.
+            </p>
+            <div class="hero-actions">
+                <a href="/tool" class="btn btn-primary btn-lg" id="heroLaunchBtn">
+                    <span>Launch OptiDrug</span>
+                    <span class="btn-icon">→</span>
+                </a>
+                <a href="#how-it-works" class="btn btn-secondary btn-lg" id="heroLearnBtn">
+                    <span>Learn More</span>
+                    <span class="btn-icon">↓</span>
+                </a>
+            </div>
+
+            <!-- Hero stats -->
+            <div class="hero-stats">
+                <div class="hero-stat">
+                    <div class="hero-stat-value">NSGA-II</div>
+                    <div class="hero-stat-label">Optimization Engine</div>
+                </div>
+                <div class="hero-stat-divider"></div>
+                <div class="hero-stat">
+                    <div class="hero-stat-value">ChEMBL 36</div>
+                    <div class="hero-stat-label">Compound Database</div>
+                </div>
+                <div class="hero-stat-divider"></div>
+                <div class="hero-stat">
+                    <div class="hero-stat-value">MolPort</div>
+                    <div class="hero-stat-label">Pricing Data</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ How It Works Section ═══ -->
+    <section class="section" id="how-it-works">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">The Pipeline</span>
+                <h2 class="section-title">How OptiDrug Works</h2>
+                <p class="section-subtitle">From target input to optimized library — a fully automated pipeline powered
+                    by advanced algorithms.</p>
+            </div>
+
+            <div class="pipeline-timeline">
+                <!-- Step 1 -->
+                <div class="timeline-item" data-aos="fade-up">
+                    <div class="timeline-marker">
+                        <span class="timeline-number">1</span>
+                    </div>
+                    <div class="timeline-card">
+                        <div class="timeline-icon">📂</div>
+                        <h3>Upload Targets</h3>
+                        <p>Upload a CSV or Excel file containing your biological targets of interest — by name or
+                            ChEMBL ID. The system validates each target against the ChEMBL database.</p>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="timeline-item" data-aos="fade-up">
+                    <div class="timeline-marker">
+                        <span class="timeline-number">2</span>
+                    </div>
+                    <div class="timeline-card">
+                        <div class="timeline-icon">🔬</div>
+                        <h3>Build Selectivity Matrix</h3>
+                        <p>OptiDrug queries ChEMBL to find compounds that are both potent and selective against your
+                            targets. A compound × target selectivity matrix is constructed, capturing how well each
+                            compound distinguishes between targets.</p>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="timeline-item" data-aos="fade-up">
+                    <div class="timeline-marker">
+                        <span class="timeline-number">3</span>
+                    </div>
+                    <div class="timeline-card">
+                        <div class="timeline-icon">💰</div>
+                        <h3>Price Estimation</h3>
+                        <p>Compound prices are fetched from MolPort's database. For compounds not found, the integrated
+                            MolPrice neural network predicts prices from molecular structure — ensuring every candidate
+                            has cost data.</p>
+                    </div>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="timeline-item" data-aos="fade-up">
+                    <div class="timeline-marker">
+                        <span class="timeline-number">4</span>
+                    </div>
+                    <div class="timeline-card">
+                        <div class="timeline-icon">🧬</div>
+                        <h3>NSGA-II Optimization</h3>
+                        <p>The algorithm simultaneously optimizes two competing objectives: maximizing biological
+                            selectivity coverage and minimizing total library cost. It evolves a population of candidate
+                            libraries over hundreds of generations to find the best trade-offs, known as the Pareto front.</p>
+                    </div>
+                </div>
+
+                <!-- Step 5 -->
+                <div class="timeline-item" data-aos="fade-up">
+                    <div class="timeline-marker">
+                        <span class="timeline-number">5</span>
+                    </div>
+                    <div class="timeline-card">
+                        <div class="timeline-icon">📊</div>
+                        <h3>Results Dashboard</h3>
+                        <p>Explore the Pareto front interactively, compare optimized libraries against the full compound
+                            pool, visualize selectivity heatmaps, and download the winning library — all in a rich,
+                            real-time dashboard.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ Features Section ═══ -->
+    <section class="section section-alt" id="features">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">Capabilities</span>
+                <h2 class="section-title">Powerful Features</h2>
+                <p class="section-subtitle">Everything you need to build optimized drug libraries for your research.</p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <div class="feature-icon">🎯</div>
+                    </div>
+                    <h3>Multi-Objective Optimization</h3>
+                    <p>NSGA-II simultaneously balances selectivity, target coverage, and cost — finding solutions no
+                        single-objective approach can discover.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <div class="feature-icon">⚡</div>
+                    </div>
+                    <h3>Real-Time Progress</h3>
+                    <p>Watch the optimization unfold in real time with live generation tracking and progress indicators
+                        — stop early or let it converge naturally.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <div class="feature-icon">📈</div>
+                    </div>
+                    <h3>Interactive Pareto Front</h3>
+                    <p>Click any point on the Pareto front to instantly view its library composition, compare metrics,
+                        and explore the cost-selectivity trade-off space.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <div class="feature-icon">🗺️</div>
+                    </div>
+                    <h3>Selectivity Heatmaps</h3>
+                    <p>Visualize exactly how each compound in your optimized library covers your targets with rich,
+                        interactive heatmaps.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <div class="feature-icon">💲</div>
+                    </div>
+                    <h3>Integrated Pricing</h3>
+                    <p>Leverages MolPort's database and MolPrice's machine learning model to provide accurate compound
+                        pricing — no manual lookup needed.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon-wrapper">
+                        <div class="feature-icon">🔧</div>
+                    </div>
+                    <h3>Configurable Parameters</h3>
+                    <p>Fine-tune selectivity thresholds, population size, mutation rates, and generation limits to match
+                        your specific research needs.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ Algorithm Section ═══ -->
+    <section class="section" id="algorithm">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">Under the Hood</span>
+                <h2 class="section-title">The NSGA-II Algorithm</h2>
+                <p class="section-subtitle">Understanding the evolutionary engine that powers OptiDrug.</p>
+            </div>
+
+            <div class="algo-grid">
+                <div class="algo-explanation">
+                    <div class="algo-block">
+                        <h3>🧬 Evolutionary Approach</h3>
+                        <p>NSGA-II (Non-dominated Sorting Genetic Algorithm II) is a widely-used multi-objective
+                            optimization algorithm. It maintains a population of candidate solutions (drug libraries)
+                            and evolves them through selection, crossover, and mutation — mimicking natural evolution to
+                            discover optimal trade-offs.</p>
+                    </div>
+                    <div class="algo-block">
+                        <h3>⚖️ Two Competing Objectives</h3>
+                        <p>OptiDrug formulates the problem with two objectives that naturally compete: <strong>maximize
+                                selectivity</strong> (you want the best possible target coverage) and
+                            <strong>minimize cost</strong> (you want to spend as little as possible). The algorithm finds
+                            the full spectrum of trade-offs between these goals.
+                        </p>
+                    </div>
+                    <div class="algo-block">
+                        <h3>📐 Pareto Optimality</h3>
+                        <p>Instead of a single "best" answer, NSGA-II produces a <strong>Pareto front</strong> — a set
+                            of solutions where no solution is better than another in both objectives simultaneously. This
+                            lets researchers choose the library that best fits their budget and selectivity requirements.
+                        </p>
+                    </div>
+                    <div class="algo-block">
+                        <h3>🏗️ Smart Initialization</h3>
+                        <p>OptiDrug seeds the initial population with intelligently constructed libraries rather than
+                            random selections. This accelerates convergence and ensures the algorithm starts from a
+                            strong foundation, reaching better solutions faster.</p>
+                    </div>
+                </div>
+
+                <div class="algo-visual">
+                    <div class="algo-visual-card">
+                        <div class="algo-visual-header">Optimization Flow</div>
+                        <div class="algo-flow">
+                            <div class="algo-flow-step">
+                                <div class="algo-flow-icon">🎲</div>
+                                <div class="algo-flow-label">Initialize Population</div>
+                            </div>
+                            <div class="algo-flow-arrow">↓</div>
+                            <div class="algo-flow-step">
+                                <div class="algo-flow-icon">📊</div>
+                                <div class="algo-flow-label">Evaluate Fitness</div>
+                            </div>
+                            <div class="algo-flow-arrow">↓</div>
+                            <div class="algo-flow-step">
+                                <div class="algo-flow-icon">🏆</div>
+                                <div class="algo-flow-label">Non-dominated Sorting</div>
+                            </div>
+                            <div class="algo-flow-arrow">↓</div>
+                            <div class="algo-flow-step">
+                                <div class="algo-flow-icon">🔀</div>
+                                <div class="algo-flow-label">Crossover & Mutation</div>
+                            </div>
+                            <div class="algo-flow-arrow">↓</div>
+                            <div class="algo-flow-step">
+                                <div class="algo-flow-icon">🔄</div>
+                                <div class="algo-flow-label">Next Generation</div>
+                            </div>
+                            <div class="algo-flow-arrow algo-flow-loop">↻ Repeat</div>
+                            <div class="algo-flow-step algo-flow-final">
+                                <div class="algo-flow-icon">✅</div>
+                                <div class="algo-flow-label">Pareto Front</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ CTA Section ═══ -->
+    <section class="cta-section">
+        <div class="cta-glow"></div>
+        <div class="section-container">
+            <h2 class="cta-title">Ready to Optimize?</h2>
+            <p class="cta-subtitle">Upload your targets and let OptiDrug find the optimal drug library for your
+                research.</p>
+            <a href="/tool" class="btn btn-primary btn-lg" id="ctaLaunchBtn">
+                <span>Get Started</span>
+                <span class="btn-icon">→</span>
+            </a>
+        </div>
+    </section>
+
+    <!-- ═══ Footer ═══ -->
+    <footer class="site-footer">
+        <div class="section-container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <img src="/static/logo.png" alt="OptiDrug Logo" class="footer-logo">
+                    <span class="footer-title"><span class="text-teal">Opti</span><span
+                            class="text-white">Drug</span></span>
+                </div>
+                <p class="footer-text">Drug Library Optimization Platform · Powered by NSGA-II</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // ─── Navbar scroll effect ───
+        const navbar = document.getElementById('navbar');
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 40) {
+                navbar.classList.add('scrolled');
+            } else {
+                navbar.classList.remove('scrolled');
+            }
+        });
+
+        // ─── Mobile hamburger menu ───
+        const hamburger = document.getElementById('navHamburger');
+        const mobileMenu = document.getElementById('navMobileMenu');
+        hamburger.addEventListener('click', () => {
+            hamburger.classList.toggle('open');
+            mobileMenu.classList.toggle('open');
+        });
+
+        // Close mobile menu on link click
+        mobileMenu.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', () => {
+                hamburger.classList.remove('open');
+                mobileMenu.classList.remove('open');
+            });
+        });
+
+        // ─── Smooth scroll for anchor links ───
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    const navHeight = navbar.offsetHeight;
+                    const targetPosition = target.getBoundingClientRect().top + window.scrollY - navHeight - 20;
+                    window.scrollTo({ top: targetPosition, behavior: 'smooth' });
+                }
+            });
+        });
+
+        // ─── Scroll-triggered animations ───
+        const observerOptions = {
+            threshold: 0.15,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.timeline-item, .feature-card, .algo-block, .algo-visual-card').forEach(el => {
+            el.classList.add('animate-on-scroll');
+            observer.observe(el);
+        });
+
+        // ─── Floating particles background ───
+        function createParticles() {
+            const container = document.getElementById('heroParticles');
+            if (!container) return;
+            const particleCount = 30;
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'hero-particle';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.top = Math.random() * 100 + '%';
+                particle.style.width = (Math.random() * 4 + 2) + 'px';
+                particle.style.height = particle.style.width;
+                particle.style.animationDelay = (Math.random() * 6) + 's';
+                particle.style.animationDuration = (Math.random() * 8 + 6) + 's';
+                container.appendChild(particle);
+            }
+        }
+        createParticles();
+    </script>
+
+</body>
+
+</html>

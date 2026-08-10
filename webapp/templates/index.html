@@ -6,25 +6,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description"
         content="NSGA-II Drug Library Optimization — Upload disease targets, build selectivity matrices, and optimize compound libraries interactively.">
-    <title>OptiDrug</title>
+    <title>OptiDrug — Optimization Tool</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%%22 y=%2250%%22 dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2280%22>💊</text></svg>">
 </head>
 
-<body>
+<body class="tool-page">
 
-    <div class="app-container">
-
-        <header class="app-header">
-            <div class="logo-container">
-                <img src="/static/logo.png" alt="OptiDrug Logo" class="app-logo">
-                <div class="logo-text-container">
-                    <h1><span class="text-teal">Opti</span><span class="text-white">Drug</span></h1>
-                </div>
+    <!-- ═══ Navigation Bar ═══ -->
+    <nav class="navbar scrolled" id="navbar">
+        <div class="navbar-inner">
+            <a href="/" class="navbar-brand">
+                <img src="/static/logo.png" alt="OptiDrug Logo" class="navbar-logo">
+                <span class="navbar-title"><span class="text-teal">Opti</span><span class="text-white">Drug</span></span>
+            </a>
+            <div class="navbar-links">
+                <a href="/" class="nav-link">Home</a>
+                <a href="/tool" class="nav-link active">Tool</a>
             </div>
-            <p class="subtitle">DRUG LIBRARY OPTIMIZATION</p>
-        </header>
+            <button class="navbar-hamburger" id="navHamburger" aria-label="Toggle navigation menu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+        <div class="navbar-mobile-menu" id="navMobileMenu">
+            <a href="/" class="nav-link">Home</a>
+            <a href="/tool" class="nav-link active">Tool</a>
+        </div>
+    </nav>
+
+    <div class="app-container tool-app-container">
 
         <!-- ═══ Step Indicator ═══ -->
         <nav class="step-indicator" id="stepIndicator">
@@ -401,6 +414,23 @@
 
     </div>
 
+    <script>
+        // ─── Navbar hamburger menu ───
+        const hamburger = document.getElementById('navHamburger');
+        const mobileMenu = document.getElementById('navMobileMenu');
+        if (hamburger && mobileMenu) {
+            hamburger.addEventListener('click', () => {
+                hamburger.classList.toggle('open');
+                mobileMenu.classList.toggle('open');
+            });
+            mobileMenu.querySelectorAll('.nav-link').forEach(link => {
+                link.addEventListener('click', () => {
+                    hamburger.classList.remove('open');
+                    mobileMenu.classList.remove('open');
+                });
+            });
+        }
+    </script>
     <script src="/static/app.js"></script>
 
 </body>
