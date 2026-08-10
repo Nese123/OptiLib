@@ -4,7 +4,6 @@
 
 // ─── State ───
 let currentStep = 1;
-let uploadedTargetNames = [];
 let uploadedChemblIds = [];
 let uploadedMatchedCount = 0;
 let uploadedFilesData = [];
@@ -203,14 +202,12 @@ function renderFiles() {
     fileInfo.innerHTML = '';
     
     // Recompute total cumulative targets
-    let allTargetNames = [];
     let allChemblIds = [];
     let allMatched = [];
     let allUnmatched = [];
     
     uploadedFilesData.forEach(fileData => {
         const d = fileData.data;
-        allTargetNames.push(...(d.target_names || []));
         allChemblIds.push(...(d.chembl_ids || []));
         allMatched.push(...(d.matched || []));
         allUnmatched.push(...(d.unmatched || []));
@@ -296,7 +293,6 @@ function renderFiles() {
         validationSummary.style.display = 'none';
         buildMatrixBtn.disabled = true;
         thresholdControl.style.display = 'none';
-        uploadedTargetNames = [];
         uploadedChemblIds = [];
         sessionStorage.removeItem('uploadedFilesData');
         return; // Nothing more to do
@@ -305,7 +301,6 @@ function renderFiles() {
     // Save to session storage
     sessionStorage.setItem('uploadedFilesData', JSON.stringify(uploadedFilesData));
     
-    uploadedTargetNames = [...new Set(allTargetNames)];
     uploadedChemblIds = [...new Set(allChemblIds)];
     const uniqueMatched = [...new Set(allMatched)];
     const uniqueUnmatched = [...new Set(allUnmatched)];
@@ -346,7 +341,6 @@ buildMatrixBtn.addEventListener('click', async () => {
     const removeTargets = document.getElementById('removeTargets').checked;
 
     const body = {
-        target_names: uploadedTargetNames,
         chembl_ids: uploadedChemblIds,
         selectivity_threshold: parseFloat(selectivityThreshold.value),
         remove_targets: removeTargets,

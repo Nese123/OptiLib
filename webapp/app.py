@@ -182,70 +182,69 @@ def upload_targets():
         all_targets.extend(file_targets)
 
     # Get unique targets while preserving order
-    targets = list(dict.fromkeys(all_targets))
+    input_targets = list(dict.fromkeys(all_targets))
     
-    if not targets:
+    if not input_targets:
         return jsonify({"error": "No targets found in the files"}), 400
 
-    # Separate ChEMBL IDs from target names
-    chembl_ids = [t for t in targets if t.upper().startswith("CHEMBL")]
-    target_names = [t for t in targets if not t.upper().startswith("CHEMBL")]
-
-    # Validate against ChEMBL database
     db_path = str(DATABASE_DIR / "chembl_36.db")
+    matched_chembl_ids = set()
     matched = []
     unmatched = []
 
     try:
         with sqlite3.connect(db_path) as conn:
-            # Query for target names
-            if target_names:
-                placeholders = ",".join(["?"] * len(target_names))
-                query = f"""
-                    SELECT DISTINCT pref_name FROM target_dictionary
-                    WHERE pref_name COLLATE NOCASE IN ({placeholders})
-                        AND target_type = 'SINGLE PROTEIN'
-                        AND organism = 'Homo sapiens'
-                """
-                found_names = {row[0] for row in conn.execute(query, target_names).fetchall()}
-                for t in target_names:
-                    # Case-insensitive match
-                    if any(t.lower() == fn.lower() for fn in found_names):
-                        matched.append(t)
-                    else:
-                        unmatched.append(t)
-
-            # Query for ChEMBL IDs
-            if chembl_ids:
-                placeholders = ",".join(["?"] * len(chembl_ids))
-                query = f"""
-                    SELECT DISTINCT chembl_id, pref_name FROM target_dictionary
-                    WHERE chembl_id IN ({placeholders})
-                        AND target_type = 'SINGLE PROTEIN'
-                        AND organism = 'Homo sapiens'
-                """
-                found_ids = {}
-                for row in conn.execute(query, [cid.upper() for cid in chembl_ids]).fetchall():
-                    found_ids[row[0]] = row[1]
-
-                for cid in chembl_ids:
-                    if cid.upper() in found_ids:
-                        matched.append(f"{cid} ({found_ids[cid.upper()]})")
-                    else:
-                        unmatched.append(cid)
+            placeholders = ",".join(["?"] * len(input_targets))
+            query = f"""
+                SELECT DISTINCT td.chembl_id, td.pref_name, 
+                       cs.accession, csy.component_synonym
+                FROM target_dictionary td
+                LEFT JOIN target_components tc ON td.tid = tc.tid
+                LEFT JOIN component_sequences cs ON tc.component_id = cs.component_id
+                LEFT JOIN component_synonyms csy ON cs.component_id = csy.component_id
+                WHERE (
+                    td.chembl_id COLLATE NOCASE IN ({placeholders}) OR
+                    td.pref_name COLLATE NOCASE IN ({placeholders}) OR
+                    cs.accession COLLATE NOCASE IN ({placeholders}) OR
+                    (csy.component_synonym COLLATE NOCASE IN ({placeholders}) 
+                     AND csy.syn_type IN ('GENE_SYMBOL', 'UNIPROT', 'EC_NUMBER'))
+                )
+                AND td.target_type = 'SINGLE PROTEIN'
+                AND td.organism = 'Homo sapiens'
+            """
+            params = input_targets * 4
+            rows = conn.execute(query, params).fetchall()
+            
+            # Map input to canonical ChEMBL IDs and Names
+            for target_in in input_targets:
+                target_in_lower = str(target_in).lower()
+                found = False
+                for r in rows:
+                    cid, name, acc, syn = r
+                    if (target_in_lower == str(cid).lower() or 
+                        target_in_lower == str(name).lower() or
+                        (acc and target_in_lower == str(acc).lower()) or
+                        (syn and target_in_lower == str(syn).lower())):
+                        found = True
+                        matched_chembl_ids.add(cid)
+                        matched.append(f"{target_in} -> {cid} ({name})")
+                        break
+                if not found:
+                    unmatched.append(target_in)
 
     except Exception as e:
         return jsonify({"error": f"Database error: {str(e)}"}), 500
+
+    chembl_ids = list(matched_chembl_ids)
 
     with _lock:
         pipeline_state["matched_targets"] = matched
         pipeline_state["unmatched_targets"] = unmatched
 
     return jsonify({
-        "total": len(targets),
+        "total": len(input_targets),
         "matched": matched,
         "unmatched": unmatched,
-        "target_names": target_names,
         "chembl_ids": chembl_ids,
     })
 
@@ -262,14 +261,13 @@ def build_matrix():
             return jsonify({"error": "Pipeline is already running"}), 409
 
     data = request.get_json(force=True)
-    target_names = data.get("target_names", [])
     chembl_ids = data.get("chembl_ids", [])
     selectivity_threshold = float(data.get("selectivity_threshold", 0.5))
     remove_targets = bool(data.get("remove_targets", True))
-    matched_count = int(data.get("matched_count", len(target_names) + len(chembl_ids)))
+    matched_count = int(data.get("matched_count", len(chembl_ids)))
 
-    if not target_names and not chembl_ids:
-        return jsonify({"error": "No targets provided"}), 400
+    if not chembl_ids:
+        return jsonify({"error": "No matched targets provided"}), 400
 
     # Reset states
     with _lock:
@@ -285,7 +283,7 @@ def build_matrix():
 
     thread = threading.Thread(
         target=_run_pipeline,
-        args=(target_names, chembl_ids, selectivity_threshold, remove_targets, matched_count),
+        args=(chembl_ids, selectivity_threshold, remove_targets, matched_count),
         daemon=True,
     )
     thread.start()
@@ -308,7 +306,7 @@ def _update_pipeline(step, label, detail="", summary=None):
             pipeline_state["step_summaries"][step] = summary
 
 
-def _run_pipeline(target_names, chembl_ids, selectivity_threshold, remove_targets=True, matched_count=0):
+def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matched_count=0):
     """Full pipeline: ChEMBL → pChEMBL rescue → selectivity → prices → save."""
     import sqlite3
 
@@ -320,19 +318,10 @@ def _run_pipeline(target_names, chembl_ids, selectivity_threshold, remove_target
 
         db_path = str(DATABASE_DIR / "chembl_36.db")
 
-        # Build WHERE clause for both names and IDs
-        conditions = []
-        params = []
-        if target_names:
-            name_ph = ",".join(["?"] * len(target_names))
-            conditions.append(f"td.pref_name COLLATE NOCASE IN ({name_ph})")
-            params.extend(target_names)
-        if chembl_ids:
-            id_ph = ",".join(["?"] * len(chembl_ids))
-            conditions.append(f"td.chembl_id IN ({id_ph})")
-            params.extend([cid.upper() for cid in chembl_ids])
-
-        where_targets = " OR ".join(conditions)
+        # Build WHERE clause
+        id_ph = ",".join(["?"] * len(chembl_ids))
+        where_targets = f"td.chembl_id IN ({id_ph})"
+        params = [cid.upper() for cid in chembl_ids]
 
         # Get the actual names of the uploaded targets
         query0 = f"""
