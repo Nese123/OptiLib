@@ -583,33 +583,33 @@ const optError = $('#optError');
 // Slider displays
 weightMean.addEventListener('input', () => {
     let val = parseFloat(weightMean.value);
-    weightMeanValue.value = val.toFixed(2);
-    weightMin.value = (1 - val).toFixed(2);
-    weightMinValue.value = (1 - val).toFixed(2);
+    weightMeanValue.value = val.toFixed(1);
+    weightMin.value = (1 - val).toFixed(1);
+    weightMinValue.value = (1 - val).toFixed(1);
 });
 
 weightMeanValue.addEventListener('input', () => {
     let val = parseFloat(weightMeanValue.value);
     if (!isNaN(val)) {
-        weightMean.value = val.toFixed(2);
-        weightMin.value = (1 - val).toFixed(2);
-        weightMinValue.value = (1 - val).toFixed(2);
+        weightMean.value = val.toFixed(1);
+        weightMin.value = (1 - val).toFixed(1);
+        weightMinValue.value = (1 - val).toFixed(1);
     }
 });
 
 weightMin.addEventListener('input', () => {
     let val = parseFloat(weightMin.value);
-    weightMinValue.value = val.toFixed(2);
-    weightMean.value = (1 - val).toFixed(2);
-    weightMeanValue.value = (1 - val).toFixed(2);
+    weightMinValue.value = val.toFixed(1);
+    weightMean.value = (1 - val).toFixed(1);
+    weightMeanValue.value = (1 - val).toFixed(1);
 });
 
 weightMinValue.addEventListener('input', () => {
     let val = parseFloat(weightMinValue.value);
     if (!isNaN(val)) {
-        weightMin.value = val.toFixed(2);
-        weightMean.value = (1 - val).toFixed(2);
-        weightMeanValue.value = (1 - val).toFixed(2);
+        weightMin.value = val.toFixed(1);
+        weightMean.value = (1 - val).toFixed(1);
+        weightMeanValue.value = (1 - val).toFixed(1);
     }
 });
 
