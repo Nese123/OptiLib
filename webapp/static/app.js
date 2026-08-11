@@ -1203,18 +1203,18 @@ async function loadDistributionChart(prefetchedData) {
                 }
             }
 
+            if (col.length === 0) continue;
+
             col.sort((a, b) => a - b);
 
-            let max = col.length > 0 ? col[col.length - 1] : 0;
-            let min = col.length > 0 ? col[0] : 0;
+            let max = col[col.length - 1];
+            let min = col[0];
             let median = 0;
-            if (col.length > 0) {
-                let mid = Math.floor(col.length / 2);
-                if (col.length % 2 === 0) {
-                    median = (col[mid - 1] + col[mid]) / 2;
-                } else {
-                    median = col[mid];
-                }
+            let mid = Math.floor(col.length / 2);
+            if (col.length % 2 === 0) {
+                median = (col[mid - 1] + col[mid]) / 2;
+            } else {
+                median = col[mid];
             }
 
             stats.push({
@@ -1275,7 +1275,7 @@ async function loadDistributionChart(prefetchedData) {
                 title: { text: 'Targets', font: { size: 13, color: '#9898b8' } },
                 zeroline: false,
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
-                range: [-0.5, numTargets - 0.5]
+                range: [-0.5, stats.length - 0.5]
             },
             yaxis: {
                 title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' }, standoff: 15 },
