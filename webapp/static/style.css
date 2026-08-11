@@ -383,6 +383,38 @@ body {
     font-weight: 500;
 }
 
+.form-group .value-display-input {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--accent-teal);
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    width: 60px;
+    text-align: right;
+    padding: 2px 4px;
+    transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.form-group .value-display-input:hover,
+.form-group .value-display-input:focus {
+    border-color: var(--border-card);
+    background: rgba(0, 0, 0, 0.2);
+    outline: none;
+}
+
+.form-group .value-display-input::-webkit-outer-spin-button,
+.form-group .value-display-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.form-group .value-display-input[type=number] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
 input[type="range"] {
     -webkit-appearance: none;
     appearance: none;

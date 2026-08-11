@@ -114,7 +114,7 @@
                         <div class="label-row">
                             <label>Minimum Selectivity Threshold <span class="info-icon"
                                     data-tooltip="Only compounds with selectivity above this threshold will be taken into account in the optimization.">?</span></label>
-                            <span class="value-display" id="thresholdValue">0.5</span>
+                            <input type="number" class="value-display-input" id="thresholdValue" value="0.5" step="0.1" min="0" max="2">
                         </div>
                         <input type="range" id="selectivityThreshold" min="0" max="2" step="0.1" value="0.5">
                         <div class="range-labels"
@@ -220,7 +220,7 @@
                         <div class="label-row">
                             <label>Weight of Mean Selectivity <span class="info-icon"
                                     data-tooltip="Determines how much the algorithm ephasizes the mean selectivity of the library opposed to the minimum selectivity. The default value, 0.5, weights mean and min selectivity equally.">?</span></label>
-                            <span class="value-display" id="weightMeanValue">0.5</span>
+                            <input type="number" class="value-display-input" id="weightMeanValue" value="0.5" step="0.01" min="0" max="1">
                         </div>
                         <input type="range" id="weightMean" min="0" max="1" step="0.01" value="0.5">
                         <div class="range-labels"
@@ -235,7 +235,7 @@
                         <div class="label-row">
                             <label>Weight of Min Selectivity <span class="info-icon"
                                     data-tooltip="Determines how much the algorithm emphasizes the minimum selectivity of the library opposed to the mean selectivity. The default value, 0.5, weights mean and min selectivity equally.">?</span></label>
-                            <span class="value-display" id="weightMinValue">0.5</span>
+                            <input type="number" class="value-display-input" id="weightMinValue" value="0.5" step="0.01" min="0" max="1">
                         </div>
                         <input type="range" id="weightMin" min="0" max="1" step="0.01" value="0.5">
                         <div class="range-labels"
@@ -250,7 +250,10 @@
                         <div class="label-row">
                             <label>Maximum amount of missed targets<span class="info-icon"
                                     data-tooltip="The maximum percentage of inputted targets that are allowed to have no active compounds in the final optimized library. The default value is 10 %, meaning that the final library has to have compounds for at least 90 % of the original targets.">?</span></label>
-                            <span class="value-display" id="allowedMissValue">10%</span>
+                            <div style="display: flex; align-items: center; gap: 4px;">
+                                <input type="number" class="value-display-input" id="allowedMissValue" value="10" step="1" min="0" max="20">
+                                <span style="color: var(--text-secondary); font-size: 0.85rem; font-family: 'JetBrains Mono', monospace;">%</span>
+                            </div>
                         </div>
                         <input type="range" id="allowedMiss" min="0" max="20" step="1" value="10">
                         <div class="range-labels"

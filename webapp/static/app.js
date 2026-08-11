@@ -164,7 +164,14 @@ fileInput.addEventListener('change', () => {
 
 // Threshold slider
 selectivityThreshold.addEventListener('input', () => {
-    thresholdValue.textContent = parseFloat(selectivityThreshold.value).toFixed(1);
+    thresholdValue.value = parseFloat(selectivityThreshold.value).toFixed(1);
+});
+
+thresholdValue.addEventListener('input', () => {
+    let val = parseFloat(thresholdValue.value);
+    if (!isNaN(val)) {
+        selectivityThreshold.value = val;
+    }
 });
 
 async function handleFileUpload(files) {
@@ -576,20 +583,45 @@ const optError = $('#optError');
 // Slider displays
 weightMean.addEventListener('input', () => {
     let val = parseFloat(weightMean.value);
-    weightMeanValue.textContent = val.toFixed(2);
+    weightMeanValue.value = val.toFixed(2);
     weightMin.value = (1 - val).toFixed(2);
-    weightMinValue.textContent = (1 - val).toFixed(2);
+    weightMinValue.value = (1 - val).toFixed(2);
+});
+
+weightMeanValue.addEventListener('input', () => {
+    let val = parseFloat(weightMeanValue.value);
+    if (!isNaN(val)) {
+        weightMean.value = val.toFixed(2);
+        weightMin.value = (1 - val).toFixed(2);
+        weightMinValue.value = (1 - val).toFixed(2);
+    }
 });
 
 weightMin.addEventListener('input', () => {
     let val = parseFloat(weightMin.value);
-    weightMinValue.textContent = val.toFixed(2);
+    weightMinValue.value = val.toFixed(2);
     weightMean.value = (1 - val).toFixed(2);
-    weightMeanValue.textContent = (1 - val).toFixed(2);
+    weightMeanValue.value = (1 - val).toFixed(2);
+});
+
+weightMinValue.addEventListener('input', () => {
+    let val = parseFloat(weightMinValue.value);
+    if (!isNaN(val)) {
+        weightMin.value = val.toFixed(2);
+        weightMean.value = (1 - val).toFixed(2);
+        weightMeanValue.value = (1 - val).toFixed(2);
+    }
 });
 
 allowedMiss.addEventListener('input', () => {
-    allowedMissValue.textContent = `${parseInt(allowedMiss.value)}%`;
+    allowedMissValue.value = parseInt(allowedMiss.value);
+});
+
+allowedMissValue.addEventListener('input', () => {
+    let val = parseInt(allowedMissValue.value);
+    if (!isNaN(val)) {
+        allowedMiss.value = val;
+    }
 });
 
 async function loadDatasetInfo() {
