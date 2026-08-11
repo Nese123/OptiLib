@@ -223,7 +223,8 @@
                             <span class="value-display" id="weightMeanValue">50%</span>
                         </div>
                         <input type="range" id="weightMean" min="0" max="100" step="1" value="50">
-                        <div class="range-labels" style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
+                        <div class="range-labels"
+                            style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
                             <span>0%</span>
                             <span>100%</span>
                         </div>
@@ -237,7 +238,8 @@
                             <span class="value-display" id="weightMinValue">50%</span>
                         </div>
                         <input type="range" id="weightMin" min="0" max="100" step="1" value="50">
-                        <div class="range-labels" style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
+                        <div class="range-labels"
+                            style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
                             <span>0%</span>
                             <span>100%</span>
                         </div>
@@ -246,29 +248,16 @@
                     <!-- Allowed Miss % -->
                     <div class="form-group">
                         <div class="label-row">
-                            <label>Allowed Miss % <span class="info-icon"
+                            <label>Maximum amount of missed targets<span class="info-icon"
                                     data-tooltip="The maximum percentage of inputted targets that are allowed to have no active compounds in the final optimized library. The default value is 10 %, meaning that the final library has to have compounds for at least 90 % of the original targets.">?</span></label>
                             <span class="value-display" id="allowedMissValue">10%</span>
                         </div>
                         <input type="range" id="allowedMiss" min="0" max="20" step="1" value="10">
-                        <div class="range-labels" style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
+                        <div class="range-labels"
+                            style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
                             <span>0%</span>
                             <span>20%</span>
                         </div>
-                    </div>
-
-                    <!-- Mutation Multiplier -->
-                    <div class="form-group">
-                        <label>Mutation Multiplier <span class="info-icon"
-                                data-tooltip="Scales the rate of genetic mutation during optimization. Higher values increase exploration but might disrupt good solutions. The default value is 1.0">?</span></label>
-                        <input type="number" id="mutationMultiplier" value="1.0" min="0.1" max="20" step="0.1">
-                    </div>
-
-                    <!-- Population Size -->
-                    <div class="form-group">
-                        <label>Population Size <span class="info-icon"
-                                data-tooltip="The number of candidate libraries evaluated in each generation. Larger populations explore more of the search space but are slower to evaluate. The default value is 100.">?</span></label>
-                        <input type="number" id="popSize" value="100" min="10" max="500" step="10">
                     </div>
 
                     <!-- Max Generations -->
@@ -276,6 +265,30 @@
                         <label>Max Generations <span class="info-icon"
                                 data-tooltip="The maximum number of evolutionary cycles the algorithm will run before terminating. The algorithm will stop before that if the solutions don't improve from generation to generation. The default value is 300.">?</span></label>
                         <input type="number" id="maxGen" value="300" min="10" max="5000" step="10">
+                    </div>
+
+                    <!-- Advanced Settings Toggle -->
+                    <div class="form-group" style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="advancedSettingsToggle" style="margin: 0;">
+                        <label for="advancedSettingsToggle" style="margin: 0; font-size: 0.9em; cursor: pointer;">Advanced Settings
+                            <span class="info-icon"
+                                data-tooltip="Toggle to show advanced evolutionary algorithm settings.">?</span></label>
+                    </div>
+
+                    <div id="advancedSettingsContainer" style="display: none; padding-left: 15px; border-left: 2px solid rgba(120, 120, 255, 0.3); margin-top: 15px; margin-bottom: 20px;">
+                        <!-- Population Size -->
+                        <div class="form-group">
+                            <label>Population Size <span class="info-icon"
+                                    data-tooltip="The number of candidate libraries evaluated in each generation. Larger populations explore more of the search space but are slower to evaluate. The default value is 100.">?</span></label>
+                            <input type="number" id="popSize" value="100" min="10" max="500" step="10">
+                        </div>
+
+                        <!-- Mutation Multiplier -->
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label>Mutation Multiplier <span class="info-icon"
+                                    data-tooltip="Scales the rate of genetic mutation during optimization. Higher values increase exploration but might disrupt good solutions. The default value is 1.0">?</span></label>
+                            <input type="number" id="mutationMultiplier" value="1.0" min="0.1" max="20" step="0.1">
+                        </div>
                     </div>
                 </div>
 
@@ -454,6 +467,15 @@
                     hamburger.classList.remove('open');
                     mobileMenu.classList.remove('open');
                 });
+            });
+        }
+
+        // ─── Advanced Settings Toggle ───
+        const advancedSettingsToggle = document.getElementById('advancedSettingsToggle');
+        const advancedSettingsContainer = document.getElementById('advancedSettingsContainer');
+        if (advancedSettingsToggle && advancedSettingsContainer) {
+            advancedSettingsToggle.addEventListener('change', (e) => {
+                advancedSettingsContainer.style.display = e.target.checked ? 'block' : 'none';
             });
         }
     </script>
