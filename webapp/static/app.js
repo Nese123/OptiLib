@@ -202,13 +202,11 @@ function renderFiles() {
     fileInfo.innerHTML = '';
     
     // Recompute total cumulative targets
-    let allChemblIds = [];
     let allMatched = [];
     let allUnmatched = [];
     
     uploadedFilesData.forEach(fileData => {
         const d = fileData.data;
-        allChemblIds.push(...(d.chembl_ids || []));
         allMatched.push(...(d.matched || []));
         allUnmatched.push(...(d.unmatched || []));
         
@@ -301,9 +299,17 @@ function renderFiles() {
     // Save to session storage
     sessionStorage.setItem('uploadedFilesData', JSON.stringify(uploadedFilesData));
     
-    uploadedChemblIds = [...new Set(allChemblIds)];
     const uniqueMatched = [...new Set(allMatched)];
     const uniqueUnmatched = [...new Set(allUnmatched)];
+    
+    let currentChemblIds = [];
+    uniqueMatched.forEach(matchStr => {
+        const match = matchStr.match(/->\s*([^\s(]+)/);
+        if (match && match[1]) {
+            currentChemblIds.push(match[1]);
+        }
+    });
+    uploadedChemblIds = [...new Set(currentChemblIds)];
     
     uploadedMatchedCount = uniqueMatched.length;
     
@@ -312,7 +318,66 @@ function renderFiles() {
 
     // Matched
     $('#matchedCount').textContent = `${uniqueMatched.length} targets matched in ChEMBL`;
-    $('#matchedList').textContent = uniqueMatched.join('\n');
+    
+    const matchedListEl = $('#matchedList');
+    matchedListEl.innerHTML = '';
+    uniqueMatched.forEach((matchStr) => {
+        const item = document.createElement('div');
+        item.className = 'target-list-item';
+        
+        const textSpan = document.createElement('span');
+        textSpan.textContent = matchStr;
+        
+        const delBtn = document.createElement('span');
+        delBtn.textContent = '❌';
+        delBtn.className = 'target-list-delete';
+        delBtn.title = 'Remove target';
+        delBtn.onclick = () => {
+            item.innerHTML = '';
+            
+            const targetName = matchStr.split(' ->')[0];
+            const msg = document.createElement('span');
+            msg.textContent = `Are you sure you want to remove the target ${targetName}?`;
+            msg.style.color = '#ff4a4a';
+            
+            const btnContainer = document.createElement('div');
+            btnContainer.style.display = 'flex';
+            btnContainer.style.gap = '8px';
+            
+            const yesBtn = document.createElement('button');
+            yesBtn.className = 'btn btn-primary';
+            yesBtn.style.padding = '0.15rem 0.5rem';
+            yesBtn.style.fontSize = '0.75rem';
+            yesBtn.style.minWidth = '40px';
+            yesBtn.textContent = 'Yes';
+            yesBtn.onclick = () => {
+                uploadedFilesData.forEach(fileData => {
+                    if (fileData.data.matched) {
+                        fileData.data.matched = fileData.data.matched.filter(m => m !== matchStr);
+                    }
+                });
+                renderFiles();
+            };
+            
+            const noBtn = document.createElement('button');
+            noBtn.className = 'btn btn-secondary';
+            noBtn.style.padding = '0.15rem 0.5rem';
+            noBtn.style.fontSize = '0.75rem';
+            noBtn.style.minWidth = '40px';
+            noBtn.textContent = 'No';
+            noBtn.onclick = () => renderFiles();
+            
+            btnContainer.appendChild(yesBtn);
+            btnContainer.appendChild(noBtn);
+            
+            item.appendChild(msg);
+            item.appendChild(btnContainer);
+        };
+        
+        item.appendChild(textSpan);
+        item.appendChild(delBtn);
+        matchedListEl.appendChild(item);
+    });
 
     // Unmatched
     if (uniqueUnmatched.length > 0) {

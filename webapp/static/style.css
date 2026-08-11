@@ -307,7 +307,6 @@ body {
     font-family: 'JetBrains Mono', monospace;
     color: var(--text-secondary);
     line-height: 1.8;
-    white-space: pre-wrap;
 }
 
 .target-list::-webkit-scrollbar {
@@ -317,6 +316,28 @@ body {
 .target-list::-webkit-scrollbar-thumb {
     background: var(--border-card);
     border-radius: 3px;
+}
+
+.target-list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+
+.target-list-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.target-list-delete {
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity var(--transition-fast);
+}
+
+.target-list-delete:hover {
+    opacity: 1;
 }
 
 /* ─── Threshold Control ─── */
