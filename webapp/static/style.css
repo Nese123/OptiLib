@@ -388,11 +388,11 @@ body {
     font-size: 0.85rem;
     color: var(--accent-teal);
     font-weight: 500;
-    background: transparent;
-    border: 1px solid transparent;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-card);
     border-radius: 4px;
-    width: 60px;
-    text-align: right;
+    width: 48px;
+    text-align: center;
     padding: 2px 4px;
     transition: border-color var(--transition-fast), background var(--transition-fast);
 }
