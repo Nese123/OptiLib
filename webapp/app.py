@@ -461,7 +461,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         # ─────────────────────────────────────────────
         # Step 2: Getting price data
         # ─────────────────────────────────────────────
-        _update_pipeline(2, "Getting price data...", "Querying molport.db for 1mg prices")
+        _update_pipeline(2, "Getting price data...", "Querying database for prices")
 
         inchikeys = final_export_df["InChIKey"].dropna().unique().tolist()
         molport_dict = {}

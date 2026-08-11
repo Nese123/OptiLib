@@ -649,14 +649,14 @@ allowedMiss.addEventListener('input', () => {
 });
 
 allowedMissValue.addEventListener('input', () => {
-    let val = parseInt(allowedMissValue.value);
+    let val = Math.round(parseFloat(allowedMissValue.value));
     if (!isNaN(val)) {
         allowedMiss.value = val;
     }
 });
 
 allowedMissValue.addEventListener('change', () => {
-    let val = parseInt(allowedMissValue.value);
+    let val = Math.round(parseFloat(allowedMissValue.value));
     if (!isNaN(val)) {
         val = Math.max(0, Math.min(20, val));
         allowedMissValue.value = val;
