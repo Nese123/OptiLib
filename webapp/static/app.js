@@ -736,6 +736,7 @@ runOptBtn.addEventListener('click', async () => {
 });
 
 function startOptPolling(maxGen) {
+    const optStartTime = Date.now();
     optPollTimer = setInterval(async () => {
         try {
             const res = await fetch('/api/status');
@@ -746,7 +747,19 @@ function startOptPolling(maxGen) {
                 const currentGen = data.generation || 0;
                 const pct = (currentGen / maxGen) * 100;
                 $('#optProgressFill').style.width = `${pct}%`;
-                $('#optGenLabel').textContent = `Optimizing... (Generation ${currentGen} / ${maxGen})`;
+                
+                if (currentGen > 0) {
+                    const msPerGen = (Date.now() - optStartTime) / currentGen;
+                    const timeLeftMs = msPerGen * (maxGen - currentGen);
+                    const totalSecs = Math.round(timeLeftMs / 1000);
+                    const mins = Math.floor(totalSecs / 60);
+                    const secs = totalSecs % 60;
+                    
+                    let timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                    $('#optGenLabel').textContent = `Approximately ${timeStr} left... (Generation ${currentGen} / ${maxGen})`;
+                } else {
+                    $('#optGenLabel').textContent = `Optimizing... (Generation ${currentGen} / ${maxGen})`;
+                }
             }
 
             if (data.status === 'complete') {
