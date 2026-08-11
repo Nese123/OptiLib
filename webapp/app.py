@@ -130,7 +130,7 @@ def home():
     return render_template("home.html")
 
 
-@app.route("/tool")
+@app.route("/optimize")
 def tool():
     return render_template("index.html")
 
@@ -455,6 +455,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
 
         inchikeys = final_export_df["InChIKey"].dropna().unique().tolist()
         molport_dict = {}
+        molport_source_dict = {}
         if inchikeys:
             molport_db = str(DATABASE_DIR / "molport.db")
             try:
@@ -464,20 +465,29 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                     for i in range(0, len(inchikeys), mp_chunk_size):
                         chunk = inchikeys[i:i + mp_chunk_size]
                         placeholders = ",".join(["?"] * len(chunk))
-                        molport_query = f"SELECT INCHIKEY, PRICE_1MG FROM compounds WHERE INCHIKEY IN ({placeholders})"
+                        molport_query = f"SELECT INCHIKEY, PRICE_1MG, MOLPORTID FROM compounds WHERE INCHIKEY IN ({placeholders})"
                         molport_dfs.append(pd.read_sql_query(molport_query, conn, params=chunk))
                     
                     if molport_dfs:
                         molport_df = pd.concat(molport_dfs, ignore_index=True)
+                        
+                        molport_source_df = molport_df.drop_duplicates(subset=["INCHIKEY"])
+                        molport_source_dict = dict(zip(molport_source_df["INCHIKEY"], molport_source_df["MOLPORTID"]))
+
                         molport_df = molport_df.groupby("INCHIKEY")["PRICE_1MG"].median().reset_index()
                         molport_dict = dict(zip(molport_df["INCHIKEY"], molport_df["PRICE_1MG"]))
             except Exception as e:
                 _update_pipeline(2, "Getting price data...", f"MolPort query warning: {e}")
 
         final_export_df["Molport_Price"] = final_export_df["InChIKey"].map(molport_dict)
+        final_export_df["Molport_Source"] = final_export_df["InChIKey"].map(molport_source_dict)
+        
         found_count = final_export_df["Molport_Price"].notna().sum()
+        molprice_approx_count = (final_export_df["Molport_Source"] == "MolPrice").sum()
+        molport_direct_count = found_count - molprice_approx_count
+        
         _update_pipeline(2, "Getting price data...",
-                         f"Found prices for {found_count}/{len(final_export_df)} compounds in MolPort")
+                         f"Found prices for {found_count}/{len(final_export_df)} compounds in database (MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})")
 
         # ─────────────────────────────────────────────
         # Handle missing prices

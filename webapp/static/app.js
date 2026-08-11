@@ -1053,17 +1053,23 @@ async function loadHeatmap(prefetchedData) {
         }
 
         const hoverText = data.matrix.map(row => 
-            row.map(val => val === null ? "NaN" : val.toFixed(3))
+            row.map(val => val === null ? "No Data" : val.toFixed(3))
+        );
+
+        const truncCompounds = data.compounds.map((s) => s.length > 30 ? s.substring(0, 27) + '...' : s);
+        const customData = data.matrix.map((row, i) => 
+            row.map(() => truncCompounds[i])
         );
 
         const trace = {
             z: data.matrix,
             x: data.targets,
-            y: data.compounds.map((s) => s.length > 30 ? s.substring(0, 27) + '...' : s),
+            y: data.compounds,
             text: hoverText,
+            customdata: customData,
             type: 'heatmap',
             colorscale: 'Viridis',
-            hovertemplate: 'Target: %{x}<br>Compound: %{y}<br>Selectivity: %{text}<extra></extra>',
+            hovertemplate: 'Target: %{x}<br>Compound: %{customdata}<br>Selectivity: %{text}<extra></extra>',
             colorbar: {
                 title: { text: 'Selectivity', font: { size: 12, color: '#9898b8' } },
                 tickfont: { color: '#9898b8' },
@@ -1156,7 +1162,7 @@ async function loadDistributionChart(prefetchedData) {
             name: 'Max',
             type: 'bar',
             marker: { color: 'rgba(132, 94, 247, 0.5)' },
-            width: 1,
+            width: 0.85,
             hovertemplate: hoverTemplate,
             customdata: customData
         };
@@ -1167,7 +1173,7 @@ async function loadDistributionChart(prefetchedData) {
             name: 'Median',
             type: 'bar',
             marker: { color: 'rgba(77, 171, 247, 0.75)' },
-            width: 1,
+            width: 0.85,
             hovertemplate: hoverTemplate,
             customdata: customData
         };
@@ -1178,7 +1184,7 @@ async function loadDistributionChart(prefetchedData) {
             name: 'Min',
             type: 'bar',
             marker: { color: 'rgba(56, 217, 169, 0.95)' },
-            width: 1,
+            width: 0.85,
             hovertemplate: hoverTemplate,
             customdata: customData
         };
