@@ -32,10 +32,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     try {
         const pipeRes = await fetch('/api/pipeline-status');
         const pipeState = await pipeRes.json();
-        
+
         const optRes = await fetch('/api/status');
         const optState = await optRes.json();
-        
+
         const datasetRes = await fetch('/api/dataset-info');
         const datasetState = await datasetRes.json();
 
@@ -200,7 +200,7 @@ async function handleFileUpload(files) {
         try {
             const res = await fetch('/api/upload-targets', { method: 'POST', body: formData });
             const data = await res.json();
-            
+
             if (res.ok) {
                 uploadedFilesData.push({ name: f.name, data: data });
             } else {
@@ -210,22 +210,22 @@ async function handleFileUpload(files) {
             showError(uploadError, `Network error: ${err.message}`);
         }
     }
-    
+
     renderFiles();
 }
 
 function renderFiles() {
     fileInfo.innerHTML = '';
-    
+
     // Recompute total cumulative targets
     let allMatched = [];
     let allUnmatched = [];
-    
+
     uploadedFilesData.forEach(fileData => {
         const d = fileData.data;
         allMatched.push(...(d.matched || []));
         allUnmatched.push(...(d.unmatched || []));
-        
+
         // Render box
         const box = document.createElement('div');
         box.className = 'file-selected';
@@ -233,20 +233,20 @@ function renderFiles() {
         box.style.display = 'flex';
         box.style.justifyContent = 'space-between';
         box.style.alignItems = 'center';
-        
+
         const leftSide = document.createElement('div');
         leftSide.style.display = 'flex';
         leftSide.style.alignItems = 'center';
         leftSide.style.gap = '0.75rem';
-        
+
         const iconSpan = document.createElement('span');
         iconSpan.textContent = '📎';
         const textSpan = document.createElement('span');
         textSpan.textContent = fileData.name;
-        
+
         leftSide.appendChild(iconSpan);
         leftSide.appendChild(textSpan);
-        
+
         const rightSide = document.createElement('div');
         const deleteBtn = document.createElement('span');
         deleteBtn.textContent = '❌';
@@ -254,16 +254,16 @@ function renderFiles() {
         deleteBtn.style.color = '#ff4a4a';
         deleteBtn.onclick = () => {
             box.innerHTML = '';
-            
+
             const msg = document.createElement('span');
             msg.textContent = `Are you sure you want to delete ${fileData.name}?`;
             msg.style.color = '#ff4a4a';
             msg.style.fontSize = '0.9rem';
-            
+
             const btnContainer = document.createElement('div');
             btnContainer.style.display = 'flex';
             btnContainer.style.gap = '8px';
-            
+
             const yesBtn = document.createElement('button');
             yesBtn.className = 'btn btn-primary';
             yesBtn.style.padding = '0.25rem 0.75rem';
@@ -274,7 +274,7 @@ function renderFiles() {
                 uploadedFilesData = uploadedFilesData.filter(d => d.name !== fileData.name);
                 renderFiles();
             };
-            
+
             const noBtn = document.createElement('button');
             noBtn.className = 'btn btn-secondary';
             noBtn.style.padding = '0.25rem 0.75rem';
@@ -282,20 +282,20 @@ function renderFiles() {
             noBtn.style.minWidth = '50px';
             noBtn.textContent = 'No';
             noBtn.onclick = () => renderFiles();
-            
+
             btnContainer.appendChild(yesBtn);
             btnContainer.appendChild(noBtn);
-            
+
             box.appendChild(msg);
             box.appendChild(btnContainer);
         };
         rightSide.appendChild(deleteBtn);
-        
+
         box.appendChild(leftSide);
         box.appendChild(rightSide);
         fileInfo.appendChild(box);
     });
-    
+
     if (uploadedFilesData.length > 0) {
         fileInfo.style.display = 'flex';
         removeAllBtnContainer.style.display = 'block';
@@ -311,13 +311,13 @@ function renderFiles() {
         sessionStorage.removeItem('uploadedFilesData');
         return; // Nothing more to do
     }
-    
+
     // Save to session storage
     sessionStorage.setItem('uploadedFilesData', JSON.stringify(uploadedFilesData));
-    
+
     const uniqueMatched = [...new Set(allMatched)];
     const uniqueUnmatched = [...new Set(allUnmatched)];
-    
+
     let currentChemblIds = [];
     uniqueMatched.forEach(matchStr => {
         const match = matchStr.match(/->\s*([^\s(]+)/);
@@ -326,40 +326,40 @@ function renderFiles() {
         }
     });
     uploadedChemblIds = [...new Set(currentChemblIds)];
-    
+
     uploadedMatchedCount = uniqueMatched.length;
-    
+
     // Show validation summary
     validationSummary.style.display = 'block';
 
     // Matched
     $('#matchedCount').textContent = `${uniqueMatched.length} targets matched in ChEMBL`;
-    
+
     const matchedListEl = $('#matchedList');
     matchedListEl.innerHTML = '';
     uniqueMatched.forEach((matchStr) => {
         const item = document.createElement('div');
         item.className = 'target-list-item';
-        
+
         const textSpan = document.createElement('span');
         textSpan.textContent = matchStr;
-        
+
         const delBtn = document.createElement('span');
         delBtn.textContent = '❌';
         delBtn.className = 'target-list-delete';
         delBtn.title = 'Remove target';
         delBtn.onclick = () => {
             item.innerHTML = '';
-            
+
             const targetName = matchStr.split(' ->')[0];
             const msg = document.createElement('span');
             msg.textContent = `Are you sure you want to remove the target ${targetName}?`;
             msg.style.color = '#ff4a4a';
-            
+
             const btnContainer = document.createElement('div');
             btnContainer.style.display = 'flex';
             btnContainer.style.gap = '8px';
-            
+
             const yesBtn = document.createElement('button');
             yesBtn.className = 'btn btn-primary';
             yesBtn.style.padding = '0.15rem 0.5rem';
@@ -374,7 +374,7 @@ function renderFiles() {
                 });
                 renderFiles();
             };
-            
+
             const noBtn = document.createElement('button');
             noBtn.className = 'btn btn-secondary';
             noBtn.style.padding = '0.15rem 0.5rem';
@@ -382,14 +382,14 @@ function renderFiles() {
             noBtn.style.minWidth = '40px';
             noBtn.textContent = 'No';
             noBtn.onclick = () => renderFiles();
-            
+
             btnContainer.appendChild(yesBtn);
             btnContainer.appendChild(noBtn);
-            
+
             item.appendChild(msg);
             item.appendChild(btnContainer);
         };
-        
+
         item.appendChild(textSpan);
         item.appendChild(delBtn);
         matchedListEl.appendChild(item);
@@ -565,12 +565,12 @@ $('#backToStep1From2Btn').addEventListener('click', async () => {
     } catch (err) {
         console.error('Failed to reset backend state', err);
     }
-    
+
     if (pipelinePollTimer) {
         clearInterval(pipelinePollTimer);
         pipelinePollTimer = null;
     }
-    
+
     buildMatrixBtn.disabled = false;
     goToStep(1);
 });
@@ -693,7 +693,7 @@ runOptBtn.addEventListener('click', async () => {
     runOptBtn.style.display = 'none';
     $('#stopOptBtn').style.display = 'inline-flex';
     $('#stopOptBtn').disabled = false;
-    
+
     optError.style.display = 'none';
     optProgress.style.display = 'block';
     $('#optProgressFill').style.width = '0%';
@@ -747,14 +747,14 @@ function startOptPolling(maxGen) {
                 const currentGen = data.generation || 0;
                 const pct = (currentGen / maxGen) * 100;
                 $('#optProgressFill').style.width = `${pct}%`;
-                
+
                 if (currentGen > 0) {
                     const msPerGen = (Date.now() - optStartTime) / currentGen;
                     const timeLeftMs = msPerGen * (maxGen - currentGen);
                     const totalSecs = Math.round(timeLeftMs / 1000);
                     const mins = Math.floor(totalSecs / 60);
                     const secs = totalSecs % 60;
-                    
+
                     let timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
                     $('#optGenLabel').textContent = `Approximately ${timeStr} left... (Generation ${currentGen} / ${maxGen})`;
                 } else {
@@ -805,23 +805,23 @@ $('#backToStep1Btn').addEventListener('click', async () => {
     } catch (err) {
         console.error('Failed to reset backend state', err);
     }
-    
+
     // Clear frontend data
     fileInput.value = '';
     uploadError.style.display = 'none';
     uploadedFilesData = [];
     renderFiles();
-    
+
     if (optPollTimer) {
         clearInterval(optPollTimer);
         optPollTimer = null;
     }
-    
+
     optProgress.style.display = 'none';
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
     $('#stopOptBtn').style.display = 'none';
-    
+
     goToStep(1);
 });
 
@@ -1027,7 +1027,7 @@ async function loadParetoChart() {
             plot_bgcolor: 'rgba(0,0,0,0.15)',
             font: { family: 'Inter, sans-serif', color: '#9898b8' },
             xaxis: {
-                title: { text: 'Selectivity Score (weight_mean * mean selectivity + weight_min * min selectivity)', font: { size: 13, color: '#9898b8' } },
+                title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' } },
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
                 zerolinecolor: 'rgba(120, 120, 255, 0.12)',
             },
@@ -1128,12 +1128,12 @@ async function loadHeatmap(prefetchedData) {
             if (!res.ok) return;
         }
 
-        const hoverText = data.matrix.map(row => 
+        const hoverText = data.matrix.map(row =>
             row.map(val => val === null ? "No Data" : val.toFixed(2))
         );
 
         const truncCompounds = data.compounds.map((s) => s.length > 30 ? s.substring(0, 27) + '...' : s);
-        const customData = data.matrix.map((row, i) => 
+        const customData = data.matrix.map((row, i) =>
             row.map(() => truncCompounds[i])
         );
 
@@ -1310,7 +1310,7 @@ async function loadDistributionChart(prefetchedData) {
 $('#backToStep3Btn').addEventListener('click', async () => {
     try {
         await fetch('/api/reset-opt', { method: 'POST' });
-    } catch (err) {}
+    } catch (err) { }
     runOptBtn.disabled = false;
     optProgress.style.display = 'none';
     goToStep(3);
@@ -1324,23 +1324,23 @@ $('#newRunBtn').addEventListener('click', async () => {
     } catch (err) {
         console.error('Failed to reset backend state', err);
     }
-    
+
     // Clear frontend data
     fileInput.value = '';
     uploadError.style.display = 'none';
     uploadedFilesData = [];
     renderFiles();
-    
+
     if (optPollTimer) {
         clearInterval(optPollTimer);
         optPollTimer = null;
     }
-    
+
     optProgress.style.display = 'none';
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
     $('#stopOptBtn').style.display = 'none';
-    
+
     goToStep(1);
 });
 
