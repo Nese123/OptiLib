@@ -226,8 +226,9 @@ def upload_targets():
                         (acc and target_in_lower == str(acc).lower()) or
                         (syn and target_in_lower == str(syn).lower())):
                         found = True
-                        matched_chembl_ids.add(cid)
-                        matched.append(f"{target_in} -> {cid} ({name})")
+                        if cid not in matched_chembl_ids:
+                            matched_chembl_ids.add(cid)
+                            matched.append(f"{target_in} -> {cid} ({name})")
                         break
                 if not found:
                     unmatched.append(target_in)
@@ -515,10 +516,12 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                 final_prices = final_prices.values
 
                 _update_pipeline(2, "Getting price data...",
-                                 f"MolPrice predicted prices for {missing_count} compounds")
+                                 f"MolPrice predicted prices for {missing_count} compounds. DB had {molport_direct_count} MolPort, {molprice_approx_count} MolPrice approx.",
+                                 summary=f"Predicted {missing_count} prices. DB: {molport_direct_count} MolPort, {molprice_approx_count} MolPrice approx.")
             except Exception as e:
                 _update_pipeline(2, "Getting price data...",
-                                 f"MolPrice prediction failed ({e}), using median fallback")
+                                 f"MolPrice prediction failed ({e}), using median fallback. DB had {molport_direct_count} MolPort, {molprice_approx_count} MolPrice approx.",
+                                 summary=f"Prediction failed, used fallback. DB: {molport_direct_count} MolPort, {molprice_approx_count} MolPrice approx.")
                 fallback = final_export_df["Molport_Price"].median()
                 if pd.isna(fallback):
                     fallback = 100.0
@@ -528,10 +531,12 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                     final_export_df["Molport_Price"]
                 )
         else:
-            _update_pipeline(2, "Getting price data...", "All prices found in database.", summary="All prices found in database.")
+            _update_pipeline(2, "Getting price data...", 
+                             f"All prices found in database (MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})", 
+                             summary=f"All prices found. MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count}")
             final_prices = final_export_df["Molport_Price"].values
         final_export_df["Price_USD_per_mg"] = final_prices
-        final_export_df.drop(columns=["MW", "Molport_Price"], inplace=True, errors="ignore")
+        final_export_df.drop(columns=["MW", "Molport_Price", "Molport_Source"], inplace=True, errors="ignore")
 
         # Drop rows with NaN prices
         final_export_df = final_export_df.dropna(subset=["Price_USD_per_mg"])
@@ -828,11 +833,7 @@ def _build_comparison(winning_matrix_df, problem):
     tgt_pct = (lib_num_targets / pool_num_targets * 100) if pool_num_targets else 0
     cmp_pct = (lib_num_drugs / problem.pool_num_drugs * 100) if problem.pool_num_drugs else 0
 
-    norm_cost = 1.0 - (lib_total_cost / pool_total_cost if pool_total_cost else 0)
-    norm_sel = lib_mean_sel / pool_mean_sel if pool_mean_sel else 0
-    norm_min_sel = lib_min_sel / pool_min_sel if pool_min_sel else 0
-    norm_tgt = lib_num_targets / pool_num_targets if pool_num_targets else 0
-    quality_score = (0.25 * norm_cost) + (0.25 * norm_sel) + (0.25 * norm_min_sel) + (0.25 * norm_tgt)
+
 
     compounds_list = []
     for idx, row in winning_matrix_df.iterrows():
@@ -871,7 +872,7 @@ def _build_comparison(winning_matrix_df, problem):
             "targets": round(tgt_pct, 1),
             "drugs": round(cmp_pct, 1),
         },
-        "quality_score": round(quality_score, 4),
+
     }
 
 
@@ -961,7 +962,7 @@ def _build_heatmap_cache(df):
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
     return {
         "matrix": df[sel_cols].astype(object).where(pd.notna(df[sel_cols]), None).values.tolist(),
-        "compounds": df["SMILES"].tolist() if "SMILES" in df.columns else df.index.tolist(),
+        "compounds": df["InChIKey"].tolist() if "InChIKey" in df.columns else df.index.tolist(),
         "targets": sel_cols,
     }
 
@@ -979,7 +980,7 @@ def heatmap_data():
     # Fallback: compute on the fly
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
     matrix = df[sel_cols].astype(object).where(pd.notna(df[sel_cols]), None).values.tolist()
-    compounds = df["SMILES"].tolist() if "SMILES" in df.columns else df.index.tolist()
+    compounds = df["InChIKey"].tolist() if "InChIKey" in df.columns else df.index.tolist()
     targets = sel_cols
 
     return jsonify({

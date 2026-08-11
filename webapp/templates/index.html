@@ -248,7 +248,7 @@
                     <!-- Allowed Miss % -->
                     <div class="form-group">
                         <div class="label-row">
-                            <label>Maximum amount of missed targets %<span class="info-icon"
+                            <label>Maximum amount of missed targets<span class="info-icon"
                                     data-tooltip="The maximum percentage of inputted targets that are allowed to have no active compounds in the final optimized library. The default value is 10 %, meaning that the final library has to have compounds for at least 90 % of the original targets.">?</span></label>
                             <span class="value-display" id="allowedMissValue">10%</span>
                         </div>
@@ -351,29 +351,6 @@
                     <h2 class="card-title"><span class="icon">📊</span> Library Comparison</h2>
 
                     <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
-                        <!-- Quality Score Ring -->
-                        <div class="quality-score-container">
-                            <div class="quality-score-ring">
-                                <svg viewBox="0 0 128 128">
-                                    <defs>
-                                        <linearGradient id="scoreGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                                            <stop offset="0%" stop-color="#38d9a9" />
-                                            <stop offset="100%" stop-color="#845ef7" />
-                                        </linearGradient>
-                                    </defs>
-                                    <circle class="bg-ring" cx="64" cy="64" r="56" />
-                                    <circle class="fg-ring" id="scoreRing" cx="64" cy="64" r="56" />
-                                </svg>
-                                <div class="quality-score-value">
-                                    <div class="number" id="qualityScoreNum">—</div>
-                                    <div class="label"
-                                        style="display: flex; align-items: center; justify-content: center;">Quality
-                                        <span class="info-icon"
-                                            data-tooltip="The quality score is a 25% weighted average of four normalized metrics compared to the original pool:&#10;&#10;• Cost Efficiency&#10;• Mean Selectivity&#10;• Min Selectivity&#10;• Target Coverage&#10;&#10;It allows to compare the overall quality of different libraries with varying metrics.">?</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
 
                         <!-- Comparison Table -->
                         <div style="flex: 1; min-width: 300px;">

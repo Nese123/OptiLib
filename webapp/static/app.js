@@ -775,16 +775,7 @@ async function loadComparison() {
         const lib = comparison.library;
         const pct = comparison.percentages;
 
-        // Quality score ring
-        const score = comparison.quality_score;
-        $('#qualityScoreNum').textContent = score.toFixed(4);
 
-        // Animate ring (circumference = 2πr = 2π·56 ≈ 351.86)
-        const circumference = 2 * Math.PI * 56;
-        const offset = circumference * (1 - Math.min(score, 1));
-        setTimeout(() => {
-            $('#scoreRing').style.strokeDashoffset = offset;
-        }, 200);
 
         // Build comparison table
         const tbody = $('#comparisonBody');

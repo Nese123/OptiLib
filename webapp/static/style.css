@@ -676,66 +676,7 @@ input[type="number"]:focus {
     color: var(--accent-red);
 }
 
-/* ─── Quality Score ─── */
-.quality-score-container {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1.5rem;
-}
 
-.quality-score-ring {
-    position: relative;
-    width: 140px;
-    height: 140px;
-}
-
-.quality-score-ring svg {
-    width: 100%;
-    height: 100%;
-    transform: rotate(-90deg);
-}
-
-.quality-score-ring .bg-ring {
-    fill: none;
-    stroke: var(--bg-secondary);
-    stroke-width: 8;
-}
-
-.quality-score-ring .fg-ring {
-    fill: none;
-    stroke: url(#scoreGradient);
-    stroke-width: 8;
-    stroke-linecap: round;
-    stroke-dasharray: 377;
-    stroke-dashoffset: 377;
-    transition: stroke-dashoffset 1.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.quality-score-value {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-}
-
-.quality-score-value .number {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 1.8rem;
-    font-weight: 700;
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.quality-score-value .label {
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}
 
 /* ─── Charts ─── */
 .chart-container {
@@ -1857,19 +1798,7 @@ input[type="number"]:focus {
         -webkit-overflow-scrolling: touch;
     }
 
-    /* Quality score + comparison stack vertically */
-    .quality-score-container {
-        padding: 1rem;
-    }
 
-    .quality-score-ring {
-        width: 110px;
-        height: 110px;
-    }
-
-    .quality-score-value .number {
-        font-size: 1.4rem;
-    }
 
     /* Chart containers adapt */
     .chart-container {
@@ -2028,18 +1957,7 @@ input[type="number"]:focus {
         font-size: 0.78rem;
     }
 
-    .quality-score-ring {
-        width: 90px;
-        height: 90px;
-    }
 
-    .quality-score-value .number {
-        font-size: 1.1rem;
-    }
-
-    .quality-score-value .label {
-        font-size: 0.6rem;
-    }
 
     .threshold-control {
         padding: 1rem;
