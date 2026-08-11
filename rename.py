@@ -11,7 +11,7 @@ def replace_in_file(filepath, replacements):
         f.write(content)
 
 replacements = [
-    ('OptiDrug', 'OptiDrugLib'),
+    ('OptiDrug', 'OptiLib'),
     ('text-white">Drug</span>', 'text-white">DrugLib</span>')
 ]
 

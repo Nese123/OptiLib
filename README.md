@@ -1,10 +1,10 @@
-# OptiDrugLib
+# OptiLib
 
-OptiDrugLib is a drug library optimization platform built with a Flask web application and a powerful multi-objective genetic algorithm, NSGA-II. It is designed to help researchers select the optimal set of chemical compounds to a given set of targets that maximizes biological target coverage and selectivity while minimizing financial cost.
+OptiLib is a drug library optimization platform built with a Flask web application and a powerful multi-objective genetic algorithm, NSGA-II. It is designed to help researchers select the optimal set of chemical compounds to a given set of targets that maximizes biological target coverage and selectivity while minimizing financial cost.
 
 ## Overview
 
-The OptiDrugLib pipeline performs the following steps:
+The OptiLib pipeline performs the following steps:
 1. **Target Input:** Users upload or define a set of biological targets of interest.
 2. **Database Querying:** The system queries local databases (e.g., ChEMBL) to find compounds active against the specified targets.
 3. **Selectivity Matrix Generation:** It builds a selectivity matrix, scoring each compound against the targets.
@@ -34,7 +34,7 @@ The OptiDrugLib pipeline performs the following steps:
 
 ## Running the Application
 
-To start the OptiDrugLib web application, run:
+To start the OptiLib web application, run:
 
 ```bash
 python webapp/app.py
