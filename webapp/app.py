@@ -1014,4 +1014,4 @@ if __name__ == "__main__":
     print(f"Project root: {PROJECT_ROOT}")
     print(f"ChEMBL database: {DATABASE_DIR / 'chembl_36.db'}")
     print(f"MolPort database: {DATABASE_DIR / 'molport.db'}")
-    app.run(debug=False, host="127.0.0.1", port=5000)
+    app.run(debug=False, host="0.0.0.0", port=5000)
