@@ -69,11 +69,37 @@ class StopOptimization(Exception):
     pass
 
 class WebappCallback(Callback):
+    def __init__(self, problem):
+        super().__init__()
+        self.problem = problem
+
     def notify(self, algorithm):
         with _lock:
             opt_state["generation"] = algorithm.n_gen
             if opt_state.get("stop_requested"):
                 raise StopOptimization("Optimization stopped by user")
+
+            import numpy as np
+            G = algorithm.pop.get("G")
+            F = algorithm.pop.get("F")
+
+            feasible_idx = np.where(G <= 0)[0]
+            if len(feasible_idx) > 0:
+                feasible_F = F[feasible_idx]
+                min_obj1 = np.min(feasible_F[:, 0])
+                min_obj2 = np.min(feasible_F[:, 1])
+            else:
+                min_obj1 = np.min(F[:, 0])
+                min_obj2 = np.min(F[:, 1])
+
+            best_sel = -min_obj1 * self.problem.pool_baseline_score
+            best_cost = min_obj2 * self.problem.pool_total_cost
+
+            opt_state["history"].append({
+                "generation": algorithm.n_gen,
+                "best_selectivity": float(best_sel),
+                "best_cost": float(best_cost)
+            })
 
 class _LightResult:
     """Minimal stand-in for pymoo Result so save_results(res, idx, ...) still works."""
@@ -101,6 +127,7 @@ opt_state = {
     "max_gen": 0,
     "error": "",
     "stop_requested": False,
+    "history": [],
 }
 
 # Optimization results
@@ -636,6 +663,7 @@ def run_optimization_route():
             "max_gen": max_gen,
             "error": "",
             "stop_requested": False,
+            "history": [],
         })
 
     thread = threading.Thread(
@@ -682,6 +710,8 @@ def reset_state():
             "generation": 0,
             "max_gen": 0,
             "error": "",
+            "stop_requested": False,
+            "history": [],
         })
         opt_results.update({
             "pareto_front": None,
@@ -711,6 +741,7 @@ def reset_opt_state():
             "generation": 0,
             "error": "",
             "stop_requested": False,
+            "history": [],
         })
     return jsonify({"status": "reset"})
 
@@ -750,7 +781,7 @@ def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max
             max_gen=max_gen, ftol=0.0025,
             mutation_multiplier=mutation_multiplier,
             crossover_type="hux",
-            callback=WebappCallback()
+            callback=WebappCallback(problem)
         )
         del X_init  # Free init population memory
 

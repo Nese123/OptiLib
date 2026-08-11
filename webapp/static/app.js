@@ -589,6 +589,56 @@ const runOptBtn = $('#runOptBtn');
 const optProgress = $('#optProgress');
 const optError = $('#optError');
 
+let lastRenderedGen = -1;
+
+function initHistoryChart() {
+    $('#historyCard').style.display = 'block';
+    lastRenderedGen = -1;
+    
+    const layout = {
+        margin: { t: 20, r: 50, l: 50, b: 40 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#9898b8', family: 'Inter, sans-serif' },
+        xaxis: { title: 'Generation', gridcolor: 'rgba(255,255,255,0.05)' },
+        yaxis: { title: 'Best Selectivity Score', gridcolor: 'rgba(255,255,255,0.05)', color: '#4a90e2' },
+        yaxis2: { title: 'Lowest Cost (USD)', overlaying: 'y', side: 'right', color: '#ff4a4a', gridcolor: 'rgba(0,0,0,0)' },
+        showlegend: true,
+        legend: { x: 0, y: 1.1, orientation: 'h' }
+    };
+
+    const traces = [
+        { x: [], y: [], name: 'Selectivity', mode: 'lines+markers', line: { color: '#4a90e2' }, marker: {size: 4} },
+        { x: [], y: [], name: 'Cost', mode: 'lines+markers', line: { color: '#ff4a4a' }, yaxis: 'y2', marker: {size: 4} }
+    ];
+
+    Plotly.newPlot('historyChart', traces, layout, { responsive: true, displayModeBar: false });
+}
+
+function updateHistoryChart(history) {
+    if (!history || history.length === 0) return;
+    
+    const x = [];
+    const ySel = [];
+    const yCost = [];
+    
+    history.forEach(h => {
+        if (h.generation > lastRenderedGen) {
+            x.push(h.generation);
+            ySel.push(h.best_selectivity);
+            yCost.push(h.best_cost);
+        }
+    });
+    
+    if (x.length > 0) {
+        Plotly.extendTraces('historyChart', {
+            x: [x, x],
+            y: [ySel, yCost]
+        }, [0, 1]);
+        lastRenderedGen = x[x.length - 1];
+    }
+}
+
 // Slider displays
 weightMean.addEventListener('input', () => {
     let val = parseFloat(weightMean.value);
@@ -698,6 +748,8 @@ runOptBtn.addEventListener('click', async () => {
     optProgress.style.display = 'block';
     $('#optProgressFill').style.width = '0%';
     $('#optGenLabel').textContent = 'Optimizing...';
+    
+    initHistoryChart();
 
     const body = {
         weight_mean: parseFloat(weightMean.value),
@@ -741,6 +793,10 @@ function startOptPolling(maxGen) {
         try {
             const res = await fetch('/api/status');
             const data = await res.json();
+
+            if (data.history && data.history.length > 0) {
+                updateHistoryChart(data.history);
+            }
 
             // Update progress bar
             if (data.status === 'running') {

@@ -228,7 +228,7 @@ def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0
     # Stop the algorithm when the Pareto front stops significantly improving
     # over a given period (e.g. 30 generations).
     termination = DefaultMultiObjectiveTermination(
-        xtol=1e-8,
+        xtol=1e9,  # Ignore design space movement (X) for combinatorial problems
         cvtol=1e-6,
         ftol=ftol,
         period=30,
