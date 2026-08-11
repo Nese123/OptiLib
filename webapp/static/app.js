@@ -174,6 +174,15 @@ thresholdValue.addEventListener('input', () => {
     }
 });
 
+thresholdValue.addEventListener('change', () => {
+    let val = parseFloat(thresholdValue.value);
+    if (!isNaN(val)) {
+        val = Math.max(0, Math.min(2, val));
+        thresholdValue.value = val.toFixed(1);
+        selectivityThreshold.value = val.toFixed(1);
+    }
+});
+
 async function handleFileUpload(files) {
     // Reset UI before uploading new files
     validationSummary.style.display = 'none';
@@ -597,6 +606,17 @@ weightMeanValue.addEventListener('input', () => {
     }
 });
 
+weightMeanValue.addEventListener('change', () => {
+    let val = parseFloat(weightMeanValue.value);
+    if (!isNaN(val)) {
+        val = Math.max(0, Math.min(1, val));
+        weightMeanValue.value = val.toFixed(1);
+        weightMean.value = val.toFixed(1);
+        weightMin.value = (1 - val).toFixed(1);
+        weightMinValue.value = (1 - val).toFixed(1);
+    }
+});
+
 weightMin.addEventListener('input', () => {
     let val = parseFloat(weightMin.value);
     weightMinValue.value = val.toFixed(1);
@@ -613,6 +633,17 @@ weightMinValue.addEventListener('input', () => {
     }
 });
 
+weightMinValue.addEventListener('change', () => {
+    let val = parseFloat(weightMinValue.value);
+    if (!isNaN(val)) {
+        val = Math.max(0, Math.min(1, val));
+        weightMinValue.value = val.toFixed(1);
+        weightMin.value = val.toFixed(1);
+        weightMean.value = (1 - val).toFixed(1);
+        weightMeanValue.value = (1 - val).toFixed(1);
+    }
+});
+
 allowedMiss.addEventListener('input', () => {
     allowedMissValue.value = parseInt(allowedMiss.value);
 });
@@ -620,6 +651,15 @@ allowedMiss.addEventListener('input', () => {
 allowedMissValue.addEventListener('input', () => {
     let val = parseInt(allowedMissValue.value);
     if (!isNaN(val)) {
+        allowedMiss.value = val;
+    }
+});
+
+allowedMissValue.addEventListener('change', () => {
+    let val = parseInt(allowedMissValue.value);
+    if (!isNaN(val)) {
+        val = Math.max(0, Math.min(20, val));
+        allowedMissValue.value = val;
         allowedMiss.value = val;
     }
 });
