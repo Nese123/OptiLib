@@ -282,7 +282,7 @@ def select_best_solution(res, problem):
     """
     # Convert optimizer's normalized values back to real-world units
     if res.F is None:
-        raise ValueError("Optimization failed to find any feasible solutions. Try relaxing the constraints (e.g., increase Allowed Miss %).")
+        raise ValueError("Optimization failed to find any feasible solutions. Try relaxing the constraints (e.g., increase the maximum amount of missed targets %).")
         
     front = res.F.copy()
     front[:, 0] *= -problem.pool_baseline_score   # Undo negation + normalization → real selectivity

@@ -793,22 +793,22 @@ async function loadComparison() {
         const metrics = [
             {
                 name: 'Total Cost (USD)',
-                pool: `$${pool.total_cost.toLocaleString()}`,
-                lib: `$${lib.total_cost.toLocaleString()}`,
+                pool: `$${pool.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+                lib: `$${lib.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
                 pctVal: pct.cost,
                 goodIfLow: true,
             },
             {
                 name: 'Mean Selectivity',
-                pool: pool.mean_selectivity.toFixed(4),
-                lib: lib.mean_selectivity.toFixed(4),
+                pool: pool.mean_selectivity.toFixed(2),
+                lib: lib.mean_selectivity.toFixed(2),
                 pctVal: pct.mean_selectivity,
                 goodIfLow: false,
             },
             {
                 name: 'Min Selectivity',
-                pool: pool.min_selectivity.toFixed(4),
-                lib: lib.min_selectivity.toFixed(4),
+                pool: pool.min_selectivity.toFixed(2),
+                lib: lib.min_selectivity.toFixed(2),
                 pctVal: pct.min_selectivity,
                 goodIfLow: false,
             },

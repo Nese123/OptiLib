@@ -248,7 +248,7 @@
                     <!-- Allowed Miss % -->
                     <div class="form-group">
                         <div class="label-row">
-                            <label>Maximum amount of missed targets<span class="info-icon"
+                            <label>Maximum amount of missed targets %<span class="info-icon"
                                     data-tooltip="The maximum percentage of inputted targets that are allowed to have no active compounds in the final optimized library. The default value is 10 %, meaning that the final library has to have compounds for at least 90 % of the original targets.">?</span></label>
                             <span class="value-display" id="allowedMissValue">10%</span>
                         </div>
@@ -267,27 +267,36 @@
                         <input type="number" id="maxGen" value="300" min="10" max="5000" step="10">
                     </div>
 
-                    <!-- Advanced Settings Toggle -->
-                    <div class="form-group" style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
-                        <input type="checkbox" id="advancedSettingsToggle" style="margin: 0;">
-                        <label for="advancedSettingsToggle" style="margin: 0; font-size: 0.9em; cursor: pointer;">Advanced Settings
-                            <span class="info-icon"
-                                data-tooltip="Toggle to show advanced evolutionary algorithm settings.">?</span></label>
-                    </div>
-
-                    <div id="advancedSettingsContainer" style="display: none; padding-left: 15px; border-left: 2px solid rgba(120, 120, 255, 0.3); margin-top: 15px; margin-bottom: 20px;">
-                        <!-- Population Size -->
-                        <div class="form-group">
-                            <label>Population Size <span class="info-icon"
-                                    data-tooltip="The number of candidate libraries evaluated in each generation. Larger populations explore more of the search space but are slower to evaluate. The default value is 100.">?</span></label>
-                            <input type="number" id="popSize" value="100" min="10" max="500" step="10">
+                    <!-- Advanced Settings -->
+                    <div style="grid-column: 1 / -1;">
+                        <!-- Advanced Settings Toggle -->
+                        <div class="form-group"
+                            style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="advancedSettingsToggle" style="margin: 0;">
+                            <label for="advancedSettingsToggle"
+                                style="margin: 0; font-size: 0.9em; cursor: pointer;">Advanced Settings
+                                <span class="info-icon"
+                                    data-tooltip="Toggle to show advanced evolutionary algorithm settings.">?</span></label>
                         </div>
 
-                        <!-- Mutation Multiplier -->
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label>Mutation Multiplier <span class="info-icon"
-                                    data-tooltip="Scales the rate of genetic mutation during optimization. Higher values increase exploration but might disrupt good solutions. The default value is 1.0">?</span></label>
-                            <input type="number" id="mutationMultiplier" value="1.0" min="0.1" max="20" step="0.1">
+                        <div id="advancedSettingsContainer"
+                            style="display: none; padding-left: 15px; border-left: 2px solid rgba(120, 120, 255, 0.3); margin-top: 15px; margin-bottom: 20px;">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+                                <!-- Population Size -->
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label>Population Size <span class="info-icon"
+                                            data-tooltip="The number of candidate libraries evaluated in each generation. Larger populations explore more of the search space but are slower to evaluate. The default value is 100.">?</span></label>
+                                    <input type="number" id="popSize" value="100" min="10" max="500" step="10">
+                                </div>
+
+                                <!-- Mutation Multiplier -->
+                                <div class="form-group" style="margin-bottom: 0;">
+                                    <label>Mutation Multiplier <span class="info-icon"
+                                            data-tooltip="Scales the rate of genetic mutation during optimization. Higher values increase exploration but might disrupt good solutions. The default value is 1.0">?</span></label>
+                                    <input type="number" id="mutationMultiplier" value="1.0" min="0.1" max="20"
+                                        step="0.1">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -357,7 +366,7 @@
                                 </svg>
                                 <div class="quality-score-value">
                                     <div class="number" id="qualityScoreNum">—</div>
-                                    <div class="label">Quality</div>
+                                    <div class="label" style="display: flex; align-items: center; justify-content: center;">Quality <span class="info-icon" data-tooltip="The quality score is a 25% weighted average of four normalized metrics compared to the original pool:&#10;&#10;• Cost Efficiency&#10;• Mean Selectivity&#10;• Min Selectivity&#10;• Target Coverage&#10;&#10;It allows to compare the overall quality of different libraries with varying metrics.">?</span></div>
                                 </div>
                             </div>
                         </div>

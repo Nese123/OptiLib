@@ -840,16 +840,16 @@ def _build_comparison(winning_matrix_df, problem):
 
     return {
         "pool": {
-            "total_cost": round(pool_total_cost, 2),
-            "mean_selectivity": round(pool_mean_sel, 4),
-            "min_selectivity": round(pool_min_sel, 4),
+            "total_cost": int(round(pool_total_cost)),
+            "mean_selectivity": round(pool_mean_sel, 2),
+            "min_selectivity": round(pool_min_sel, 2),
             "num_targets": pool_num_targets,
             "num_drugs": problem.pool_num_drugs,
         },
         "library": {
-            "total_cost": round(lib_total_cost, 2),
-            "mean_selectivity": round(lib_mean_sel, 4),
-            "min_selectivity": round(lib_min_sel, 4),
+            "total_cost": int(round(lib_total_cost)),
+            "mean_selectivity": round(lib_mean_sel, 2),
+            "min_selectivity": round(lib_min_sel, 2),
             "num_targets": lib_num_targets,
             "num_drugs": lib_num_drugs,
             "compounds": compounds_list,
