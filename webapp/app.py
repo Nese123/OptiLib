@@ -429,9 +429,18 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         del selectivity_df  # Free memory — no longer needed
         final_drugs, final_targets = clean_df.shape
         pruned_low_sel = new_drugs - final_drugs
+        dropped_targets = matched_count - final_targets
+        if dropped_targets > 0:
+            summary_text = (
+                f"Found {final_drugs} compounds active against {final_targets} targets. "
+                f"{dropped_targets} targets were dropped because they lacked compounds with sufficient affinity or selectivity."
+            )
+        else:
+            summary_text = f"Found {final_drugs} compounds active against {final_targets} targets"
+
         _update_pipeline(1, "Searching for selective compounds...",
                          f"Pruned {pruned_low_sel} compounds with low selectivity: {final_drugs} compounds remaining",
-                         summary=f"Found {final_drugs} compounds active against {matched_count} targets")
+                         summary=summary_text)
 
         if final_drugs == 0 or final_targets == 0:
             raise ValueError("No compounds/targets survived selectivity pruning. Try a lower threshold.")
@@ -533,7 +542,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         else:
             _update_pipeline(2, "Getting price data...", 
                              f"All prices found in database (MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})", 
-                             summary=f"All prices found. MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count}")
+                             summary=f"All prices found. {molport_direct_count} prices were found directly from MolPort, {molprice_approx_count} prices were approximated using MolPrice.")
             final_prices = final_export_df["Molport_Price"].values
         final_export_df["Price_USD_per_mg"] = final_prices
         final_export_df.drop(columns=["MW", "Molport_Price", "Molport_Source"], inplace=True, errors="ignore")

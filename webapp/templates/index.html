@@ -218,30 +218,30 @@
                     <!-- Weight Mean -->
                     <div class="form-group">
                         <div class="label-row">
-                            <label>Mean Selectivity % <span class="info-icon"
-                                    data-tooltip="Determines how much the algorithm ephasizes the mean selectivity of the library opposed to the minimum selectivity. The default value, 50 %, weights mean and min selectivity equally.">?</span></label>
-                            <span class="value-display" id="weightMeanValue">50%</span>
+                            <label>Weight of Mean Selectivity <span class="info-icon"
+                                    data-tooltip="Determines how much the algorithm ephasizes the mean selectivity of the library opposed to the minimum selectivity. The default value, 0.5, weights mean and min selectivity equally.">?</span></label>
+                            <span class="value-display" id="weightMeanValue">0.5</span>
                         </div>
-                        <input type="range" id="weightMean" min="0" max="100" step="1" value="50">
+                        <input type="range" id="weightMean" min="0" max="1" step="0.01" value="0.5">
                         <div class="range-labels"
                             style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
-                            <span>0%</span>
-                            <span>100%</span>
+                            <span>0.0</span>
+                            <span>1.0</span>
                         </div>
                     </div>
 
                     <!-- Weight Min -->
                     <div class="form-group">
                         <div class="label-row">
-                            <label>Min Selectivity % <span class="info-icon"
-                                    data-tooltip="Determines how much the algorithm emphasizes the minimum selectivity of the library opposed to the mean selectivity. The default value, 50 %, weights mean and min selectivity equally.">?</span></label>
-                            <span class="value-display" id="weightMinValue">50%</span>
+                            <label>Weight of Min Selectivity <span class="info-icon"
+                                    data-tooltip="Determines how much the algorithm emphasizes the minimum selectivity of the library opposed to the mean selectivity. The default value, 0.5, weights mean and min selectivity equally.">?</span></label>
+                            <span class="value-display" id="weightMinValue">0.5</span>
                         </div>
-                        <input type="range" id="weightMin" min="0" max="100" step="1" value="50">
+                        <input type="range" id="weightMin" min="0" max="1" step="0.01" value="0.5">
                         <div class="range-labels"
                             style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
-                            <span>0%</span>
-                            <span>100%</span>
+                            <span>0.0</span>
+                            <span>1.0</span>
                         </div>
                     </div>
 

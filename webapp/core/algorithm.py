@@ -293,7 +293,7 @@ def select_best_solution(res, problem):
     # Initialize the Scatter plot
     plot = Scatter(
         title="Pareto Front",
-        labels=["Biological Score", "Total Library Cost"]
+        labels=["Selectivity Score (weight_mean * mean selectivity + weight_min * min selectivity)", "Total Library Cost"]
     )
     plot.add(front_for_plotting, color="green", facecolor="none", s=40)
 
@@ -309,7 +309,7 @@ def select_best_solution(res, problem):
     plot.fig.savefig(str(img_path), dpi=200, bbox_inches="tight")
     print(f"Plot successfully saved as '{img_path.name}' in {output_dir}!")
 
-    # Normalize the PLOTTED values (biological score vs cost) to [0, 1]
+    # Normalize the PLOTTED values (selectivity score vs cost) to [0, 1]
     # so the knee-point calculation matches what is visually shown on the Pareto front.
     min_vals = np.min(front_for_plotting, axis=0)
     max_vals = np.max(front_for_plotting, axis=0)

@@ -575,17 +575,17 @@ const optError = $('#optError');
 
 // Slider displays
 weightMean.addEventListener('input', () => {
-    let val = parseInt(weightMean.value);
-    weightMeanValue.textContent = val + '%';
-    weightMin.value = 100 - val;
-    weightMinValue.textContent = (100 - val) + '%';
+    let val = parseFloat(weightMean.value);
+    weightMeanValue.textContent = val.toFixed(2);
+    weightMin.value = (1 - val).toFixed(2);
+    weightMinValue.textContent = (1 - val).toFixed(2);
 });
 
 weightMin.addEventListener('input', () => {
-    let val = parseInt(weightMin.value);
-    weightMinValue.textContent = val + '%';
-    weightMean.value = 100 - val;
-    weightMeanValue.textContent = (100 - val) + '%';
+    let val = parseFloat(weightMin.value);
+    weightMinValue.textContent = val.toFixed(2);
+    weightMean.value = (1 - val).toFixed(2);
+    weightMeanValue.textContent = (1 - val).toFixed(2);
 });
 
 allowedMiss.addEventListener('input', () => {
@@ -628,7 +628,7 @@ runOptBtn.addEventListener('click', async () => {
     $('#optGenLabel').textContent = 'Optimizing...';
 
     const body = {
-        weight_mean: parseFloat(weightMean.value) / 100,
+        weight_mean: parseFloat(weightMean.value),
         allowed_miss_pct: parseInt(allowedMiss.value) / 100.0,
         mutation_multiplier: parseFloat($('#mutationMultiplier').value),
         pop_size: parseInt($('#popSize').value),
@@ -864,7 +864,7 @@ async function loadParetoChart() {
         const bestIdx = data.best_idx;
         const selectedIdx = data.selected_idx !== undefined ? data.selected_idx : bestIdx;
 
-        const x = points.map((p) => p[0]);  // Biological Score
+        const x = points.map((p) => p[0]);  // Selectivity Score (weight_mean * mean selectivity + weight_min * min selectivity)
         const y = points.map((p) => p[1]);  // Cost
 
         // Store point indices for click handler
@@ -878,9 +878,9 @@ async function loadParetoChart() {
 
         // Arrays for conditional styling on the selected point (matching by coordinates for duplicates)
         const hoverTemplates = points.map((_, i) => {
-            if (x[i] === selectedX && y[i] === selectedY) return 'Selectivity: %{x:.4f}<br>Cost: $%{y:,.0f}<br><i>Selected</i><extra></extra>';
-            if (x[i] === bestX && y[i] === bestY) return 'Selectivity: %{x:.4f}<br>Cost: $%{y:,.0f}<br><i>Best compromise solution, click to select</i><extra></extra>';
-            return 'Selectivity: %{x:.4f}<br>Cost: $%{y:,.0f}<br><i>Click to select</i><extra></extra>';
+            if (x[i] === selectedX && y[i] === selectedY) return 'Selectivity: %{x:.2f}<br>Cost: $%{y:,.0f}<br><i>Selected</i><extra></extra>';
+            if (x[i] === bestX && y[i] === bestY) return 'Selectivity: %{x:.2f}<br>Cost: $%{y:,.0f}<br><i>Best compromise solution, click to select</i><extra></extra>';
+            return 'Selectivity: %{x:.2f}<br>Cost: $%{y:,.0f}<br><i>Click to select</i><extra></extra>';
         });
         const hoverBgColors = points.map((_, i) => {
             if (x[i] === selectedX && y[i] === selectedY) return '#ffd43b';
@@ -942,7 +942,7 @@ async function loadParetoChart() {
             plot_bgcolor: 'rgba(0,0,0,0.15)',
             font: { family: 'Inter, sans-serif', color: '#9898b8' },
             xaxis: {
-                title: { text: 'Biological Score', font: { size: 13, color: '#9898b8' } },
+                title: { text: 'Selectivity Score (weight_mean * mean selectivity + weight_min * min selectivity)', font: { size: 13, color: '#9898b8' } },
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
                 zerolinecolor: 'rgba(120, 120, 255, 0.12)',
             },
@@ -1044,7 +1044,7 @@ async function loadHeatmap(prefetchedData) {
         }
 
         const hoverText = data.matrix.map(row => 
-            row.map(val => val === null ? "No Data" : val.toFixed(3))
+            row.map(val => val === null ? "No Data" : val.toFixed(2))
         );
 
         const truncCompounds = data.compounds.map((s) => s.length > 30 ? s.substring(0, 27) + '...' : s);
@@ -1144,7 +1144,7 @@ async function loadDistributionChart(prefetchedData) {
 
         const x = stats.map((s, i) => i);
 
-        const hoverTemplate = '<b>%{customdata[3]}</b><br>Max: %{customdata[0]:.3f}<br>Median: %{customdata[1]:.3f}<br>Min: %{customdata[2]:.3f}<extra></extra>';
+        const hoverTemplate = '<b>%{customdata[3]}</b><br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
         const customData = stats.map(s => [s.max, s.median, s.min, s.target]);
 
         const traceMax = {
