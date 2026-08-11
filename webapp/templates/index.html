@@ -25,7 +25,7 @@
             </a>
             <div class="navbar-links">
                 <a href="/" class="nav-link">Home</a>
-                <a href="/tool" class="nav-link active">Tool</a>
+                <a href="/tool" class="nav-link active">Optimizer</a>
             </div>
             <button class="navbar-hamburger" id="navHamburger" aria-label="Toggle navigation menu">
                 <span></span>
@@ -35,7 +35,7 @@
         </div>
         <div class="navbar-mobile-menu" id="navMobileMenu">
             <a href="/" class="nav-link">Home</a>
-            <a href="/tool" class="nav-link active">Tool</a>
+            <a href="/tool" class="nav-link active">Optimizer</a>
         </div>
     </nav>
 
@@ -117,6 +117,11 @@
                             <span class="value-display" id="thresholdValue">0.5</span>
                         </div>
                         <input type="range" id="selectivityThreshold" min="0" max="2" step="0.1" value="0.5">
+                        <div class="range-labels"
+                            style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
+                            <span>0.0</span>
+                            <span>2.0</span>
+                        </div>
                     </div>
                     <div class="form-group" style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
                         <input type="checkbox" id="removeTargets" checked style="margin: 0;">
