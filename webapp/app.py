@@ -72,16 +72,27 @@ class WebappCallback(Callback):
     def __init__(self, problem):
         super().__init__()
         self.problem = problem
+        # Snapshot of the latest algorithm state for early-stop result extraction
+        self.last_pop_X = None
+        self.last_pop_F = None
+        self.last_pop_G = None
 
     def notify(self, algorithm):
+        import numpy as np
+
+        # Always snapshot the current population before any stop check,
+        # so if we stop we have the latest state available.
+        self.last_pop_X = algorithm.pop.get("X").copy()
+        self.last_pop_F = algorithm.pop.get("F").copy()
+        self.last_pop_G = algorithm.pop.get("G").copy()
+
         with _lock:
             opt_state["generation"] = algorithm.n_gen
             if opt_state.get("stop_requested"):
                 raise StopOptimization("Optimization stopped by user")
 
-            import numpy as np
-            G = algorithm.pop.get("G")
-            F = algorithm.pop.get("F")
+            G = self.last_pop_G
+            F = self.last_pop_F
 
             feasible_idx = np.where(G <= 0)[0]
             if len(feasible_idx) > 0:
@@ -651,10 +662,14 @@ def run_optimization_route():
     mutation_multiplier = float(data.get("mutation_multiplier", 4.0))
     pop_size = int(data.get("pop_size", 100))
     max_gen = int(data.get("max_gen", 300))
+    ftol = float(data.get("ftol", 0.0025))
+    term_period = int(data.get("term_period", 30))
 
     # Clamp values
     pop_size = max(pop_size, 5)
     max_gen = max(max_gen, 10)
+    ftol = max(ftol, 0.0001)
+    term_period = max(term_period, 5)
 
     with _lock:
         opt_state.update({
@@ -668,7 +683,7 @@ def run_optimization_route():
 
     thread = threading.Thread(
         target=_run_nsga2,
-        args=(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen),
+        args=(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol, term_period),
         daemon=True,
     )
     thread.start()
@@ -753,8 +768,10 @@ def stop_opt_state():
     return jsonify({"status": "stop_requested"})
 
 
-def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen):
+def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol=0.0025, term_period=30):
     """Run NSGA-II optimization using the loaded dataset."""
+    cb = None  # Keep callback accessible for early-stop result extraction
+    problem = None
     try:
         with _lock:
             # Use direct references — these arrays are read-only during optimization
@@ -775,13 +792,15 @@ def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max
         del selectivities, prices
 
         # Run optimization
+        cb = WebappCallback(problem)
         res, elapsed_time = run_optimization(
             problem, X_init,
             pop_size=pop_size, seed=1,
-            max_gen=max_gen, ftol=0.0025,
+            max_gen=max_gen, ftol=ftol,
+            period=term_period,
             mutation_multiplier=mutation_multiplier,
             crossover_type="hux",
-            callback=WebappCallback(problem)
+            callback=cb
         )
         del X_init  # Free init population memory
 
@@ -794,52 +813,94 @@ def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max
         res_F = res.F.copy()
         del res
 
-        # Load matrix from CSV on demand (avoids keeping large DataFrame resident)
+        _process_and_store_results(res_X, res_F, best_idx, front, problem)
+
         with _lock:
-            matrix_file = dataset["matrix_file"]
-        matrix_df_indexed = pd.read_csv(matrix_file).set_index("SMILES")
-
-        # Wrap in lightweight result for save_results compatibility
-        res_light = _LightResult(res_X, res_F)
-
-        # Save results
-        output_dir = PROJECT_ROOT / "webapp" / "output"
-        output_dir.mkdir(exist_ok=True)
-        winning_file = str(output_dir / "winning_library.xlsx")
-
-        winning_smiles, selected_drug_indices, winning_matrix_df = save_results(
-            res_light, best_idx, matrix_df_indexed,
-            output_file=winning_file,
-        )
-        del matrix_df_indexed  # Free immediately
-
-        # Calculate comparison metrics
-        comparison = _build_comparison(winning_matrix_df, problem)
-
-        # Store results
-        with _lock:
-            opt_results["pareto_front"] = front.tolist()
-            opt_results["best_idx"] = int(best_idx)
-            opt_results["selected_idx"] = int(best_idx)
-            opt_results["comparison"] = comparison
-            opt_results["winning_matrix_df"] = winning_matrix_df
-            opt_results["winning_file"] = winning_file
-            opt_results["res_X"] = res_X
-            opt_results["res_F"] = res_F
-            opt_results["problem"] = problem
-            opt_results["heatmap_cache"] = _build_heatmap_cache(winning_matrix_df)
-
             opt_state["status"] = "complete"
 
-    except StopOptimization as e:
-        with _lock:
-            opt_state["status"] = "stopped"
-            opt_state["error"] = str(e)
+    except StopOptimization:
+        # Early stop: extract results from the callback's saved population snapshot
+        if cb is not None and cb.last_pop_X is not None and problem is not None:
+            try:
+                _process_stopped_results(cb, problem)
+            except Exception as inner_e:
+                with _lock:
+                    opt_state["status"] = "error"
+                    opt_state["error"] = f"Stopped, but failed to process partial results: {inner_e}"
+                traceback.print_exc()
+        else:
+            with _lock:
+                opt_state["status"] = "error"
+                opt_state["error"] = "Optimization stopped before any generation completed."
     except Exception as e:
         with _lock:
             opt_state["status"] = "error"
             opt_state["error"] = str(e)
         traceback.print_exc()
+
+
+def _process_stopped_results(cb, problem):
+    """Build and store results from the callback's population snapshot after early stop."""
+    # Filter to feasible solutions (constraint G <= 0)
+    G = cb.last_pop_G
+    F = cb.last_pop_F
+    X = cb.last_pop_X
+
+    feasible_mask = (G <= 0).all(axis=1) if G.ndim > 1 else (G <= 0).ravel()
+    if np.any(feasible_mask):
+        res_X = X[feasible_mask]
+        res_F = F[feasible_mask]
+    else:
+        # No feasible solutions — use entire population
+        res_X = X
+        res_F = F
+
+    # Build a lightweight result and select the best solution
+    res_light = _LightResult(res_X, res_F)
+    best_idx, front = select_best_solution(res_light, problem)
+
+    _process_and_store_results(res_X, res_F, best_idx, front, problem)
+
+    with _lock:
+        opt_state["status"] = "complete"
+
+
+def _process_and_store_results(res_X, res_F, best_idx, front, problem):
+    """Common result processing shared by normal completion and early stop."""
+    # Load matrix from CSV on demand (avoids keeping large DataFrame resident)
+    with _lock:
+        matrix_file = dataset["matrix_file"]
+    matrix_df_indexed = pd.read_csv(matrix_file).set_index("SMILES")
+
+    # Wrap in lightweight result for save_results compatibility
+    res_light = _LightResult(res_X, res_F)
+
+    # Save results
+    output_dir = PROJECT_ROOT / "webapp" / "output"
+    output_dir.mkdir(exist_ok=True)
+    winning_file = str(output_dir / "winning_library.xlsx")
+
+    winning_smiles, selected_drug_indices, winning_matrix_df = save_results(
+        res_light, best_idx, matrix_df_indexed,
+        output_file=winning_file,
+    )
+    del matrix_df_indexed  # Free immediately
+
+    # Calculate comparison metrics
+    comparison = _build_comparison(winning_matrix_df, problem)
+
+    # Store results
+    with _lock:
+        opt_results["pareto_front"] = front.tolist()
+        opt_results["best_idx"] = int(best_idx)
+        opt_results["selected_idx"] = int(best_idx)
+        opt_results["comparison"] = comparison
+        opt_results["winning_matrix_df"] = winning_matrix_df
+        opt_results["winning_file"] = winning_file
+        opt_results["res_X"] = res_X
+        opt_results["res_F"] = res_F
+        opt_results["problem"] = problem
+        opt_results["heatmap_cache"] = _build_heatmap_cache(winning_matrix_df)
 
 
 def _build_comparison(winning_matrix_df, problem):

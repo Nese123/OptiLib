@@ -101,6 +101,9 @@ function goToStep(step) {
             line.classList.toggle('completed', i < step);
         }
     }
+
+    // Scroll to top so the new step is visible from the beginning
+    window.scrollTo(0, 0);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -400,7 +403,13 @@ function renderFiles() {
         $('#unmatchedRow').style.display = 'flex';
         $('#unmatchedList').style.display = 'block';
         $('#unmatchedCount').textContent = `${uniqueUnmatched.length} targets not found`;
-        $('#unmatchedList').textContent = uniqueUnmatched.join('\n');
+        const unmatchedListEl = $('#unmatchedList');
+        unmatchedListEl.innerHTML = '';
+        uniqueUnmatched.forEach(name => {
+            const row = document.createElement('div');
+            row.textContent = name;
+            unmatchedListEl.appendChild(row);
+        });
     } else {
         $('#unmatchedRow').style.display = 'none';
         $('#unmatchedList').style.display = 'none';
@@ -594,22 +603,22 @@ let lastRenderedGen = -1;
 function initHistoryChart() {
     $('#historyCard').style.display = 'block';
     lastRenderedGen = -1;
-    
+
     const layout = {
-        margin: { t: 20, r: 50, l: 50, b: 40 },
+        margin: { t: 20, r: 80, l: 60, b: 80 },
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         font: { color: '#9898b8', family: 'Inter, sans-serif' },
-        xaxis: { title: 'Generation', gridcolor: 'rgba(255,255,255,0.05)' },
-        yaxis: { title: 'Best Selectivity Score', gridcolor: 'rgba(255,255,255,0.05)', color: '#4a90e2' },
-        yaxis2: { title: 'Lowest Cost (USD)', overlaying: 'y', side: 'right', color: '#ff4a4a', gridcolor: 'rgba(0,0,0,0)' },
+        xaxis: { title: 'Generation', gridcolor: 'rgba(255,255,255,0.05)', automargin: true },
+        yaxis: { title: 'Best Selectivity Score', gridcolor: 'rgba(255,255,255,0.05)', color: '#12f3b9', automargin: true },
+        yaxis2: { title: 'Lowest Cost (USD)', overlaying: 'y', side: 'right', color: '#9d7cff', gridcolor: 'rgba(0,0,0,0)', automargin: true },
         showlegend: true,
         legend: { x: 0, y: 1.1, orientation: 'h' }
     };
 
     const traces = [
-        { x: [], y: [], name: 'Selectivity', mode: 'lines+markers', line: { color: '#4a90e2' }, marker: {size: 4} },
-        { x: [], y: [], name: 'Cost', mode: 'lines+markers', line: { color: '#ff4a4a' }, yaxis: 'y2', marker: {size: 4} }
+        { x: [], y: [], name: 'Selectivity', mode: 'lines+markers', line: { color: '#12f3b9' }, marker: { size: 4 } },
+        { x: [], y: [], name: 'Cost', mode: 'lines+markers', line: { color: '#9d7cff' }, yaxis: 'y2', marker: { size: 4 } }
     ];
 
     Plotly.newPlot('historyChart', traces, layout, { responsive: true, displayModeBar: false });
@@ -617,11 +626,11 @@ function initHistoryChart() {
 
 function updateHistoryChart(history) {
     if (!history || history.length === 0) return;
-    
+
     const x = [];
     const ySel = [];
     const yCost = [];
-    
+
     history.forEach(h => {
         if (h.generation > lastRenderedGen) {
             x.push(h.generation);
@@ -629,7 +638,7 @@ function updateHistoryChart(history) {
             yCost.push(h.best_cost);
         }
     });
-    
+
     if (x.length > 0) {
         Plotly.extendTraces('historyChart', {
             x: [x, x],
@@ -748,7 +757,7 @@ runOptBtn.addEventListener('click', async () => {
     optProgress.style.display = 'block';
     $('#optProgressFill').style.width = '0%';
     $('#optGenLabel').textContent = 'Optimizing...';
-    
+
     initHistoryChart();
 
     const body = {
@@ -757,6 +766,8 @@ runOptBtn.addEventListener('click', async () => {
         mutation_multiplier: parseFloat($('#mutationMultiplier').value),
         pop_size: parseInt($('#popSize').value),
         max_gen: parseInt($('#maxGen').value),
+        ftol: parseFloat($('#ftol').value),
+        term_period: parseInt($('#termPeriod').value),
     };
 
     try {
@@ -834,14 +845,10 @@ function startOptPolling(maxGen) {
                 }, 800);
             }
 
-            if (data.status === 'error' || data.status === 'stopped') {
+            if (data.status === 'error') {
                 clearInterval(optPollTimer);
                 optPollTimer = null;
-                if (data.status === 'error') {
-                    showError(optError, data.error || 'Optimization failed');
-                } else {
-                    showError(optError, 'Optimization stopped');
-                }
+                showError(optError, data.error || 'Optimization failed');
                 optProgress.style.display = 'none';
                 $('#stopOptBtn').style.display = 'none';
                 runOptBtn.style.display = 'inline-flex';
@@ -851,7 +858,7 @@ function startOptPolling(maxGen) {
         } catch (err) {
             // Silent retry
         }
-    }, 2000);
+    }, 500);
 }
 
 // Back button
@@ -1098,8 +1105,12 @@ async function loadParetoChart() {
                 bgcolor: 'rgba(0,0,0,0.3)',
                 bordercolor: 'rgba(120,120,255,0.1)',
                 borderwidth: 1,
+                x: 1.02,
+                xanchor: 'left',
+                y: 1,
+                yanchor: 'top',
             },
-            margin: { l: 90, r: 160, t: 20, b: 65 },
+            margin: { l: 90, r: 180, t: 20, b: 85 },
         };
 
         Plotly.newPlot('paretoChart', [traceAll, traceBest, traceSelected], layout, {
@@ -1336,7 +1347,8 @@ async function loadDistributionChart(prefetchedData) {
             yaxis: {
                 title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' }, standoff: 15 },
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
-                zerolinecolor: 'rgba(120, 120, 255, 0.12)',
+                zerolinecolor: 'rgba(255, 255, 255, 0.45)',
+                zerolinewidth: 2,
                 ticks: 'outside',
                 ticklen: 5,
                 tickcolor: 'rgba(0,0,0,0)'

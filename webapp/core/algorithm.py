@@ -202,7 +202,7 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
 #  OPTIMIZATION
 # ═══════════════════════════════════════════════════════════════
 
-def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0.0025, mutation_multiplier=1.098, crossover_type="hux", callback=None):
+def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0.0025, period=30, mutation_multiplier=1.098, crossover_type="hux", callback=None):
     """Configure and run the NSGA-II optimizer.
 
     Returns:
@@ -228,10 +228,10 @@ def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0
     # Stop the algorithm when the Pareto front stops significantly improving
     # over a given period (e.g. 30 generations).
     termination = DefaultMultiObjectiveTermination(
-        xtol=1e9,  # Ignore design space movement (X) for combinatorial problems
+        xtol=1e-8,
         cvtol=1e-6,
         ftol=ftol,
-        period=30,
+        period=period,
         n_max_gen=max_gen,
         n_max_evals=900000
     )
