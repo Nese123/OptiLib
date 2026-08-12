@@ -661,7 +661,7 @@ def run_optimization_route():
     allowed_miss_pct = float(data.get("allowed_miss_pct", 0.04))
     mutation_multiplier = float(data.get("mutation_multiplier", 4.0))
     pop_size = int(data.get("pop_size", 100))
-    max_gen = int(data.get("max_gen", 300))
+    max_gen = int(data.get("max_gen", 1000))
     ftol = float(data.get("ftol", 0.0025))
     term_period = int(data.get("term_period", 30))
 
