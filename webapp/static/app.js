@@ -587,6 +587,7 @@ $('#backToStep1From2Btn').addEventListener('click', async () => {
         pipelinePollTimer = null;
     }
 
+    $('#historyCard').style.display = 'none';
     buildMatrixBtn.disabled = false;
     goToStep(1);
 });
@@ -909,6 +910,7 @@ $('#backToStep1Btn').addEventListener('click', async () => {
         optPollTimer = null;
     }
 
+    $('#historyCard').style.display = 'none';
     optStatusIndicator.style.visibility = 'hidden';
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
@@ -1412,6 +1414,10 @@ $('#backToStep3Btn').addEventListener('click', async () => {
     try {
         await fetch('/api/reset-opt', { method: 'POST' });
     } catch (err) { }
+    
+    $('#historyCard').style.display = 'none';
+    $('#optCompleteBanner').style.display = 'none';
+    $('#optCompleteBanner').classList.remove('visible');
     runOptBtn.disabled = false;
     optStatusIndicator.style.visibility = 'hidden';
     goToStep(3);
@@ -1437,6 +1443,9 @@ $('#newRunBtn').addEventListener('click', async () => {
         optPollTimer = null;
     }
 
+    $('#historyCard').style.display = 'none';
+    $('#optCompleteBanner').style.display = 'none';
+    $('#optCompleteBanner').classList.remove('visible');
     optStatusIndicator.style.visibility = 'hidden';
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
