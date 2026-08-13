@@ -271,8 +271,7 @@
                     <div class="form-group">
                         <label>F-Tolerance <span class="info-icon"
                                 data-tooltip="The minimum improvement in objective function values required to consider the Pareto front as still improving. Smaller values make the algorithm run longer by requiring finer improvements before stopping. The default value is 0.0025.">?</span></label>
-                        <input type="number" id="ftol" value="0.0025" min="0.0001" max="1.0"
-                            step="0.0001">
+                        <input type="number" id="ftol" value="0.0025" min="0.0001" max="1.0" step="0.0001">
                     </div>
 
                     <!-- Advanced Settings -->
@@ -316,19 +315,21 @@
                                 <div class="form-group" style="margin-bottom: 0;">
                                     <label>Termination Period <span class="info-icon"
                                             data-tooltip="The number of consecutive generations over which the algorithm checks for improvement. If the Pareto front does not improve by more than F-Tolerance over this many generations, optimization stops early. The default value is 30.">?</span></label>
-                                    <input type="number" id="termPeriod" value="30" min="5" max="500"
-                                        step="5">
+                                    <input type="number" id="termPeriod" value="30" min="5" max="500" step="5">
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div id="historyCard" style="display: none; margin-top: 2rem; background: var(--bg-card); border-radius: var(--radius-md); padding: 1rem; border: 1px solid var(--border-light);">
-                    <h3 style="margin-bottom: 1rem; font-size: 1.1rem; color: #fff;">Optimization Progress History <span class="info-icon"
-                            data-tooltip="Tracks how the optimization objectives evolve over generations. The top plot shows the best selectivity score found so far (higher is better), and the bottom plot shows the lowest cost found so far (lower is better). Flattening curves indicate the algorithm is converging on an optimal trade-off.">?</span></h3>
+                <div id="historyCard"
+                    style="display: none; margin-top: 2rem; background: var(--bg-card); border-radius: var(--radius-md); padding: 1rem 1rem 0.5rem 1rem; border: 1px solid var(--border-light);">
+                    <h3 style="margin-bottom: 1rem; font-size: 1.1rem; color: #fff;">Optimization Progress History <span
+                            class="info-icon"
+                            data-tooltip="Tracks how the optimization objectives evolve over generations. The top plot shows the best selectivity score found so far (higher is better), and the bottom plot shows the lowest cost found so far (lower is better). Flattening curves indicate the algorithm is converging on an optimal trade-off.">?</span>
+                    </h3>
                     <div class="chart-container" id="historyChart" style="height: 350px;"></div>
-                    <div class="opt-status-indicator" id="optStatusIndicator" style="display: none;">
+                    <div class="opt-status-indicator" id="optStatusIndicator" style="visibility: hidden; margin-top: 0.25rem; padding-top: 0.25rem;">
                         <span class="opt-status-dot"></span>
                         <span class="opt-status-text" id="optStatusText">Optimizing...</span>
                     </div>
@@ -336,7 +337,7 @@
 
                 <div class="error-box" id="optError" style="display: none;"></div>
 
-                <div class="btn-row">
+                <div class="btn-row" style="margin-top: 0;">
                     <div id="optCompleteBanner" class="opt-complete-inline" style="display: none;">
                         <span class="opt-complete-icon">✅</span>
                         <span class="opt-complete-text" id="optCompleteText">Optimization Complete</span>
@@ -377,7 +378,8 @@
                     <h2 class="card-title"><span class="icon">📈</span> Pareto Front <span class="info-icon"
                             data-tooltip="Displays the trade-off between maximizing selectivity and minimizing cost. Each point represents an optimized library generated during the run. On the y-axis is the total cost of the library, and on the x-axis the selectivity score of the library, which is a weighted sum of the mean and minimum selectivity of the library. Click a point on the front to see its statistics.">?</span>
                     </h2>
-                    <p style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
+                    <p
+                        style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
                         <span style="margin-right: 0.3rem;">👆</span>Click a Solution to Select It
                     </p>
                     <div class="chart-container" id="paretoChart" style="height: 420px;"></div>

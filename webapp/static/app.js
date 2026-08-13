@@ -57,7 +57,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             $('#stopOptBtn').disabled = false;
             optError.style.display = 'none';
             initHistoryChart();
-            $('#optStatusIndicator').style.display = 'flex';
+            $('#optStatusIndicator').style.visibility = 'visible';
             $('#optStatusText').textContent = 'Optimizing...';
             startOptPolling(optState.max_gen);
         } else if (pipeState.status === 'complete' && datasetState.ready) {
@@ -787,7 +787,7 @@ runOptBtn.addEventListener('click', async () => {
             runOptBtn.disabled = false;
             runOptBtn.style.display = 'inline-flex';
             $('#stopOptBtn').style.display = 'none';
-            optStatusIndicator.style.display = 'none';
+            optStatusIndicator.style.visibility = 'hidden';
             return;
         }
 
@@ -798,7 +798,7 @@ runOptBtn.addEventListener('click', async () => {
         runOptBtn.disabled = false;
         runOptBtn.style.display = 'inline-flex';
         $('#stopOptBtn').style.display = 'none';
-        optStatusIndicator.style.display = 'none';
+        optStatusIndicator.style.visibility = 'hidden';
     }
 });
 
@@ -815,7 +815,7 @@ function startOptPolling(maxGen) {
 
             // Update status indicator
             if (data.status === 'running') {
-                optStatusIndicator.style.display = 'flex';
+                optStatusIndicator.style.visibility = 'visible';
                 const currentGen = data.generation || 0;
                 $('#optStatusText').textContent = `Optimizing... Generation ${currentGen}`;
             }
@@ -823,7 +823,7 @@ function startOptPolling(maxGen) {
             if (data.status === 'complete') {
                 clearInterval(optPollTimer);
                 optPollTimer = null;
-                optStatusIndicator.style.display = 'none';
+                optStatusIndicator.style.visibility = 'hidden';
                 $('#stopOptBtn').style.display = 'none';
                 runOptBtn.style.display = 'none';
 
@@ -836,7 +836,7 @@ function startOptPolling(maxGen) {
                 clearInterval(optPollTimer);
                 optPollTimer = null;
                 showError(optError, data.error || 'Optimization failed');
-                optStatusIndicator.style.display = 'none';
+                optStatusIndicator.style.visibility = 'hidden';
                 $('#stopOptBtn').style.display = 'none';
                 runOptBtn.style.display = 'inline-flex';
                 runOptBtn.disabled = false;
@@ -909,7 +909,7 @@ $('#backToStep1Btn').addEventListener('click', async () => {
         optPollTimer = null;
     }
 
-    optStatusIndicator.style.display = 'none';
+    optStatusIndicator.style.visibility = 'hidden';
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
     $('#stopOptBtn').style.display = 'none';
@@ -1413,7 +1413,7 @@ $('#backToStep3Btn').addEventListener('click', async () => {
         await fetch('/api/reset-opt', { method: 'POST' });
     } catch (err) { }
     runOptBtn.disabled = false;
-    optStatusIndicator.style.display = 'none';
+    optStatusIndicator.style.visibility = 'hidden';
     goToStep(3);
     await loadDatasetInfo();
 });
@@ -1437,7 +1437,7 @@ $('#newRunBtn').addEventListener('click', async () => {
         optPollTimer = null;
     }
 
-    optStatusIndicator.style.display = 'none';
+    optStatusIndicator.style.visibility = 'hidden';
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
     $('#stopOptBtn').style.display = 'none';
