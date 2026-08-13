@@ -267,11 +267,12 @@
                         </div>
                     </div>
 
-                    <!-- Max Generations -->
+                    <!-- Ftol (Termination) -->
                     <div class="form-group">
-                        <label>Max Generations <span class="info-icon"
-                                data-tooltip="The maximum number of evolutionary cycles the algorithm will run before terminating. The algorithm will stop before that if the solutions don't improve from generation to generation. The default value is 1000. Increasing this will increase the optimization time, but will likely improve results.">?</span></label>
-                        <input type="number" id="maxGen" value="1000" min="10" max="5000" step="10">
+                        <label>F-Tolerance <span class="info-icon"
+                                data-tooltip="The minimum improvement in objective function values required to consider the Pareto front as still improving. Smaller values make the algorithm run longer by requiring finer improvements before stopping. The default value is 0.0025.">?</span></label>
+                        <input type="number" id="ftol" value="0.0025" min="0.0001" max="1.0"
+                            step="0.0001">
                     </div>
 
                     <!-- Advanced Settings -->
@@ -304,12 +305,11 @@
                                         step="0.1">
                                 </div>
 
-                                <!-- Ftol (Termination) -->
+                                <!-- Max Generations -->
                                 <div class="form-group" style="margin-bottom: 0;">
-                                    <label>F-Tolerance <span class="info-icon"
-                                            data-tooltip="The minimum improvement in objective function values required to consider the Pareto front as still improving. Smaller values make the algorithm run longer by requiring finer improvements before stopping. The default value is 0.0025.">?</span></label>
-                                    <input type="number" id="ftol" value="0.0025" min="0.0001" max="1.0"
-                                        step="0.0001">
+                                    <label>Max Generations <span class="info-icon"
+                                            data-tooltip="The maximum number of evolutionary cycles the algorithm will run before terminating. The algorithm will stop before that if the solutions don't improve from generation to generation. The default value is 1000. Increasing this will increase the optimization time, but will likely improve results.">?</span></label>
+                                    <input type="number" id="maxGen" value="1000" min="10" max="5000" step="10">
                                 </div>
 
                                 <!-- Period (Termination) -->

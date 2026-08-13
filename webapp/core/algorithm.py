@@ -233,7 +233,7 @@ def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0
         ftol=ftol,
         period=period,
         n_max_gen=max_gen,
-        n_max_evals=900000
+        n_max_evals=1000000
     )
 
     print("Starting NSGA-II Optimization...")
