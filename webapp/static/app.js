@@ -56,7 +56,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             $('#stopOptBtn').style.display = 'inline-flex';
             $('#stopOptBtn').disabled = false;
             optError.style.display = 'none';
-            optProgress.style.display = 'block';
+            initHistoryChart();
+            $('#optStatusIndicator').style.display = 'flex';
+            $('#optStatusText').textContent = 'Optimizing...';
             startOptPolling(optState.max_gen);
         } else if (pipeState.status === 'complete' && datasetState.ready) {
             const savedStep = sessionStorage.getItem('currentStep');
@@ -600,7 +602,7 @@ const weightMinValue = $('#weightMinValue');
 const allowedMiss = $('#allowedMiss');
 const allowedMissValue = $('#allowedMissValue');
 const runOptBtn = $('#runOptBtn');
-const optProgress = $('#optProgress');
+const optStatusIndicator = $('#optStatusIndicator');
 const optError = $('#optError');
 
 let lastRenderedGen = -1;
@@ -759,9 +761,6 @@ runOptBtn.addEventListener('click', async () => {
     $('#stopOptBtn').disabled = false;
 
     optError.style.display = 'none';
-    optProgress.style.display = 'block';
-    $('#optProgressFill').style.width = '0%';
-    $('#optGenLabel').textContent = 'Optimizing...';
 
     initHistoryChart();
 
@@ -788,7 +787,7 @@ runOptBtn.addEventListener('click', async () => {
             runOptBtn.disabled = false;
             runOptBtn.style.display = 'inline-flex';
             $('#stopOptBtn').style.display = 'none';
-            optProgress.style.display = 'none';
+            optStatusIndicator.style.display = 'none';
             return;
         }
 
@@ -799,7 +798,7 @@ runOptBtn.addEventListener('click', async () => {
         runOptBtn.disabled = false;
         runOptBtn.style.display = 'inline-flex';
         $('#stopOptBtn').style.display = 'none';
-        optProgress.style.display = 'none';
+        optStatusIndicator.style.display = 'none';
     }
 });
 
@@ -814,31 +813,17 @@ function startOptPolling(maxGen) {
                 updateHistoryChart(data.history);
             }
 
-            // Update progress bar
+            // Update status indicator
             if (data.status === 'running') {
+                optStatusIndicator.style.display = 'flex';
                 const currentGen = data.generation || 0;
-                const pct = (currentGen / maxGen) * 100;
-                $('#optProgressFill').style.width = `${pct}%`;
-
-                if (currentGen > 0) {
-                    const msPerGen = (Date.now() - optStartTime) / currentGen;
-                    const timeLeftMs = msPerGen * (maxGen - currentGen);
-                    const totalSecs = Math.round(timeLeftMs / 1000);
-                    const mins = Math.floor(totalSecs / 60);
-                    const secs = totalSecs % 60;
-
-                    let timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-                    $('#optGenLabel').textContent = `Approximately ${timeStr} left... (Generation ${currentGen} / ${maxGen})`;
-                } else {
-                    $('#optGenLabel').textContent = `Optimizing... (Generation ${currentGen} / ${maxGen})`;
-                }
+                $('#optStatusText').textContent = `Optimizing... Generation ${currentGen}`;
             }
 
             if (data.status === 'complete') {
                 clearInterval(optPollTimer);
                 optPollTimer = null;
-                $('#optProgressFill').style.width = '100%';
-                $('#optGenLabel').textContent = 'Complete!';
+                optStatusIndicator.style.display = 'none';
                 $('#stopOptBtn').style.display = 'none';
                 runOptBtn.style.display = 'none';
 
@@ -851,7 +836,7 @@ function startOptPolling(maxGen) {
                 clearInterval(optPollTimer);
                 optPollTimer = null;
                 showError(optError, data.error || 'Optimization failed');
-                optProgress.style.display = 'none';
+                optStatusIndicator.style.display = 'none';
                 $('#stopOptBtn').style.display = 'none';
                 runOptBtn.style.display = 'inline-flex';
                 runOptBtn.disabled = false;
@@ -924,7 +909,7 @@ $('#backToStep1Btn').addEventListener('click', async () => {
         optPollTimer = null;
     }
 
-    optProgress.style.display = 'none';
+    optStatusIndicator.style.display = 'none';
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
     $('#stopOptBtn').style.display = 'none';
@@ -1428,7 +1413,7 @@ $('#backToStep3Btn').addEventListener('click', async () => {
         await fetch('/api/reset-opt', { method: 'POST' });
     } catch (err) { }
     runOptBtn.disabled = false;
-    optProgress.style.display = 'none';
+    optStatusIndicator.style.display = 'none';
     goToStep(3);
     await loadDatasetInfo();
 });
@@ -1452,7 +1437,7 @@ $('#newRunBtn').addEventListener('click', async () => {
         optPollTimer = null;
     }
 
-    optProgress.style.display = 'none';
+    optStatusIndicator.style.display = 'none';
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
     $('#stopOptBtn').style.display = 'none';

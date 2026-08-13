@@ -720,67 +720,39 @@ input[type="number"]:focus {
     padding: 0.5rem;
 }
 
-/* ─── Progress Bar ─── */
-.progress-bar-container {
-    margin-top: 1.5rem;
-    padding: 1.25rem;
-    background: rgba(0, 0, 0, 0.15);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-card);
-}
-
-.progress-bar-label {
+/* ─── Optimization Status Indicator ─── */
+.opt-status-indicator {
     display: flex;
-    justify-content: space-between;
-    margin-bottom: 0.5rem;
-    font-size: 0.85rem;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
 }
 
-.progress-bar-label .text {
-    color: var(--text-secondary);
-}
-
-.progress-bar-label .value {
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--accent-teal);
-}
-
-.progress-bar {
-    width: 100%;
+.opt-status-dot {
+    width: 8px;
     height: 8px;
-    background: var(--bg-secondary);
-    border-radius: 4px;
-    overflow: hidden;
+    border-radius: 50%;
+    background: var(--accent-teal);
+    box-shadow: 0 0 6px var(--accent-teal);
+    animation: statusPulse 1.4s ease-in-out infinite;
+    flex-shrink: 0;
 }
 
-.progress-bar-fill {
-    height: 100%;
-    background: var(--gradient-primary);
-    border-radius: 4px;
-    transition: width 0.5s ease-out;
-    position: relative;
+.opt-status-text {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
 }
 
-.progress-bar-fill::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    top: 0;
-    height: 100%;
-    width: 30px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
-    animation: shimmer 1.5s ease-in-out infinite;
-}
-
-@keyframes shimmer {
-
-    0%,
-    100% {
-        opacity: 0;
+@keyframes statusPulse {
+    0%, 100% {
+        opacity: 0.4;
+        transform: scale(0.85);
     }
-
     50% {
         opacity: 1;
+        transform: scale(1);
     }
 }
 
@@ -1882,11 +1854,6 @@ input[type="number"]:focus {
     .pipeline-step {
         padding: 0.7rem 1rem;
         gap: 0.75rem;
-    }
-
-    /* Progress bar */
-    .progress-bar-container {
-        padding: 1rem;
     }
 
     /* Tooltips reposition for mobile */

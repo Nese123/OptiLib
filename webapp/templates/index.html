@@ -324,21 +324,14 @@
                     </div>
                 </div>
 
-                <!-- Optimization Progress -->
-                <div class="progress-bar-container" id="optProgress" style="display: none;">
-                    <div class="progress-bar-label">
-                        <span class="text">Optimizing...</span>
-                        <span class="value" id="optGenLabel">Gen 0 / 300</span>
-                    </div>
-                    <div class="progress-bar">
-                        <div class="progress-bar-fill" id="optProgressFill" style="width: 0%;"></div>
-                    </div>
-                </div>
-                
                 <div id="historyCard" style="display: none; margin-top: 2rem; background: var(--bg-card); border-radius: var(--radius-md); padding: 1rem; border: 1px solid var(--border-light);">
                     <h3 style="margin-bottom: 1rem; font-size: 1.1rem; color: #fff;">Optimization Progress History <span class="info-icon"
                             data-tooltip="Tracks how the optimization objectives evolve over generations. The top plot shows the best selectivity score found so far (higher is better), and the bottom plot shows the lowest cost found so far (lower is better). Flattening curves indicate the algorithm is converging on an optimal trade-off.">?</span></h3>
                     <div class="chart-container" id="historyChart" style="height: 350px;"></div>
+                    <div class="opt-status-indicator" id="optStatusIndicator" style="display: none;">
+                        <span class="opt-status-dot"></span>
+                        <span class="opt-status-text" id="optStatusText">Optimizing...</span>
+                    </div>
                 </div>
 
                 <div class="error-box" id="optError" style="display: none;"></div>
