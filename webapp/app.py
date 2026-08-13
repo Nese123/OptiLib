@@ -348,8 +348,38 @@ def _update_pipeline(step, label, detail="", summary=None):
 def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matched_count=0):
     """Full pipeline: ChEMBL → pChEMBL rescue → selectivity → prices → save."""
     import sqlite3
+    import hashlib
 
     try:
+        output_dir = PROJECT_ROOT / "webapp" / "output"
+        output_dir.mkdir(exist_ok=True)
+        
+        # Generate cache key based on inputs
+        cache_str = f"{sorted(chembl_ids)}_{selectivity_threshold}_{remove_targets}_{matched_count}"
+        cache_key = hashlib.md5(cache_str.encode('utf-8')).hexdigest()
+        matrix_file = str(output_dir / f"selectivity_matrix_{cache_key}.csv")
+        
+        if os.path.exists(matrix_file):
+            _update_pipeline(1, "Loading cached matrix...", "Found a previously computed selectivity matrix for these parameters.")
+            final_export_df = pd.read_csv(matrix_file)
+            
+            target_cols = [c for c in final_export_df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"}]
+            with _lock:
+                dataset["selectivities"] = final_export_df[target_cols].to_numpy(dtype=float)
+                dataset["prices"] = final_export_df["Price_USD_per_mg"].to_numpy(dtype=float)
+                dataset["smiles"] = final_export_df["SMILES"].to_numpy()
+                dataset["num_drugs"] = len(final_export_df)
+                dataset["num_targets"] = len(target_cols)
+                dataset["total_cost"] = float(np.sum(dataset["prices"]))
+                dataset["matrix_file"] = matrix_file
+                dataset["ready"] = True
+    
+                pipeline_state["status"] = "complete"
+                pipeline_state["current_step"] = 3
+                pipeline_state["step_label"] = "Done"
+                pipeline_state["detail"] = f"Loaded cached matrix: {dataset['num_drugs']} compounds × {dataset['num_targets']} targets"
+            return
+
         # ─────────────────────────────────────────────
         # Step 1: Searching for selective compounds
         # ─────────────────────────────────────────────
@@ -600,9 +630,6 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         # Save matrix as CSV (fast) — Excel generated lazily on download
         _update_pipeline(3, "Saving matrix...", "Saving CSV matrix...")
         
-        output_dir = PROJECT_ROOT / "webapp" / "output"
-        output_dir.mkdir(exist_ok=True)
-        matrix_file = str(output_dir / "selectivity_matrix.csv")
         final_export_df.to_csv(matrix_file, index=False)
 
         # Store in global dataset
@@ -740,11 +767,7 @@ def reset_state():
             "problem": None,
             "heatmap_cache": None,
         })
-    # Clean up cached Excel file so stale data isn't served
-    xlsx_cache = str(PROJECT_ROOT / "webapp" / "output" / "selectivity_matrix.xlsx")
-    if os.path.isfile(xlsx_cache):
-        os.remove(xlsx_cache)
-
+    # We no longer clear the global cache files on reset, as they are cached by parameters.
     return jsonify({"status": "reset"})
 
 
@@ -1109,8 +1132,7 @@ def download_matrix():
         return jsonify({"error": "No matrix file available"}), 404
 
     # Generate Excel lazily from CSV (cached after first call)
-    output_dir = PROJECT_ROOT / "webapp" / "output"
-    xlsx_path = str(output_dir / "selectivity_matrix.xlsx")
+    xlsx_path = csv_path.replace(".csv", ".xlsx")
 
     if not os.path.isfile(xlsx_path):
         pd.read_csv(csv_path).to_excel(xlsx_path, index=False, engine='xlsxwriter')

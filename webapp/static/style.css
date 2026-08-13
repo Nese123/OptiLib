@@ -968,7 +968,7 @@ input[type="number"]:focus {
 
 /* Tool page offset for fixed navbar */
 .tool-page .tool-app-container {
-    padding-top: 7rem;
+    padding-top: 6rem;
 }
 
 .home-page {
