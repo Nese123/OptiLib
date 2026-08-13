@@ -40,9 +40,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         const datasetState = await datasetRes.json();
 
         if (optState.status === 'complete') {
-            goToStep(4);
+            goToStep(3);
             await loadDatasetInfo();
-            await loadResults();
+            showOptCompleteBanner(optState.generation || '?');
         } else if (optState.status === 'running') {
             goToStep(3);
             await loadDatasetInfo();
@@ -835,14 +835,11 @@ function startOptPolling(maxGen) {
                 $('#optProgressFill').style.width = '100%';
                 $('#optGenLabel').textContent = 'Complete!';
                 $('#stopOptBtn').style.display = 'none';
-                runOptBtn.style.display = 'inline-flex';
-                runOptBtn.disabled = false;
+                runOptBtn.style.display = 'none';
 
-                // Short delay then go to results
-                setTimeout(async () => {
-                    goToStep(4);
-                    await loadResults();
-                }, 800);
+                // Show the completion banner instead of auto-navigating
+                const finalGen = data.generation || '?';
+                showOptCompleteBanner(finalGen);
             }
 
             if (data.status === 'error') {
@@ -860,6 +857,48 @@ function startOptPolling(maxGen) {
         }
     }, 500);
 }
+
+function showOptCompleteBanner(generations) {
+    const banner = $('#optCompleteBanner');
+    const text = $('#optCompleteText');
+    text.textContent = `Optimization Complete: The Algorithm Ran For ${generations} Generations`;
+    banner.style.display = '';
+    // Trigger entrance animation
+    requestAnimationFrame(() => {
+        banner.classList.add('visible');
+    });
+    // Hide the Run Optimization button since we're done, show Run Again & See Results
+    runOptBtn.style.display = 'none';
+    $('#runAgainBtn').style.display = 'inline-flex';
+    $('#seeResultsBtn').style.display = 'inline-flex';
+}
+
+// See Results button
+$('#seeResultsBtn').addEventListener('click', async () => {
+    goToStep(4);
+    await loadResults();
+});
+
+// Run Again button
+$('#runAgainBtn').addEventListener('click', async () => {
+    // Hide the completion banner and buttons
+    $('#optCompleteBanner').style.display = 'none';
+    $('#optCompleteBanner').classList.remove('visible');
+    $('#runAgainBtn').style.display = 'none';
+    $('#seeResultsBtn').style.display = 'none';
+
+    // Reset backend optimization state
+    try {
+        await fetch('/api/reset-opt', { method: 'POST' });
+    } catch (err) {
+        console.error('Failed to reset opt state', err);
+    }
+
+    // Trigger the optimization as if the user clicked "Run Optimization"
+    runOptBtn.style.display = 'inline-flex';
+    runOptBtn.disabled = false;
+    runOptBtn.click();
+});
 
 // Back button
 $('#backToStep1Btn').addEventListener('click', async () => {
@@ -884,6 +923,10 @@ $('#backToStep1Btn').addEventListener('click', async () => {
     runOptBtn.style.display = 'inline-flex';
     runOptBtn.disabled = false;
     $('#stopOptBtn').style.display = 'none';
+    $('#runAgainBtn').style.display = 'none';
+    $('#seeResultsBtn').style.display = 'none';
+    $('#optCompleteBanner').style.display = 'none';
+    $('#optCompleteBanner').classList.remove('visible');
 
     goToStep(1);
 });

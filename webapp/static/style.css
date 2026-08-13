@@ -488,6 +488,7 @@ input[type="number"]:focus {
     cursor: pointer;
     transition: opacity var(--transition-fast), transform var(--transition-fast);
     text-decoration: none;
+    white-space: nowrap;
 }
 
 .btn-primary {
@@ -781,6 +782,33 @@ input[type="number"]:focus {
     50% {
         opacity: 1;
     }
+}
+
+/* ─── Optimization Complete Text ─── */
+.opt-complete-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-right: auto;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.opt-complete-inline.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.opt-complete-icon {
+    font-size: 1.2rem;
+}
+
+.opt-complete-text {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--accent-teal);
+    font-family: 'Inter', sans-serif;
 }
 
 /* ─── Download Buttons ─── */
