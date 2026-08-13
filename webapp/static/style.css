@@ -740,16 +740,20 @@ input[type="number"]:focus {
 }
 
 .opt-status-text {
-    font-size: 0.82rem;
+    font-size: 0.9rem;
+    font-weight: 600;
     color: var(--text-secondary);
     font-family: 'JetBrains Mono', monospace;
 }
 
 @keyframes statusPulse {
-    0%, 100% {
+
+    0%,
+    100% {
         opacity: 0.4;
         transform: scale(0.85);
     }
+
     50% {
         opacity: 1;
         transform: scale(1);
