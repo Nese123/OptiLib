@@ -43,6 +43,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             goToStep(3);
             await loadDatasetInfo();
             showOptCompleteBanner(optState.generation || '?');
+            // Restore the optimization progress history chart
+            if (optState.history && optState.history.length > 0) {
+                initHistoryChart();
+                updateHistoryChart(optState.history);
+            }
         } else if (optState.status === 'running') {
             goToStep(3);
             await loadDatasetInfo();
