@@ -628,7 +628,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         final_export_df = final_export_df[meta_cols + cols]
 
         # Save matrix as CSV (fast) — Excel generated lazily on download
-        _update_pipeline(3, "Saving matrix...", "Saving CSV matrix...")
+        _update_pipeline(3, "Saving matrix...", "Saving matrix...")
         
         final_export_df.to_csv(matrix_file, index=False)
 
