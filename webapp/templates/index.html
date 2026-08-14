@@ -149,7 +149,7 @@
         <!-- ═══════════════════════════════════════════════════════ -->
         <section class="step-section" id="step-2">
             <div class="card">
-                <h2 class="card-title"><span class="icon">⚙️</span> Building Selectivity Matrix</h2>
+                <h2 class="card-title" id="matrixTitle"><span class="icon">⚙️</span> Building Selectivity Matrix</h2>
 
                 <div class="pipeline-steps" id="pipelineSteps">
                     <div class="pipeline-step" data-pipeline="1">
@@ -245,6 +245,13 @@
                             <span>0.0</span>
                             <span>1.0</span>
                         </div>
+                    </div>
+
+                    <!-- Final Selectivity Score Formula -->
+                    <div class="form-group" style="grid-column: 1 / -1; background: var(--bg-tertiary, rgba(255,255,255,0.03)); border-radius: 8px; padding: 10px 14px; margin-top: 4px;">
+                        <p id="selectivityFormula" style="margin: 0; font-size: 0.82rem; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; line-height: 1.5;">
+                            Final Selectivity Score Used By Algorithm: <strong style="color: var(--text-primary);"><span id="formulaWeightMean">0.5</span></strong> × Mean Selectivity + <strong style="color: var(--text-primary);"><span id="formulaWeightMin">0.5</span></strong> × Min Selectivity
+                        </p>
                     </div>
 
                     <!-- Allowed Miss % -->

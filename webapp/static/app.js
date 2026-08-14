@@ -502,6 +502,9 @@ function resetPipelineUI() {
     $('#pipelineError').style.display = 'none';
     $('#goToConfigBtn').disabled = true;
 
+    // Reset title
+    $('#matrixTitle').innerHTML = '<span class="icon">⚙️</span> Building Selectivity Matrix';
+
     // Clear detail texts
     $$('[data-detail]').forEach((d) => d.textContent = '');
 }
@@ -561,6 +564,9 @@ function updatePipelineUI(data) {
         if (lastDetail && data.detail) lastDetail.textContent = data.detail;
 
         $('#goToConfigBtn').disabled = false;
+
+        // Update title to indicate completion
+        $('#matrixTitle').innerHTML = '<span class="icon">✅</span> Selectivity Matrix Complete';
     }
 
     if (data.status === 'error') {
@@ -656,12 +662,21 @@ function updateHistoryChart(history) {
     }
 }
 
+// Formula display helper
+function updateFormula() {
+    const fMean = document.getElementById('formulaWeightMean');
+    const fMin = document.getElementById('formulaWeightMin');
+    if (fMean) fMean.textContent = parseFloat(weightMean.value).toFixed(1);
+    if (fMin) fMin.textContent = parseFloat(weightMin.value).toFixed(1);
+}
+
 // Slider displays
 weightMean.addEventListener('input', () => {
     let val = parseFloat(weightMean.value);
     weightMeanValue.value = val.toFixed(1);
     weightMin.value = (1 - val).toFixed(1);
     weightMinValue.value = (1 - val).toFixed(1);
+    updateFormula();
 });
 
 weightMeanValue.addEventListener('input', () => {
@@ -670,6 +685,7 @@ weightMeanValue.addEventListener('input', () => {
         weightMean.value = val.toFixed(1);
         weightMin.value = (1 - val).toFixed(1);
         weightMinValue.value = (1 - val).toFixed(1);
+        updateFormula();
     }
 });
 
@@ -681,6 +697,7 @@ weightMeanValue.addEventListener('change', () => {
         weightMean.value = val.toFixed(1);
         weightMin.value = (1 - val).toFixed(1);
         weightMinValue.value = (1 - val).toFixed(1);
+        updateFormula();
     }
 });
 
@@ -689,6 +706,7 @@ weightMin.addEventListener('input', () => {
     weightMinValue.value = val.toFixed(1);
     weightMean.value = (1 - val).toFixed(1);
     weightMeanValue.value = (1 - val).toFixed(1);
+    updateFormula();
 });
 
 weightMinValue.addEventListener('input', () => {
@@ -697,6 +715,7 @@ weightMinValue.addEventListener('input', () => {
         weightMin.value = val.toFixed(1);
         weightMean.value = (1 - val).toFixed(1);
         weightMeanValue.value = (1 - val).toFixed(1);
+        updateFormula();
     }
 });
 
@@ -708,6 +727,7 @@ weightMinValue.addEventListener('change', () => {
         weightMin.value = val.toFixed(1);
         weightMean.value = (1 - val).toFixed(1);
         weightMeanValue.value = (1 - val).toFixed(1);
+        updateFormula();
     }
 });
 
