@@ -248,9 +248,14 @@
                     </div>
 
                     <!-- Final Selectivity Score Formula -->
-                    <div class="form-group" style="grid-column: 1 / -1; background: var(--bg-tertiary, rgba(255,255,255,0.03)); border-radius: 8px; padding: 10px 14px; margin-top: 4px;">
-                        <p id="selectivityFormula" style="margin: 0; font-size: 0.82rem; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; line-height: 1.5;">
-                            Final Selectivity Score Used By Algorithm: <strong style="color: var(--text-primary);"><span id="formulaWeightMean">0.5</span></strong> × Mean Selectivity + <strong style="color: var(--text-primary);"><span id="formulaWeightMin">0.5</span></strong> × Min Selectivity
+                    <div class="form-group"
+                        style="grid-column: 1 / -1; background: var(--bg-tertiary, rgba(255,255,255,0.03)); border-radius: 8px; padding: 10px 14px; margin-top: 4px;">
+                        <p id="selectivityFormula"
+                            style="margin: 0; font-size: 0.82rem; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; line-height: 1.5;">
+                            Final Selectivity Score Used By Algorithm: <strong style="color: var(--text-primary);"><span
+                                    id="formulaWeightMean">0.5</span></strong> × Mean Selectivity + <strong
+                                style="color: var(--text-primary);"><span id="formulaWeightMin">0.5</span></strong> ×
+                            Min Selectivity
                         </p>
                     </div>
 
@@ -335,6 +340,10 @@
                             class="info-icon"
                             data-tooltip="Tracks how the optimization objectives evolve over generations. The top plot shows the best selectivity score found so far (higher is better), and the bottom plot shows the lowest cost found so far (lower is better). Flattening curves indicate the algorithm is converging on an optimal trade-off.">?</span>
                     </h3>
+                    <p
+                        style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
+                        <span style="margin-right: 0.3rem;">🔍</span>Click and drag to zoom (double-click to reset)
+                    </p>
                     <div class="chart-container" id="historyChart" style="height: 350px;"></div>
                     <div class="opt-status-indicator" id="optStatusIndicator"
                         style="visibility: hidden; margin-top: 0.25rem; padding-top: 0.25rem;">
@@ -388,7 +397,9 @@
                     </h2>
                     <p
                         style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
-                        <span style="margin-right: 0.3rem;">👆</span>Click a Solution to Select It
+                        <span style="margin-right: 0.3rem;">👆</span>Click a Solution to Select It <span
+                            style="margin: 0 0.5rem; opacity: 0.5;">•</span> <span
+                            style="margin-right: 0.3rem;">🔍</span>Click and drag to zoom (double-click to reset)
                     </p>
                     <div class="chart-container" id="paretoChart" style="height: 420px;"></div>
                 </div>
@@ -441,6 +452,10 @@
                     <h2 class="card-title"><span class="icon">🗺️</span> Selectivity Heatmap <span class="info-icon"
                             data-tooltip="Visualizes the selectivity score for each target across the chosen library. Brighter colors indicate higher selectivity for that specific target.">?</span>
                     </h2>
+                    <p
+                        style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
+                        <span style="margin-right: 0.3rem;">🔍</span>Click and drag to zoom (double-click to reset)
+                    </p>
                     <div style="position: relative;">
                         <div class="chart-container" id="heatmapChart" style="height: 500px;"></div>
                         <div
@@ -458,6 +473,10 @@
                             class="info-icon"
                             data-tooltip="Shows the frequency distribution of selectivity scores across all targets. A distribution shifted to the right indicates the library covers many targets with high selectivity.">?</span>
                     </h2>
+                    <p
+                        style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
+                        <span style="margin-right: 0.3rem;">🔍</span>Click and drag to zoom (double-click to reset)
+                    </p>
                     <div class="chart-container" id="distributionChart" style="height: 420px;"></div>
                 </div>
 
