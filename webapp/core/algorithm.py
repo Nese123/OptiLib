@@ -291,9 +291,11 @@ def select_best_solution(res, problem):
     front_for_plotting = front.copy()
 
     # Initialize the Scatter plot
+    w_mean = round(float(problem.weight_mean), 4) if hasattr(problem, "weight_mean") else 0.5
+    w_min = round(float(problem.weight_min), 4) if hasattr(problem, "weight_min") else 0.5
     plot = Scatter(
         title="Pareto Front",
-        labels=["Selectivity Score (weight_mean * mean selectivity + weight_min * min selectivity)", "Total Library Cost"]
+        labels=[f"Selectivity Score ({w_mean} * Mean Selectivity + {w_min} * Min Selectivity)", "Total Library Cost"]
     )
     plot.add(front_for_plotting, color="green", facecolor="none", s=40)
 

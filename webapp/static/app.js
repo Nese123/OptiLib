@@ -1067,6 +1067,12 @@ async function loadParetoChart() {
         const bestIdx = data.best_idx;
         const selectedIdx = data.selected_idx !== undefined ? data.selected_idx : bestIdx;
 
+        const weightMeanVal = data.weight_mean !== undefined ? data.weight_mean : (parseFloat($('#weightMean')?.value) || 0.5);
+        const weightMinVal = data.weight_min !== undefined ? data.weight_min : (parseFloat($('#weightMin')?.value) || 0.5);
+        const wMean = Number(Number(weightMeanVal).toFixed(4));
+        const wMin = Number(Number(weightMinVal).toFixed(4));
+        const xAxisTitle = `Selectivity Score (${wMean} * Mean Selectivity + ${wMin} * Min Selectivity)`;
+
         const x = points.map((p) => p[0]);  // Selectivity Score (weight_mean * mean selectivity + weight_min * min selectivity)
         const y = points.map((p) => p[1]);  // Cost
 
@@ -1145,9 +1151,10 @@ async function loadParetoChart() {
             plot_bgcolor: 'rgba(0,0,0,0.15)',
             font: { family: 'Inter, sans-serif', color: '#9898b8' },
             xaxis: {
-                title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' } },
+                title: { text: xAxisTitle, font: { size: 13, color: '#9898b8' } },
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
                 zerolinecolor: 'rgba(120, 120, 255, 0.12)',
+                automargin: true,
             },
             yaxis: {
                 title: { text: 'Total Library Cost (USD)', font: { size: 13, color: '#9898b8' }, standoff: 20 },

@@ -153,6 +153,8 @@ opt_results = {
     "res_F": None,              # Objective values (pop × 2)
     "problem": None,            # DrugLibraryProblem instance
     "heatmap_cache": None,      # Cached JSON-ready heatmap dict
+    "weight_mean": None,
+    "weight_min": None,
 }
 
 # Thread lock for state access
@@ -766,6 +768,8 @@ def reset_state():
             "res_F": None,
             "problem": None,
             "heatmap_cache": None,
+            "weight_mean": None,
+            "weight_min": None,
         })
     # We no longer clear the global cache files on reset, as they are cached by parameters.
     return jsonify({"status": "reset"})
@@ -924,6 +928,8 @@ def _process_and_store_results(res_X, res_F, best_idx, front, problem):
         opt_results["res_F"] = res_F
         opt_results["problem"] = problem
         opt_results["heatmap_cache"] = _build_heatmap_cache(winning_matrix_df)
+        opt_results["weight_mean"] = round(float(problem.weight_mean), 4) if hasattr(problem, "weight_mean") else 0.5
+        opt_results["weight_min"] = round(float(problem.weight_min), 4) if hasattr(problem, "weight_min") else 0.5
 
 
 def _build_comparison(winning_matrix_df, problem):
@@ -1023,10 +1029,24 @@ def pareto_data():
         front = opt_results["pareto_front"]
         best = opt_results["best_idx"]
         selected = opt_results.get("selected_idx", best)
+        problem = opt_results.get("problem")
+        weight_mean = opt_results.get("weight_mean")
+        if weight_mean is None and problem and hasattr(problem, "weight_mean"):
+            weight_mean = round(float(problem.weight_mean), 4)
+        elif weight_mean is None:
+            weight_mean = 0.5
+
+        weight_min = opt_results.get("weight_min")
+        if weight_min is None and problem and hasattr(problem, "weight_min"):
+            weight_min = round(float(problem.weight_min), 4)
+        elif weight_min is None:
+            weight_min = 0.5
     return jsonify({
         "points": front,
         "best_idx": best,
         "selected_idx": selected,
+        "weight_mean": weight_mean,
+        "weight_min": weight_min,
     })
 
 
