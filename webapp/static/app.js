@@ -40,13 +40,19 @@ window.addEventListener('DOMContentLoaded', async () => {
         const datasetState = await datasetRes.json();
 
         if (optState.status === 'complete') {
-            goToStep(3);
-            await loadDatasetInfo();
-            showOptCompleteBanner(optState.generation || '?');
-            // Restore the optimization progress history chart
-            if (optState.history && optState.history.length > 0) {
-                initHistoryChart();
-                updateHistoryChart(optState.history);
+            const savedStep = sessionStorage.getItem('currentStep');
+            if (savedStep === '4') {
+                goToStep(4);
+                await loadResults();
+            } else {
+                goToStep(3);
+                await loadDatasetInfo();
+                showOptCompleteBanner(optState.generation || '?');
+                // Restore the optimization progress history chart
+                if (optState.history && optState.history.length > 0) {
+                    initHistoryChart();
+                    updateHistoryChart(optState.history);
+                }
             }
         } else if (optState.status === 'running') {
             goToStep(3);
