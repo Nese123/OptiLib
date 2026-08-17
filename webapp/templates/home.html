@@ -175,8 +175,8 @@
                         <h3 class="viz-title">Pareto Front</h3>
                         <p class="viz-description">
                             In multi-objective drug library optimization, no single compound combination is universally
-                            superior in both selectivity and budget. OptiLib constructs a <strong>Pareto front</strong>
-                            — a set of mathematically optimal, non-dominated trade-off solutions where selectivity
+                            superior in both selectivity and budget. OptiLib constructs a <strong>Pareto front</strong>,
+                            a set of mathematically optimal trade-off solutions where selectivity
                             cannot be improved without increasing cost.
                         </p>
                         <ul class="viz-features">
@@ -188,7 +188,7 @@
                             <li>
                                 <span class="viz-feat-dot"></span>
                                 <div><strong>Interactive Solution Selection:</strong> Click any point on the curve to
-                                    dynamically switch the active library, inspect its compound roster, and compare
+                                    dynamically switch the active library, inspect its compounds, and compare
                                     quality metrics against the full compound pool.</div>
                             </li>
                             <li>
@@ -214,27 +214,27 @@
                     <div class="viz-info">
                         <h3 class="viz-title">Selectivity Heatmap</h3>
                         <p class="viz-description">
-                            The selectivity heatmap provides a comprehensive 2D matrix mapping every compound in your
-                            chosen library against all uploaded biological disease targets, allowing you to instantly
-                            assess coverage patterns and selectivity depth.
+                            The selectivity heatmap visualizes the selectivity of each compound against each target in
+                            the chosen library,
+                            allowing you to assess coverage patterns and selectivity depth.
                         </p>
                         <ul class="viz-features">
                             <li>
                                 <span class="viz-feat-dot"></span>
-                                <div><strong>Perceptual Color Mapping:</strong> Uses the continuous <em>Viridis</em>
-                                    colormap where brighter yellow and green hues represent strong target-specific
-                                    selectivity, while darker shades indicate lower affinities.</div>
+                                <div><strong>Clear Color Mapping:</strong> Brighter yellow and green hues represent
+                                    stronger selectivity, while darker shades indicate lower selectivity values.
+                                    Compound-target pairs with no selectivity data are marked with gray.</div>
                             </li>
                             <li>
                                 <span class="viz-feat-dot"></span>
-                                <div><strong>Gap & Redundancy Detection:</strong> Instantly identify which disease
+                                <div><strong>Selectivity Pattern Detection:</strong> Instantly identify which disease
                                     targets are robustly covered by multiple selective molecules and detect any
                                     potential screening blind spots.</div>
                             </li>
                             <li>
                                 <span class="viz-feat-dot"></span>
-                                <div><strong>Granular Cell Inspection:</strong> Hover over individual cells to inspect
-                                    the exact target name, compound ChEMBL ID, and calculated selectivity coefficient.
+                                <div><strong>Interactive Interface:</strong> Hover over individual cells to inspect
+                                    the exact target name, compound ChEMBL ID, and calculated selectivity score.
                                 </div>
                             </li>
                         </ul>
@@ -266,7 +266,7 @@
                         <ul class="viz-features">
                             <li>
                                 <span class="viz-feat-dot"></span>
-                                <div><strong>Three-Tiered Metric Bars:</strong> Overlaid bars display the
+                                <div><strong>Selectivity Metric Bars:</strong> Overlaid bars display the
                                     <strong>Maximum</strong> (purple), <strong>Median</strong> (blue), and
                                     <strong>Minimum</strong> (teal) selectivity scores achieved for each target.
                                 </div>
@@ -769,16 +769,16 @@
             const targets = ['EGFR', 'BRAF', 'ERBB2', 'PIK3CA', 'CDK4', 'MTOR', 'JAK2', 'ALK', 'MET', 'KDR'];
             const compounds = ['CHEMBL25', 'CHEMBL1800', 'CHEMBL278', 'CHEMBL428', 'CHEMBL192', 'CHEMBL554', 'CHEMBL392', 'CHEMBL762', 'CHEMBL901', 'CHEMBL1122'];
             const matrix = [
-                [ 1.85,  0.42, -0.30,   null,  0.30,  0.55,  0.40,  1.45, -0.20,  0.88],
-                [-0.35,  1.92, -0.55,  0.85,   null,  0.40,  1.30,  null, -0.50, -0.70],
-                [ 1.70,  null,  1.88, -0.45,  0.60,  0.70,  null,  1.35, -0.30,  0.95],
-                [ 0.40,  0.55, -0.60,  1.75,  0.50,  1.40,  0.45,  null,  0.90, -0.35],
-                [-0.50,  null, -0.45,  0.35,  1.82,  0.60,  0.50,  0.45,  null, -0.40],
-                [ 0.60,  0.45, -0.35,  1.35,  0.40,  1.95,  0.35,  0.50,  0.85, -0.60],
-                [ null,  1.25, -0.40, -0.30,  0.65,  0.60,  1.80,  0.60, -0.65, -0.45],
-                [ 1.40,  null,  1.30,  0.45,  0.35,  0.50,  0.40,  1.90, -0.60,  0.80],
-                [-0.20,  0.80,  0.90, -0.45,  0.45,  0.90,  0.65,  1.15,  1.75, -0.50],
-                [ 0.90,  0.35,  0.85,  0.40,  0.50,  0.70,  0.25,  0.75, -0.40,  1.85]
+                [1.85, 0.42, -0.30, null, 0.30, 0.55, 0.40, 1.45, -0.20, 0.88],
+                [-0.35, 1.92, -0.55, 0.85, null, 0.40, 1.30, null, -0.50, -0.70],
+                [1.70, null, 1.88, -0.45, 0.60, 0.70, null, 1.35, -0.30, 0.95],
+                [0.40, 0.55, -0.60, 1.75, 0.50, 1.40, 0.45, null, 0.90, -0.35],
+                [-0.50, null, -0.45, 0.35, 1.82, 0.60, 0.50, 0.45, null, -0.40],
+                [0.60, 0.45, -0.35, 1.35, 0.40, 1.95, 0.35, 0.50, 0.85, -0.60],
+                [null, 1.25, -0.40, -0.30, 0.65, 0.60, 1.80, 0.60, -0.65, -0.45],
+                [1.40, null, 1.30, 0.45, 0.35, 0.50, 0.40, 1.90, -0.60, 0.80],
+                [-0.20, 0.80, 0.90, -0.45, 0.45, 0.90, 0.65, 1.15, 1.75, -0.50],
+                [0.90, 0.35, 0.85, 0.40, 0.50, 0.70, 0.25, 0.75, -0.40, 1.85]
             ];
 
             const hoverText = matrix.map(row =>
