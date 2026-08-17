@@ -219,7 +219,7 @@
                     <div class="form-group">
                         <div class="label-row">
                             <label>Weight of Mean Selectivity <span class="info-icon"
-                                    data-tooltip="Determines how much the algorithm ephasizes the mean selectivity of the library opposed to the minimum selectivity. The default value, 0.5, weights mean and min selectivity equally.">?</span></label>
+                                    data-tooltip="Determines how much the algorithm emphasizes the mean selectivity of the library opposed to the minimum selectivity. The default value, 0.5, weights mean and min selectivity equally.">?</span></label>
                             <input type="number" class="value-display-input" id="weightMeanValue" value="0.5" step="0.1"
                                 min="0" max="1">
                         </div>
@@ -252,9 +252,10 @@
                         style="grid-column: 1 / -1; background: var(--bg-tertiary, rgba(255,255,255,0.03)); border-radius: 8px; padding: 10px 14px; margin-top: 4px;">
                         <p id="selectivityFormula"
                             style="margin: 0; font-size: 0.82rem; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; line-height: 1.5;">
-                            Final Selectivity Score Used By Algorithm: <strong style="color: var(--text-primary);"><span
-                                    id="formulaWeightMean">0.5</span></strong> × Mean Selectivity + <strong
-                                style="color: var(--text-primary);"><span id="formulaWeightMin">0.5</span></strong> ×
+                            Final Selectivity Score Used By The Algorithm: <strong
+                                style="color: var(--text-primary);"><span id="formulaWeightMean">0.5</span></strong> ×
+                            Mean Selectivity + <strong style="color: var(--text-primary);"><span
+                                    id="formulaWeightMin">0.5</span></strong> ×
                             Min Selectivity
                         </p>
                     </div>
@@ -262,7 +263,7 @@
                     <!-- Allowed Miss % -->
                     <div class="form-group">
                         <div class="label-row">
-                            <label>Max percentage of missing targets<span class="info-icon"
+                            <label>Max Percentage of Missing Targets<span class="info-icon"
                                     data-tooltip="The maximum percentage of inputted targets that are allowed to have no active compounds in the final optimized library. The default value is 10 %, meaning that the final library has to have compounds for at least 90 % of the original targets.">?</span></label>
                             <div style="display: flex; align-items: center; gap: 4px;">
                                 <input type="number" class="value-display-input" id="allowedMissValue" value="10"

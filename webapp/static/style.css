@@ -1288,6 +1288,194 @@ input[type="number"]:focus {
 
 
 /* ═══════════════════════════════════════════════════════════════
+   Visualization Showcase
+   ═══════════════════════════════════════════════════════════════ */
+
+.viz-showcase {
+    display: flex;
+    flex-direction: column;
+    gap: 5.5rem;
+}
+
+.viz-item {
+    display: grid;
+    grid-template-columns: 1fr 1.15fr;
+    gap: 2.5rem;
+    align-items: start;
+}
+
+.viz-item.viz-reverse {
+    grid-template-columns: 1.15fr 1fr;
+}
+
+.viz-item.viz-reverse .viz-info {
+    order: 2;
+}
+
+.viz-item.viz-reverse .viz-plot-card {
+    order: 1;
+}
+
+.viz-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding-top: 0.25rem;
+}
+
+.viz-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.9rem;
+    background: rgba(18, 243, 185, 0.08);
+    border: 1px solid rgba(18, 243, 185, 0.2);
+    border-radius: 50px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--accent-teal);
+    width: fit-content;
+}
+
+.viz-badge-purple {
+    background: rgba(157, 124, 255, 0.1);
+    border-color: rgba(157, 124, 255, 0.25);
+    color: var(--accent-purple);
+}
+
+.viz-badge-blue {
+    background: rgba(50, 196, 255, 0.1);
+    border-color: rgba(50, 196, 255, 0.25);
+    color: var(--accent-blue);
+}
+
+.viz-badge-icon {
+    font-size: 0.95rem;
+    display: inline-flex;
+    align-items: center;
+}
+
+.viz-title {
+    font-size: 1.85rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    line-height: 1.25;
+}
+
+.viz-description {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+.viz-features {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.viz-features li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.viz-features li strong {
+    color: var(--text-primary);
+}
+
+.viz-features li em {
+    color: var(--accent-teal);
+    font-style: normal;
+    font-weight: 500;
+}
+
+.viz-feat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--gradient-primary);
+    margin-top: 0.45rem;
+    flex-shrink: 0;
+}
+
+.viz-plot-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-card);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    box-shadow: var(--shadow-card);
+    transition: border-color var(--transition-fast), transform var(--transition-fast);
+    position: relative;
+}
+
+.viz-plot-card:hover {
+    border-color: var(--border-active);
+}
+
+.viz-plot-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.viz-plot-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.viz-plot-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.viz-nodata-badge {
+    position: absolute;
+    bottom: 8px;
+    right: 12px;
+    color: #9898b8;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(15, 15, 29, 0.85);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(120, 120, 255, 0.15);
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.viz-nodata-box {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid #9898b8;
+    border-radius: 2px;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
    Features Grid
    ═══════════════════════════════════════════════════════════════ */
 
@@ -1324,7 +1512,16 @@ input[type="number"]:focus {
 }
 
 .feature-icon {
-    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-teal);
+}
+
+.feature-icon svg {
+    width: 24px;
+    height: 24px;
+    stroke: var(--accent-teal);
 }
 
 .feature-card h3 {
@@ -1437,8 +1634,17 @@ input[type="number"]:focus {
 }
 
 .algo-flow-icon {
-    font-size: 1.2rem;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-teal);
+}
+
+.algo-flow-icon svg {
+    width: 18px;
+    height: 18px;
+    stroke: var(--accent-teal);
 }
 
 .algo-flow-label {
@@ -1704,6 +1910,33 @@ input[type="number"]:focus {
 
     .section-header {
         margin-bottom: 2.5rem;
+    }
+
+    /* Visualizations mobile */
+    .viz-showcase {
+        gap: 4rem;
+    }
+
+    .viz-item,
+    .viz-item.viz-reverse {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+
+    .viz-item.viz-reverse .viz-info {
+        order: 1;
+    }
+
+    .viz-item.viz-reverse .viz-plot-card {
+        order: 2;
+    }
+
+    .viz-title {
+        font-size: 1.5rem;
+    }
+
+    .viz-plot-card {
+        padding: 1rem;
     }
 
     /* Features mobile */
