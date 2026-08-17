@@ -851,7 +851,7 @@
                 { target: 'MET', max: 1.75, median: -0.25, min: -0.65 }
             ];
 
-            const x = stats.map(s => s.target);
+            const x = stats.map((_, i) => i);
             const hoverTemplate = '<b>%{customdata[3]}</b><br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
             const customData = stats.map(s => [s.max, s.median, s.min, s.target]);
 
@@ -895,12 +895,15 @@
                 font: { family: 'Inter, sans-serif', color: '#9898b8' },
                 xaxis: {
                     title: { text: 'Targets', font: { size: 12, color: '#9898b8' }, standoff: 15 },
+                    tickvals: stats.map((_, i) => i),
+                    ticktext: stats.map(s => s.target),
                     gridcolor: 'rgba(120, 120, 255, 0.08)',
+                    range: [-0.85, stats.length - 0.15],
                     automargin: true,
                     fixedrange: true,
                 },
                 yaxis: {
-                    title: { text: 'Selectivity Score', font: { size: 12, color: '#9898b8' }, standoff: 15 },
+                    title: { text: 'Selectivity Score', font: { size: 12, color: '#9898b8' }, standoff: 5 },
                     gridcolor: 'rgba(120, 120, 255, 0.08)',
                     zeroline: true,
                     zerolinecolor: 'rgba(255, 255, 255, 0.45)',
@@ -917,7 +920,7 @@
                     xanchor: 'right',
                     yanchor: 'top',
                 },
-                margin: { l: 60, r: 25, t: 20, b: 65 },
+                margin: { l: 50, r: 25, t: 20, b: 65 },
                 hovermode: 'closest',
             };
 

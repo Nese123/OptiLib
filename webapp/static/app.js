@@ -1413,7 +1413,7 @@ async function loadDistributionChart(prefetchedData) {
                 range: [-0.5, stats.length - 0.5]
             },
             yaxis: {
-                title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' }, standoff: 15 },
+                title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' }, standoff: 5 },
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
                 zerolinecolor: 'rgba(255, 255, 255, 0.45)',
                 zerolinewidth: 2,
@@ -1427,7 +1427,7 @@ async function loadDistributionChart(prefetchedData) {
                 bordercolor: 'rgba(120,120,255,0.1)',
                 borderwidth: 1
             },
-            margin: { l: 80, r: 30, t: 20, b: 60 },
+            margin: { l: 55, r: 30, t: 20, b: 60 },
             hovermode: 'closest'
         };
 
