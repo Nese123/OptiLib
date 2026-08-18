@@ -1449,20 +1449,14 @@ input[type="number"]:focus {
 
 .viz-nodata-badge {
     position: absolute;
-    bottom: 8px;
-    right: 12px;
+    bottom: 20px;
+    right: 9px;
     color: #9898b8;
     font-size: 11px;
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(15, 15, 29, 0.85);
-    padding: 3px 8px;
-    border-radius: 4px;
-    border: 1px solid rgba(120, 120, 255, 0.15);
     pointer-events: none;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
 }
 
 .viz-nodata-box {
@@ -3344,4 +3338,33 @@ input[type="number"]:focus {
     .reference-item {
         font-size: 0.85rem;
     }
+}
+
+/* ─── Heatmap Vertical Compound Slider ─── */
+.heatmap-vslider-container {
+    user-select: none;
+    position: relative;
+    width: 100%;
+    overflow: visible;
+}
+
+.heatmap-vertical-slider {
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) rotate(90deg) !important;
+    transform-origin: center center !important;
+    height: 6px !important;
+    cursor: pointer !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: rgba(255, 255, 255, 0.3) !important;
+    outline: none !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+}
+
+.heatmap-vertical-slider::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
 }

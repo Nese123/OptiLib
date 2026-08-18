@@ -7,7 +7,7 @@
     <meta name="description"
         content="OptiLib — An intelligent drug library optimization platform using NSGA-II to maximize target selectivity while minimizing cost.">
     <title>OptiLib — Drug Library Optimization</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=1.1">
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%%22 y=%2250%%22 dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2280%22>💊</text></svg>">
@@ -1009,20 +1009,7 @@
             const chartEl = document.getElementById('demoHeatmapChart');
             if (!chartEl) return;
 
-            const targetDetails = [
-                { symbol: 'EGFR', name: 'Epidermal growth factor receptor' },
-                { symbol: 'BRAF', name: 'B-Raf proto-oncogene, serine/threonine kinase' },
-                { symbol: 'ERBB2', name: 'Erb-B2 receptor tyrosine kinase 2' },
-                { symbol: 'PIK3CA', name: 'Phosphatidylinositol-4,5-bisphosphate 3-kinase catalytic subunit alpha' },
-                { symbol: 'CDK4', name: 'Cyclin-dependent kinase 4' },
-                { symbol: 'MTOR', name: 'Mechanistic target of rapamycin kinase' },
-                { symbol: 'JAK2', name: 'Janus kinase 2' },
-                { symbol: 'ALK', name: 'ALK receptor tyrosine kinase' },
-                { symbol: 'MET', name: 'MET proto-oncogene, receptor tyrosine kinase' },
-                { symbol: 'KDR', name: 'Kinase insert domain receptor' }
-            ];
-            const targets = targetDetails.map(t => t.symbol);
-            const targetNames = targetDetails.map(t => `${t.name} (${t.symbol})`);
+            const targets = ['EGFR', 'BRAF', 'ERBB2', 'PIK3CA', 'CDK4', 'MTOR', 'JAK2', 'ALK', 'MET', 'KDR'];
             const compounds = ['CHEMBL25', 'CHEMBL1800', 'CHEMBL278', 'CHEMBL428', 'CHEMBL192', 'CHEMBL554', 'CHEMBL392', 'CHEMBL762', 'CHEMBL901', 'CHEMBL1122'];
             const matrix = [
                 [1.85, 0.42, -0.30, null, 0.30, 0.55, 0.40, 1.45, -0.20, 0.88],
@@ -1042,7 +1029,7 @@
             );
 
             const customData = matrix.map((row, i) =>
-                row.map((_, j) => [compounds[i], targetNames[j]])
+                row.map((_, j) => [compounds[i], targets[j]])
             );
 
             const trace = {
@@ -1055,9 +1042,12 @@
                 colorscale: 'Viridis',
                 hovertemplate: 'Target: %{customdata[1]}<br>Compound: %{customdata[0]}<br>Selectivity: %{text}<extra></extra>',
                 colorbar: {
-                    title: { text: 'Selectivity', font: { size: 11, color: '#9898b8' } },
                     tickfont: { color: '#9898b8', size: 10 },
                     len: 0.9,
+                    thickness: 18,
+                    x: 1.04,
+                    xanchor: 'left',
+                    xpad: 0,
                 },
             };
 
@@ -1079,7 +1069,23 @@
                     automargin: true,
                     fixedrange: true,
                 },
-                margin: { l: 85, r: 35, t: 60, b: 45 },
+                margin: { l: 85, r: 80, t: 60, b: 45 },
+                dragmode: false,
+                annotations: [
+                    {
+                        text: 'Selectivity',
+                        font: { family: 'Inter, sans-serif', size: 11, color: '#9898b8' },
+                        xref: 'paper',
+                        yref: 'paper',
+                        x: 1.04,
+                        y: 0.95,
+                        yshift: 2,
+                        xanchor: 'center',
+                        xshift: 9,
+                        yanchor: 'bottom',
+                        showarrow: false,
+                    }
+                ],
             };
 
             Plotly.newPlot('demoHeatmapChart', [trace], layout, {
@@ -1095,21 +1101,21 @@
             if (!chartEl) return;
 
             const stats = [
-                { target: 'MTOR', fullName: 'Mechanistic target of rapamycin kinase', max: 1.95, median: 0.85, min: 0.40 },
-                { target: 'BRAF', fullName: 'B-Raf proto-oncogene, serine/threonine kinase', max: 1.92, median: 0.75, min: 0.35 },
-                { target: 'ALK', fullName: 'ALK receptor tyrosine kinase', max: 1.90, median: 1.10, min: 0.45 },
-                { target: 'ERBB2', fullName: 'Erb-B2 receptor tyrosine kinase 2', max: 1.88, median: 0.20, min: -0.60 },
-                { target: 'EGFR', fullName: 'Epidermal growth factor receptor', max: 1.85, median: 0.30, min: -0.50 },
-                { target: 'KDR', fullName: 'Kinase insert domain receptor', max: 1.85, median: -0.20, min: -0.70 },
-                { target: 'CDK4', fullName: 'Cyclin-dependent kinase 4', max: 1.82, median: 0.65, min: 0.30 },
-                { target: 'JAK2', fullName: 'Janus kinase 2', max: 1.80, median: 0.55, min: 0.25 },
-                { target: 'PIK3CA', fullName: 'Phosphatidylinositol-4,5-bisphosphate 3-kinase catalytic subunit alpha', max: 1.75, median: 0.10, min: -0.45 },
-                { target: 'MET', fullName: 'MET proto-oncogene, receptor tyrosine kinase', max: 1.75, median: -0.25, min: -0.65 }
+                { target: 'MTOR', max: 1.95, median: 0.85, min: 0.40 },
+                { target: 'BRAF', max: 1.92, median: 0.75, min: 0.35 },
+                { target: 'ALK', max: 1.90, median: 1.10, min: 0.45 },
+                { target: 'ERBB2', max: 1.88, median: 0.20, min: -0.60 },
+                { target: 'EGFR', max: 1.85, median: 0.30, min: -0.50 },
+                { target: 'KDR', max: 1.85, median: -0.20, min: -0.70 },
+                { target: 'CDK4', max: 1.82, median: 0.65, min: 0.30 },
+                { target: 'JAK2', max: 1.80, median: 0.55, min: 0.25 },
+                { target: 'PIK3CA', max: 1.75, median: 0.10, min: -0.45 },
+                { target: 'MET', max: 1.75, median: -0.25, min: -0.65 }
             ];
 
             const x = stats.map((_, i) => i);
-            const hoverTemplate = '<b>%{customdata[4]}</b> (%{customdata[3]})<br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
-            const customData = stats.map(s => [s.max, s.median, s.min, s.target, s.fullName]);
+            const hoverTemplate = '<b>%{customdata[3]}</b><br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
+            const customData = stats.map(s => [s.max, s.median, s.min, s.target]);
 
             const traceMax = {
                 x: x,
@@ -1171,12 +1177,12 @@
                     bgcolor: 'rgba(0,0,0,0.4)',
                     bordercolor: 'rgba(120,120,255,0.15)',
                     borderwidth: 1,
-                    x: 0.98,
-                    y: 0.98,
-                    xanchor: 'right',
+                    x: 1.02,
+                    xanchor: 'left',
+                    y: 1,
                     yanchor: 'top',
                 },
-                margin: { l: 50, r: 25, t: 20, b: 65 },
+                margin: { l: 50, r: 90, t: 20, b: 65 },
                 hovermode: 'closest',
             };
 

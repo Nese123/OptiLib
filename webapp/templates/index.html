@@ -7,7 +7,7 @@
     <meta name="description"
         content="NSGA-II Drug Library Optimization — Upload disease targets, build selectivity matrices, and optimize compound libraries interactively.">
     <title>OptiLib — Optimization Tool</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=1.1">
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%%22 y=%2250%%22 dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2280%22>💊</text></svg>">
@@ -341,10 +341,6 @@
                             class="info-icon"
                             data-tooltip="Tracks how the optimization objectives evolve over generations. The top plot shows the best selectivity score found so far (higher is better), and the bottom plot shows the lowest cost found so far (lower is better). Flattening curves indicate the algorithm is converging on an optimal trade-off.">?</span>
                     </h3>
-                    <p
-                        style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
-                        <span style="margin-right: 0.3rem;">🔍</span>Click and drag to zoom (double-click to reset)
-                    </p>
                     <div class="chart-container" id="historyChart" style="height: 350px;"></div>
                     <div class="opt-status-indicator" id="optStatusIndicator"
                         style="visibility: hidden; margin-top: 0.25rem; padding-top: 0.25rem;">
@@ -453,17 +449,46 @@
                     <h2 class="card-title"><span class="icon">🗺️</span> Selectivity Heatmap <span class="info-icon"
                             data-tooltip="Visualizes the selectivity score for each target across the chosen library. Brighter colors indicate higher selectivity for that specific target.">?</span>
                     </h2>
-                    <p
-                        style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
-                        <span style="margin-right: 0.3rem;">🔍</span>Click and drag to zoom (double-click to reset)
-                    </p>
-                    <div style="position: relative;">
-                        <div class="chart-container" id="heatmapChart" style="height: 500px;"></div>
-                        <div
-                            style="position: absolute; bottom: 15px; right: 15px; color: #9898b8; font-size: 11px; display: flex; align-items: center; gap: 6px;">
-                            <span
-                                style="display: inline-block; width: 14px; height: 14px; background: rgba(255,255,255,0.1); border: 1px solid #9898b8; border-radius: 2px;"></span>
-                            = No Data
+                    <!-- Main Heatmap Grid: Target Slider on Top-Right, Drug Slider on Left, Heatmap Chart on Right -->
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 12px 14px; position: relative;">
+                        <!-- 40-Target Window Slider (Heatmap) - Row 1, Col 2 -->
+                        <div id="heatmapTargetSliderWrapper"
+                            style="grid-column: 2; grid-row: 1; display: none; padding: 10px 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-card); border-radius: var(--radius-md);">
+                            <div
+                                style="margin-bottom: 6px; font-size: 0.7rem; color: var(--text-secondary); font-weight: 500; letter-spacing: 0.5px;">
+                                Targets <strong id="heatmapTargetSliderRangeText"
+                                    style="color: var(--text-primary); font-size: 0.78rem;">1–40</strong>
+                            </div>
+                            <input type="range" id="heatmapTargetRangeSlider" min="0" max="75" step="1" value="0"
+                                style="margin: 0; width: 100%;">
+                        </div>
+
+                        <!-- 20-Compound Window Slider (Heatmap) - Row 2, Col 1 -->
+                        <div id="heatmapCompoundSliderWrapper"
+                            style="grid-column: 1; grid-row: 2; display: none; width: 58px; padding: 10px 4px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-card); border-radius: var(--radius-md); flex-direction: column; align-items: center;">
+
+                            <div style="text-align: center; width: 100%; margin-bottom: 6px;">
+                                <div
+                                    style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 500; letter-spacing: 0.5px;">
+                                    Drugs</div>
+                                <strong id="heatmapCompoundSliderRangeText"
+                                    style="color: var(--text-primary); font-size: 0.78rem; display: block; margin-top: 1px; white-space: nowrap;">1–20</strong>
+                            </div>
+
+                            <div id="heatmapVSliderContainer" class="heatmap-vslider-container"
+                                style="flex: 1; width: 100%; min-height: 200px; position: relative; overflow: visible;">
+                                <input type="range" id="heatmapCompoundRangeSlider" min="0" max="75" step="1" value="0"
+                                    class="heatmap-vertical-slider"
+                                    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(90deg); transform-origin: center center; width: 300px; height: 6px; cursor: pointer; margin: 0; padding: 0; background: rgba(255, 255, 255, 0.3); max-width: none;">
+                            </div>
+                        </div>
+
+                        <!-- Heatmap Chart - Row 2, Col 2 -->
+                        <div style="grid-column: 2; grid-row: 2; min-width: 0; position: relative;">
+                            <div class="chart-container" id="heatmapChart" style="height: 360px;"></div>
+                            <div class="viz-nodata-badge">
+                                <span class="viz-nodata-box"></span> = No Data
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -474,11 +499,19 @@
                             class="info-icon"
                             data-tooltip="Shows the frequency distribution of selectivity scores across all targets. A distribution shifted to the right indicates the library covers many targets with high selectivity.">?</span>
                     </h2>
-                    <p
-                        style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 0.5rem; opacity: 0.7;">
-                        <span style="margin-right: 0.3rem;">🔍</span>Click and drag to zoom (double-click to reset)
-                    </p>
                     <div class="chart-container" id="distributionChart" style="height: 420px;"></div>
+
+                    <!-- 40-Target Window Slider (Distribution) -->
+                    <div id="distributionSliderWrapper"
+                        style="display: none; margin-top: 1rem; padding: 10px 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-card); border-radius: var(--radius-md);">
+                        <div
+                            style="margin-bottom: 6px; font-size: 0.7rem; color: var(--text-secondary); font-weight: 500; letter-spacing: 0.5px;">
+                            Targets <strong id="distributionSliderRangeText"
+                                style="color: var(--text-primary); font-size: 0.78rem;">1–40</strong>
+                        </div>
+                        <input type="range" id="distributionRangeSlider" min="0" max="75" step="1" value="0"
+                            style="margin: 0; width: 100%;">
+                    </div>
                 </div>
 
                 <!-- Downloads -->
@@ -536,7 +569,7 @@
             });
         }
     </script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=3.8"></script>
 
 </body>
 

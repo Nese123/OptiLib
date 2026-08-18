@@ -115,6 +115,16 @@ function goToStep(step) {
         }
     }
 
+    // Trigger chart resize in case containers were previously hidden
+    requestAnimationFrame(() => {
+        ['historyChart', 'paretoChart', 'heatmapChart', 'distributionChart'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el && el.data) {
+                Plotly.Plots.resize(el);
+            }
+        });
+    });
+
     // Scroll to top so the new step is visible from the beginning
     window.scrollTo(0, 0);
 }
@@ -629,11 +639,12 @@ function initHistoryChart() {
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         font: { color: '#9898b8', family: 'Inter, sans-serif' },
-        xaxis: { title: 'Generation', gridcolor: 'rgba(255,255,255,0.05)', automargin: true },
-        yaxis: { title: 'Best Selectivity Score', gridcolor: 'rgba(255,255,255,0.05)', color: '#12f3b9', automargin: true },
-        yaxis2: { title: 'Lowest Cost (USD)', overlaying: 'y', side: 'right', color: '#9d7cff', gridcolor: 'rgba(0,0,0,0)', automargin: true },
+        xaxis: { title: 'Generation', gridcolor: 'rgba(255,255,255,0.05)', automargin: true, fixedrange: true },
+        yaxis: { title: 'Best Selectivity Score', gridcolor: 'rgba(255,255,255,0.05)', color: '#12f3b9', automargin: true, fixedrange: true },
+        yaxis2: { title: 'Lowest Cost (USD)', overlaying: 'y', side: 'right', color: '#9d7cff', gridcolor: 'rgba(0,0,0,0)', automargin: true, fixedrange: true },
         showlegend: true,
-        legend: { x: 0, y: 1.1, orientation: 'h' }
+        legend: { x: 0, y: 1.1, orientation: 'h' },
+        dragmode: false
     };
 
     const traces = [
@@ -641,7 +652,12 @@ function initHistoryChart() {
         { x: [], y: [], name: 'Cost', mode: 'lines+markers', line: { color: '#9d7cff' }, yaxis: 'y2', marker: { size: 4 } }
     ];
 
-    Plotly.newPlot('historyChart', traces, layout, { responsive: true, displayModeBar: false });
+    Plotly.newPlot('historyChart', traces, layout, {
+        responsive: true,
+        displayModeBar: false,
+        scrollZoom: false,
+        doubleClick: false
+    });
 }
 
 function updateHistoryChart(history) {
@@ -1277,47 +1293,224 @@ async function loadHeatmap(prefetchedData) {
             row.map((_, j) => [truncCompounds[i], targetNames[j]])
         );
 
+        const xIndices = data.targets.map((_, j) => j);
+        const yIndices = data.compounds.map((_, i) => i);
+
         const trace = {
             z: data.matrix,
-            x: data.targets,
-            y: data.compounds,
+            x: xIndices,
+            y: yIndices,
             text: hoverText,
             customdata: customData,
             type: 'heatmap',
             colorscale: 'Viridis',
+            showscale: true,
             hovertemplate: 'Target: %{customdata[1]}<br>Compound: %{customdata[0]}<br>Selectivity: %{text}<extra></extra>',
             colorbar: {
-                title: { text: 'Selectivity', font: { size: 11, color: '#9898b8' } },
-                tickfont: { color: '#9898b8', size: 10 },
-                len: 0.9,
+                tickfont: { color: '#9898b8', size: 9 },
+                len: 0.85,
+                thickness: 18,
+                x: 1.04,
+                xanchor: 'left',
+                xpad: 0,
             },
         };
+
+        const TARGET_WINDOW = 40;
+        const COMPOUND_WINDOW = 20;
+        const numTargets = data.targets.length;
+        const numCompounds = data.compounds.length;
+
+        const hasManyTargets = numTargets > TARGET_WINDOW;
+        const hasManyCompounds = numCompounds > COMPOUND_WINDOW;
+
+        const initialTargetCount = Math.min(TARGET_WINDOW, numTargets);
+        const initialCompoundCount = Math.min(COMPOUND_WINDOW, numCompounds);
+
+        // Setup sliders display before Plotly.newPlot so container width is accurately allocated
+        const targetSliderWrapper = $('#heatmapTargetSliderWrapper');
+        const targetRangeSlider = $('#heatmapTargetRangeSlider');
+        const targetRangeText = $('#heatmapTargetSliderRangeText');
+        const targetSubtext = $('#heatmapTargetSliderSubtext');
+        const targetMinLabel = $('#heatmapTargetSliderMinLabel');
+        const targetMaxLabel = $('#heatmapTargetSliderMaxLabel');
+
+        if (targetSliderWrapper && targetRangeSlider) {
+            if (hasManyTargets) {
+                targetSliderWrapper.style.display = 'block';
+                targetRangeSlider.min = 0;
+                targetRangeSlider.max = numTargets - TARGET_WINDOW;
+                targetRangeSlider.value = 0;
+                if (targetMinLabel) targetMinLabel.textContent = `#1 (${data.targets[0]})`;
+                if (targetMaxLabel) targetMaxLabel.textContent = `#${numTargets} (${data.targets[numTargets - 1]})`;
+            } else {
+                targetSliderWrapper.style.display = 'none';
+            }
+        }
+
+        const compoundSliderWrapper = $('#heatmapCompoundSliderWrapper');
+        const compoundRangeSlider = $('#heatmapCompoundRangeSlider');
+        const compoundRangeText = $('#heatmapCompoundSliderRangeText');
+        const compoundStartEl = $('#heatmapCompoundSliderStart');
+        const compoundEndEl = $('#heatmapCompoundSliderEnd');
+        const compoundSubtext = $('#heatmapCompoundSliderSubtext');
+        const compoundMinLabel = $('#heatmapCompoundSliderMinLabel');
+        const compoundMaxLabel = $('#heatmapCompoundSliderMaxLabel');
+
+        if (compoundSliderWrapper && compoundRangeSlider) {
+            if (hasManyCompounds) {
+                compoundSliderWrapper.style.display = 'flex';
+                compoundRangeSlider.min = 0;
+                compoundRangeSlider.max = numCompounds - COMPOUND_WINDOW;
+                compoundRangeSlider.value = 0;
+                if (compoundMinLabel) compoundMinLabel.textContent = `#1`;
+                if (compoundMaxLabel) compoundMaxLabel.textContent = `#${numCompounds}`;
+            } else {
+                compoundSliderWrapper.style.display = 'none';
+            }
+        }
 
         const layout = {
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor: 'rgba(255,255,255,0.08)',
             font: { family: 'Inter, sans-serif', color: '#9898b8', size: 10 },
             xaxis: {
-                title: { text: 'Targets', font: { size: 12, color: '#9898b8' }, standoff: 5 },
+                title: false,
                 showgrid: false,
+                zeroline: false,
+                showline: false,
                 side: 'top',
-                automargin: true,
+                automargin: false,
+                tickmode: 'array',
+                tickvals: xIndices,
+                ticktext: data.targets,
                 tickfont: { color: '#9898b8', size: 10 },
+                tickangle: -90,
+                range: [-0.5, initialTargetCount - 0.5],
+                fixedrange: true,
             },
             yaxis: {
-                autorange: 'reversed',
-                title: { text: 'Compounds', font: { size: 12, color: '#9898b8' }, standoff: 5 },
+                autorange: false,
                 showgrid: false,
-                automargin: true,
+                zeroline: false,
+                showline: false,
+                tickmode: 'array',
+                tickvals: yIndices,
+                ticktext: truncCompounds,
+                range: [initialCompoundCount - 0.5, -0.5],
+                title: false,
+                automargin: false,
                 tickfont: { color: '#9898b8', size: 10 },
+                fixedrange: true,
             },
-            margin: { l: 85, r: 35, t: 60, b: 45 },
+            margin: { l: 95, r: 95, t: 65, b: 25 },
+            dragmode: false,
+            annotations: [
+                {
+                    text: 'Selectivity',
+                    font: { family: 'Inter, sans-serif', size: 10, color: '#9898b8' },
+                    xref: 'paper',
+                    yref: 'paper',
+                    x: 1.04,
+                    y: 0.925,
+                    yshift: -5,
+                    xanchor: 'center',
+                    xshift: 9,
+                    yanchor: 'bottom',
+                    showarrow: false,
+                }
+            ],
         };
 
         Plotly.newPlot('heatmapChart', [trace], layout, {
             responsive: true,
             displayModeBar: false,
+            scrollZoom: false,
+            doubleClick: false,
         });
+
+        // Ensure proper chart dimensions inside flex container
+        requestAnimationFrame(() => {
+            Plotly.Plots.resize('heatmapChart');
+        });
+
+        // Attach resize observer to heatmap container if available
+        const heatmapEl = document.getElementById('heatmapChart');
+        if (heatmapEl && !heatmapEl._roAttached && window.ResizeObserver) {
+            heatmapEl._roAttached = true;
+            const ro = new ResizeObserver(() => {
+                Plotly.Plots.resize('heatmapChart');
+            });
+            ro.observe(heatmapEl);
+        }
+
+        // Setup 40-target window slider interactions
+        if (targetSliderWrapper && targetRangeSlider && hasManyTargets) {
+            const updateTargetSliderView = (startIdx) => {
+                const endIdx = startIdx + TARGET_WINDOW;
+                if (targetRangeText) targetRangeText.textContent = `${startIdx + 1}–${endIdx}`;
+            };
+
+            updateTargetSliderView(0);
+
+            targetRangeSlider.oninput = (e) => {
+                const startIdx = parseInt(e.target.value, 10);
+                const endIdx = startIdx + TARGET_WINDOW;
+                updateTargetSliderView(startIdx);
+                Plotly.relayout('heatmapChart', {
+                    'xaxis.range': [startIdx - 0.5, endIdx - 0.5]
+                });
+            };
+        }
+
+        // Setup 20-compound window slider interactions
+        if (compoundSliderWrapper && compoundRangeSlider && hasManyCompounds) {
+            const updateCompoundSliderView = (startIdx) => {
+                const endIdx = startIdx + COMPOUND_WINDOW;
+                const startComp = truncCompounds[startIdx];
+                const endComp = truncCompounds[endIdx - 1];
+                if (compoundRangeText) compoundRangeText.textContent = `${startIdx + 1}–${endIdx}`;
+                if (compoundStartEl) compoundStartEl.textContent = startComp;
+                if (compoundEndEl) compoundEndEl.textContent = endComp;
+                if (compoundSubtext) compoundSubtext.title = `${data.compounds[startIdx]} → ${data.compounds[endIdx - 1]}`;
+            };
+
+            updateCompoundSliderView(0);
+
+            const vContainer = document.getElementById('heatmapVSliderContainer');
+            if (vContainer && compoundRangeSlider) {
+                const syncSliderHeight = () => {
+                    const h = vContainer.clientHeight;
+                    if (h > 40) {
+                        compoundRangeSlider.style.width = `${h}px`;
+                    }
+                };
+                syncSliderHeight();
+                requestAnimationFrame(syncSliderHeight);
+                setTimeout(syncSliderHeight, 50);
+                setTimeout(syncSliderHeight, 150);
+                setTimeout(syncSliderHeight, 400);
+                if (!vContainer._roAttached && window.ResizeObserver) {
+                    vContainer._roAttached = true;
+                    const ro = new ResizeObserver(() => syncSliderHeight());
+                    ro.observe(vContainer);
+                }
+            }
+
+            compoundRangeSlider.oninput = (e) => {
+                const startIdx = parseInt(e.target.value, 10);
+                const endIdx = startIdx + COMPOUND_WINDOW;
+                updateCompoundSliderView(startIdx);
+                Plotly.relayout('heatmapChart', {
+                    'yaxis.range': [endIdx - 0.5, startIdx - 0.5]
+                });
+            };
+        }
+
+        // Handle double-click reset on heatmap
+        if (heatmapEl && heatmapEl.on) {
+            heatmapEl.on('plotly_doubleclick', () => false);
+        }
 
     } catch (err) {
         console.error('Failed to load heatmap:', err);
@@ -1415,6 +1608,10 @@ async function loadDistributionChart(prefetchedData) {
             customdata: customData
         };
 
+        const WINDOW_SIZE = 40;
+        const hasManyTargets = stats.length > WINDOW_SIZE;
+        const initialVisibleCount = Math.min(WINDOW_SIZE, stats.length);
+
         const layout = {
             barmode: 'overlay',
             paper_bgcolor: 'rgba(0,0,0,0)',
@@ -1428,8 +1625,9 @@ async function loadDistributionChart(prefetchedData) {
                 tickangle: -45,
                 zeroline: false,
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
-                range: [-0.85, stats.length - 0.15],
+                range: [-0.5, initialVisibleCount - 0.5],
                 automargin: true,
+                fixedrange: true,
             },
             yaxis: {
                 title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' }, standoff: 5 },
@@ -1438,22 +1636,67 @@ async function loadDistributionChart(prefetchedData) {
                 zerolinewidth: 2,
                 ticks: 'outside',
                 ticklen: 5,
-                tickcolor: 'rgba(0,0,0,0)'
+                tickcolor: 'rgba(0,0,0,0)',
+                fixedrange: true,
             },
             legend: {
                 font: { size: 11 },
                 bgcolor: 'rgba(0,0,0,0.3)',
                 bordercolor: 'rgba(120,120,255,0.1)',
-                borderwidth: 1
+                borderwidth: 1,
+                x: 1.02,
+                xanchor: 'left',
+                y: 1,
+                yanchor: 'top',
             },
-            margin: { l: 55, r: 30, t: 20, b: 70 },
-            hovermode: 'closest'
+            margin: { l: 55, r: 100, t: 20, b: 70 },
+            hovermode: 'closest',
+            dragmode: false
         };
 
         Plotly.newPlot('distributionChart', [traceMax, traceMedian, traceMin], layout, {
             responsive: true,
-            displayModeBar: false
+            displayModeBar: false,
+            scrollZoom: false,
+            doubleClick: false
         });
+
+        // Setup 40-target window slider
+        const sliderWrapper = $('#distributionSliderWrapper');
+        const rangeSlider = $('#distributionRangeSlider');
+        const rangeText = $('#distributionSliderRangeText');
+        const targetsSubtext = $('#distributionSliderTargetsSubtext');
+        const minLabel = $('#distributionSliderMinLabel');
+        const maxLabel = $('#distributionSliderMaxLabel');
+
+        if (sliderWrapper && rangeSlider) {
+            if (hasManyTargets) {
+                sliderWrapper.style.display = 'block';
+                rangeSlider.min = 0;
+                rangeSlider.max = stats.length - WINDOW_SIZE;
+                rangeSlider.value = 0;
+                if (minLabel) minLabel.textContent = `#1 (${stats[0].target})`;
+                if (maxLabel) maxLabel.textContent = `#${stats.length} (${stats[stats.length - 1].target})`;
+
+                const updateSliderView = (startIdx) => {
+                    const endIdx = startIdx + WINDOW_SIZE;
+                    if (rangeText) rangeText.textContent = `${startIdx + 1}–${endIdx}`;
+                };
+
+                updateSliderView(0);
+
+                rangeSlider.oninput = (e) => {
+                    const startIdx = parseInt(e.target.value, 10);
+                    const endIdx = startIdx + WINDOW_SIZE;
+                    updateSliderView(startIdx);
+                    Plotly.relayout('distributionChart', {
+                        'xaxis.range': [startIdx - 0.5, endIdx - 0.5]
+                    });
+                };
+            } else {
+                sliderWrapper.style.display = 'none';
+            }
+        }
 
     } catch (err) {
         console.error('Failed to load distribution chart:', err);
@@ -1466,7 +1709,7 @@ $('#backToStep3Btn').addEventListener('click', async () => {
     try {
         await fetch('/api/reset-opt', { method: 'POST' });
     } catch (err) { }
-    
+
     $('#historyCard').style.display = 'none';
     $('#optCompleteBanner').style.display = 'none';
     $('#optCompleteBanner').classList.remove('visible');
@@ -1519,5 +1762,15 @@ function showError(el, message) {
 // ═══════════════════════════════════════════════════════════════
 //  INITIALIZATION
 // ═══════════════════════════════════════════════════════════════
+
+// Global window resize listener to ensure all Plotly charts stay responsive and within bounds
+window.addEventListener('resize', () => {
+    ['historyChart', 'paretoChart', 'heatmapChart', 'distributionChart'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el && el.data) {
+            Plotly.Plots.resize(el);
+        }
+    });
+});
 
 // End of app.js
