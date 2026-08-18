@@ -1272,7 +1272,7 @@ async function loadHeatmap(prefetchedData) {
             row.map(val => val === null ? "No Data" : val.toFixed(2))
         );
 
-        const truncCompounds = data.compounds.map((s) => s.length > 30 ? s.substring(0, 27) + '...' : s);
+        const truncCompounds = data.compounds.map((s) => (s && s.length > 30) ? s.substring(0, 27) + '...' : (s || 'Unknown'));
         const customData = data.matrix.map((row, i) =>
             row.map((_, j) => [truncCompounds[i], targetNames[j]])
         );
@@ -1287,14 +1287,15 @@ async function loadHeatmap(prefetchedData) {
             colorscale: 'Viridis',
             hovertemplate: 'Target: %{customdata[1]}<br>Compound: %{customdata[0]}<br>Selectivity: %{text}<extra></extra>',
             colorbar: {
-                title: { text: 'Selectivity', font: { size: 12, color: '#9898b8' } },
-                tickfont: { color: '#9898b8' },
+                title: { text: 'Selectivity', font: { size: 11, color: '#9898b8' } },
+                tickfont: { color: '#9898b8', size: 10 },
+                len: 0.9,
             },
         };
 
         const layout = {
             paper_bgcolor: 'rgba(0,0,0,0)',
-            plot_bgcolor: 'rgba(255,255,255,0.1)',
+            plot_bgcolor: 'rgba(255,255,255,0.08)',
             font: { family: 'Inter, sans-serif', color: '#9898b8', size: 10 },
             xaxis: {
                 title: { text: 'Targets', font: { size: 12, color: '#9898b8' }, standoff: 5 },
@@ -1304,12 +1305,13 @@ async function loadHeatmap(prefetchedData) {
                 tickfont: { color: '#9898b8', size: 10 },
             },
             yaxis: {
-                showticklabels: false,
-                showgrid: false,
                 autorange: 'reversed',
                 title: { text: 'Compounds', font: { size: 12, color: '#9898b8' }, standoff: 5 },
+                showgrid: false,
+                automargin: true,
+                tickfont: { color: '#9898b8', size: 10 },
             },
-            margin: { l: 60, r: 35, t: 60, b: 45 },
+            margin: { l: 85, r: 35, t: 60, b: 45 },
         };
 
         Plotly.newPlot('heatmapChart', [trace], layout, {

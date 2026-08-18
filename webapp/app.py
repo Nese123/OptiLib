@@ -1175,13 +1175,36 @@ def _map_targets_to_gene_symbols(target_list):
     return symbols
 
 
+def _extract_compound_labels(df):
+    """Extract preferred compound labels for heatmap (Molecule_ChEMBL_ID -> InChIKey -> Compound_Name -> Index)."""
+    if "Molecule_ChEMBL_ID" in df.columns:
+        labels = []
+        for i, val in enumerate(df["Molecule_ChEMBL_ID"]):
+            val_str = str(val).strip() if pd.notna(val) else ""
+            if val_str and val_str not in ("nan", "None", "Unknown"):
+                labels.append(val_str)
+            elif "InChIKey" in df.columns and pd.notna(df["InChIKey"].iloc[i]) and str(df["InChIKey"].iloc[i]).strip() not in ("nan", "None", "Unknown"):
+                labels.append(str(df["InChIKey"].iloc[i]).strip())
+            elif "Compound_Name" in df.columns and pd.notna(df["Compound_Name"].iloc[i]) and str(df["Compound_Name"].iloc[i]).strip() not in ("nan", "None", "Unknown"):
+                labels.append(str(df["Compound_Name"].iloc[i]).strip())
+            else:
+                labels.append(f"Compound {i+1}")
+        return labels
+    elif "InChIKey" in df.columns:
+        return [str(x).strip() if pd.notna(x) and str(x).strip() not in ("nan", "None", "Unknown") else f"Compound {i+1}" for i, x in enumerate(df["InChIKey"])]
+    elif "Compound_Name" in df.columns:
+        return [str(x).strip() if pd.notna(x) and str(x).strip() not in ("nan", "None", "Unknown") else f"Compound {i+1}" for i, x in enumerate(df["Compound_Name"])]
+    else:
+        return [str(x) for x in df.index.tolist()]
+
+
 def _build_heatmap_cache(df):
     """Pre-compute the heatmap JSON dict so /api/heatmap-data is instant."""
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
     target_symbols, target_names = _get_target_info(sel_cols)
     return {
         "matrix": df[sel_cols].astype(object).where(pd.notna(df[sel_cols]), None).values.tolist(),
-        "compounds": df["InChIKey"].tolist() if "InChIKey" in df.columns else df.index.tolist(),
+        "compounds": _extract_compound_labels(df),
         "targets": target_symbols,
         "target_names": target_names,
     }
@@ -1200,7 +1223,7 @@ def heatmap_data():
     # Fallback: compute on the fly
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
     matrix = df[sel_cols].astype(object).where(pd.notna(df[sel_cols]), None).values.tolist()
-    compounds = df["InChIKey"].tolist() if "InChIKey" in df.columns else df.index.tolist()
+    compounds = _extract_compound_labels(df)
     targets, target_names = _get_target_info(sel_cols)
 
     return jsonify({
