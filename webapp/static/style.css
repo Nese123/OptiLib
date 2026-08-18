@@ -1449,8 +1449,8 @@ input[type="number"]:focus {
 
 .viz-nodata-badge {
     position: absolute;
-    bottom: 20px;
-    right: 9px;
+    bottom: 22px;
+    right: 7px;
     color: #9898b8;
     font-size: 11px;
     display: flex;

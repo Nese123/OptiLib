@@ -1313,6 +1313,7 @@ async function loadHeatmap(prefetchedData) {
                 x: 1.04,
                 xanchor: 'left',
                 xpad: 0,
+                outlinewidth: 0,
             },
         };
 
@@ -1331,6 +1332,7 @@ async function loadHeatmap(prefetchedData) {
         const targetSliderWrapper = $('#heatmapTargetSliderWrapper');
         const targetRangeSlider = $('#heatmapTargetRangeSlider');
         const targetRangeText = $('#heatmapTargetSliderRangeText');
+        const targetTotalText = $('#heatmapTargetSliderTotalText');
         const targetSubtext = $('#heatmapTargetSliderSubtext');
         const targetMinLabel = $('#heatmapTargetSliderMinLabel');
         const targetMaxLabel = $('#heatmapTargetSliderMaxLabel');
@@ -1341,8 +1343,9 @@ async function loadHeatmap(prefetchedData) {
                 targetRangeSlider.min = 0;
                 targetRangeSlider.max = numTargets - TARGET_WINDOW;
                 targetRangeSlider.value = 0;
-                if (targetMinLabel) targetMinLabel.textContent = `#1 (${data.targets[0]})`;
-                if (targetMaxLabel) targetMaxLabel.textContent = `#${numTargets} (${data.targets[numTargets - 1]})`;
+                if (targetTotalText) targetTotalText.textContent = `of ${numTargets}`;
+                if (targetMinLabel) targetMinLabel.textContent = `1`;
+                if (targetMaxLabel) targetMaxLabel.textContent = `${numTargets}`;
             } else {
                 targetSliderWrapper.style.display = 'none';
             }
@@ -1351,6 +1354,7 @@ async function loadHeatmap(prefetchedData) {
         const compoundSliderWrapper = $('#heatmapCompoundSliderWrapper');
         const compoundRangeSlider = $('#heatmapCompoundRangeSlider');
         const compoundRangeText = $('#heatmapCompoundSliderRangeText');
+        const compoundTotalText = $('#heatmapCompoundSliderTotalText');
         const compoundStartEl = $('#heatmapCompoundSliderStart');
         const compoundEndEl = $('#heatmapCompoundSliderEnd');
         const compoundSubtext = $('#heatmapCompoundSliderSubtext');
@@ -1363,8 +1367,9 @@ async function loadHeatmap(prefetchedData) {
                 compoundRangeSlider.min = 0;
                 compoundRangeSlider.max = numCompounds - COMPOUND_WINDOW;
                 compoundRangeSlider.value = 0;
-                if (compoundMinLabel) compoundMinLabel.textContent = `#1`;
-                if (compoundMaxLabel) compoundMaxLabel.textContent = `#${numCompounds}`;
+                if (compoundTotalText) compoundTotalText.textContent = `of ${numCompounds}`;
+                if (compoundMinLabel) compoundMinLabel.textContent = `1`;
+                if (compoundMaxLabel) compoundMaxLabel.textContent = `${numCompounds}`;
             } else {
                 compoundSliderWrapper.style.display = 'none';
             }
@@ -1447,15 +1452,16 @@ async function loadHeatmap(prefetchedData) {
         // Setup 40-target window slider interactions
         if (targetSliderWrapper && targetRangeSlider && hasManyTargets) {
             const updateTargetSliderView = (startIdx) => {
-                const endIdx = startIdx + TARGET_WINDOW;
+                const endIdx = Math.min(startIdx + TARGET_WINDOW, numTargets);
                 if (targetRangeText) targetRangeText.textContent = `${startIdx + 1}–${endIdx}`;
+                if (targetTotalText) targetTotalText.textContent = `of ${numTargets}`;
             };
 
             updateTargetSliderView(0);
 
             targetRangeSlider.oninput = (e) => {
                 const startIdx = parseInt(e.target.value, 10);
-                const endIdx = startIdx + TARGET_WINDOW;
+                const endIdx = Math.min(startIdx + TARGET_WINDOW, numTargets);
                 updateTargetSliderView(startIdx);
                 Plotly.relayout('heatmapChart', {
                     'xaxis.range': [startIdx - 0.5, endIdx - 0.5]
@@ -1466,10 +1472,11 @@ async function loadHeatmap(prefetchedData) {
         // Setup 20-compound window slider interactions
         if (compoundSliderWrapper && compoundRangeSlider && hasManyCompounds) {
             const updateCompoundSliderView = (startIdx) => {
-                const endIdx = startIdx + COMPOUND_WINDOW;
+                const endIdx = Math.min(startIdx + COMPOUND_WINDOW, numCompounds);
                 const startComp = truncCompounds[startIdx];
                 const endComp = truncCompounds[endIdx - 1];
                 if (compoundRangeText) compoundRangeText.textContent = `${startIdx + 1}–${endIdx}`;
+                if (compoundTotalText) compoundTotalText.textContent = `of ${numCompounds}`;
                 if (compoundStartEl) compoundStartEl.textContent = startComp;
                 if (compoundEndEl) compoundEndEl.textContent = endComp;
                 if (compoundSubtext) compoundSubtext.title = `${data.compounds[startIdx]} → ${data.compounds[endIdx - 1]}`;
@@ -1499,7 +1506,7 @@ async function loadHeatmap(prefetchedData) {
 
             compoundRangeSlider.oninput = (e) => {
                 const startIdx = parseInt(e.target.value, 10);
-                const endIdx = startIdx + COMPOUND_WINDOW;
+                const endIdx = Math.min(startIdx + COMPOUND_WINDOW, numCompounds);
                 updateCompoundSliderView(startIdx);
                 Plotly.relayout('heatmapChart', {
                     'yaxis.range': [endIdx - 0.5, startIdx - 0.5]
@@ -1644,12 +1651,8 @@ async function loadDistributionChart(prefetchedData) {
                 bgcolor: 'rgba(0,0,0,0.3)',
                 bordercolor: 'rgba(120,120,255,0.1)',
                 borderwidth: 1,
-                x: 1.02,
-                xanchor: 'left',
-                y: 1,
-                yanchor: 'top',
             },
-            margin: { l: 55, r: 100, t: 20, b: 70 },
+            margin: { l: 55, r: 30, t: 20, b: 70 },
             hovermode: 'closest',
             dragmode: false
         };
@@ -1665,6 +1668,7 @@ async function loadDistributionChart(prefetchedData) {
         const sliderWrapper = $('#distributionSliderWrapper');
         const rangeSlider = $('#distributionRangeSlider');
         const rangeText = $('#distributionSliderRangeText');
+        const totalText = $('#distributionSliderTotalText');
         const targetsSubtext = $('#distributionSliderTargetsSubtext');
         const minLabel = $('#distributionSliderMinLabel');
         const maxLabel = $('#distributionSliderMaxLabel');
@@ -1675,19 +1679,21 @@ async function loadDistributionChart(prefetchedData) {
                 rangeSlider.min = 0;
                 rangeSlider.max = stats.length - WINDOW_SIZE;
                 rangeSlider.value = 0;
-                if (minLabel) minLabel.textContent = `#1 (${stats[0].target})`;
-                if (maxLabel) maxLabel.textContent = `#${stats.length} (${stats[stats.length - 1].target})`;
+                if (totalText) totalText.textContent = `of ${stats.length}`;
+                if (minLabel) minLabel.textContent = `1`;
+                if (maxLabel) maxLabel.textContent = `${stats.length}`;
 
                 const updateSliderView = (startIdx) => {
-                    const endIdx = startIdx + WINDOW_SIZE;
+                    const endIdx = Math.min(startIdx + WINDOW_SIZE, stats.length);
                     if (rangeText) rangeText.textContent = `${startIdx + 1}–${endIdx}`;
+                    if (totalText) totalText.textContent = `of ${stats.length}`;
                 };
 
                 updateSliderView(0);
 
                 rangeSlider.oninput = (e) => {
                     const startIdx = parseInt(e.target.value, 10);
-                    const endIdx = startIdx + WINDOW_SIZE;
+                    const endIdx = Math.min(startIdx + WINDOW_SIZE, stats.length);
                     updateSliderView(startIdx);
                     Plotly.relayout('distributionChart', {
                         'xaxis.range': [startIdx - 0.5, endIdx - 0.5]

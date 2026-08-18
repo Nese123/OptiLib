@@ -458,22 +458,35 @@
                                 style="margin-bottom: 6px; font-size: 0.7rem; color: var(--text-secondary); font-weight: 500; letter-spacing: 0.5px;">
                                 Targets <strong id="heatmapTargetSliderRangeText"
                                     style="color: var(--text-primary); font-size: 0.78rem;">1–40</strong>
+                                <span id="heatmapTargetSliderTotalText"
+                                    style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; margin-left: 2px;">of 75</span>
                             </div>
-                            <input type="range" id="heatmapTargetRangeSlider" min="0" max="75" step="1" value="0"
-                                style="margin: 0; width: 100%;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span id="heatmapTargetSliderMinLabel"
+                                    style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500; min-width: 14px;">1</span>
+                                <input type="range" id="heatmapTargetRangeSlider" min="0" max="75" step="1" value="0"
+                                    style="margin: 0; flex: 1;">
+                                <span id="heatmapTargetSliderMaxLabel"
+                                    style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500; min-width: 18px; text-align: right;">75</span>
+                            </div>
                         </div>
 
                         <!-- 20-Compound Window Slider (Heatmap) - Row 2, Col 1 -->
                         <div id="heatmapCompoundSliderWrapper"
-                            style="grid-column: 1; grid-row: 2; display: none; width: 58px; padding: 10px 4px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-card); border-radius: var(--radius-md); flex-direction: column; align-items: center;">
+                            style="grid-column: 1; grid-row: 2; display: none; width: 68px; padding: 10px 4px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-card); border-radius: var(--radius-md); flex-direction: column; align-items: center;">
 
-                            <div style="text-align: center; width: 100%; margin-bottom: 6px;">
+                            <div style="text-align: center; width: 100%; margin-bottom: 4px;">
                                 <div
                                     style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 500; letter-spacing: 0.5px;">
                                     Drugs</div>
                                 <strong id="heatmapCompoundSliderRangeText"
                                     style="color: var(--text-primary); font-size: 0.78rem; display: block; margin-top: 1px; white-space: nowrap;">1–20</strong>
+                                <span id="heatmapCompoundSliderTotalText"
+                                    style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; display: block; margin-top: 1px; white-space: nowrap;">of 50</span>
                             </div>
+
+                            <span id="heatmapCompoundSliderMinLabel"
+                                style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; margin-bottom: 2px;">1</span>
 
                             <div id="heatmapVSliderContainer" class="heatmap-vslider-container"
                                 style="flex: 1; width: 100%; min-height: 200px; position: relative; overflow: visible;">
@@ -481,6 +494,9 @@
                                     class="heatmap-vertical-slider"
                                     style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(90deg); transform-origin: center center; width: 300px; height: 6px; cursor: pointer; margin: 0; padding: 0; background: rgba(255, 255, 255, 0.3); max-width: none;">
                             </div>
+
+                            <span id="heatmapCompoundSliderMaxLabel"
+                                style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; margin-top: 2px;">50</span>
                         </div>
 
                         <!-- Heatmap Chart - Row 2, Col 2 -->
@@ -508,9 +524,17 @@
                             style="margin-bottom: 6px; font-size: 0.7rem; color: var(--text-secondary); font-weight: 500; letter-spacing: 0.5px;">
                             Targets <strong id="distributionSliderRangeText"
                                 style="color: var(--text-primary); font-size: 0.78rem;">1–40</strong>
+                            <span id="distributionSliderTotalText"
+                                style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; margin-left: 2px;">of 75</span>
                         </div>
-                        <input type="range" id="distributionRangeSlider" min="0" max="75" step="1" value="0"
-                            style="margin: 0; width: 100%;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span id="distributionSliderMinLabel"
+                                style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500; min-width: 14px;">1</span>
+                            <input type="range" id="distributionRangeSlider" min="0" max="75" step="1" value="0"
+                                style="margin: 0; flex: 1;">
+                            <span id="distributionSliderMaxLabel"
+                                style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500; min-width: 18px; text-align: right;">75</span>
+                        </div>
                     </div>
                 </div>
 
@@ -569,7 +593,7 @@
             });
         }
     </script>
-    <script src="/static/app.js?v=3.8"></script>
+    <script src="/static/app.js?v=3.9"></script>
 
 </body>
 
