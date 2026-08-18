@@ -364,9 +364,12 @@ def save_results(res, best_idx, full_df, output_file='winning_library_matrix.xls
     # Slice the rows: Keep only the drugs that won
     winning_matrix_df = full_df.loc[winning_smiles].copy()
 
-    # Drop any targets that this specific library completely missed
+    # Drop any targets that do not have at least one selectivity measurement > 0
     target_cols = [c for c in winning_matrix_df.columns if c not in ['Compound_Name', 'Molecule_ChEMBL_ID', 'InChIKey', 'SMILES', 'Price_USD_per_mg']]
-    missed_targets = [c for c in target_cols if winning_matrix_df[c].max() <= 0]
+    missed_targets = [
+        c for c in target_cols
+        if not pd.to_numeric(winning_matrix_df[c], errors='coerce').gt(0).any()
+    ]
     winning_matrix_df.drop(columns=missed_targets, inplace=True)
 
     # Reset the index so SMILES becomes a proper column
