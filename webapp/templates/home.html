@@ -24,10 +24,10 @@
             </a>
             <div class="navbar-links">
                 <a href="/" class="nav-link active">Home</a>
-                <a href="#how-it-works" class="nav-link">How It Works</a>
-                <a href="#visualizations" class="nav-link">Visualizations</a>
-                <a href="#features" class="nav-link">Features</a>
-                <a href="#algorithm" class="nav-link">NSGA-II</a>
+                <a href="#set-up" class="nav-link">Set Up</a>
+                <a href="#optimization" class="nav-link">Optimization</a>
+                <a href="#visualizations" class="nav-link">Visualization</a>
+                <a href="#references" class="nav-link">References</a>
                 <a href="/optimize" class="nav-link nav-cta">Start Optimization</a>
             </div>
             <button class="navbar-hamburger" id="navHamburger" aria-label="Toggle navigation menu">
@@ -39,10 +39,10 @@
         <!-- Mobile menu -->
         <div class="navbar-mobile-menu" id="navMobileMenu">
             <a href="/" class="nav-link active">Home</a>
-            <a href="#how-it-works" class="nav-link">How It Works</a>
-            <a href="#visualizations" class="nav-link">Visualizations</a>
-            <a href="#features" class="nav-link">Features</a>
-            <a href="#algorithm" class="nav-link">NSGA-II</a>
+            <a href="#set-up" class="nav-link">Set Up</a>
+            <a href="#optimization" class="nav-link">Optimization</a>
+            <a href="#visualizations" class="nav-link">Visualization</a>
+            <a href="#references" class="nav-link">References</a>
             <a href="/optimize" class="nav-link nav-cta">Launch Tool</a>
         </div>
     </nav>
@@ -61,7 +61,7 @@
             <p class="hero-subtitle">
                 Welcome to OptiLib, a tool for creating the most optimal drug library for your needs.
                 OptiLib uses NSGA-II, a powerful multi-objective genetic algorithm, to find the optimal set of
-                compounds that maximizes biological target selectivity while minimizing cost — giving you the
+                compounds that maximizes biological target selectivity while minimizing cost, giving you the
                 best possible drug library for any set of targets.
             </p>
             <div class="hero-actions">
@@ -69,7 +69,7 @@
                     <span>Start Optimization</span>
                     <span class="btn-icon">→</span>
                 </a>
-                <a href="#how-it-works" class="btn btn-secondary btn-lg" id="heroLearnBtn">
+                <a href="#set-up" class="btn btn-secondary btn-lg" id="heroLearnBtn">
                     <span>Learn More</span>
                     <span class="btn-icon">↓</span>
                 </a>
@@ -77,79 +77,381 @@
         </div>
     </section>
 
-    <!-- ═══ How It Works Section ═══ -->
-    <section class="section" id="how-it-works">
+    <!-- ═══ Set Up Section ═══ -->
+    <section class="section" id="set-up">
         <div class="section-container">
             <div class="section-header">
-                <h2 class="section-title">How OptiLib Works</h2>
-                <p class="section-subtitle">From target input to optimized library, a fully automated pipeline powered
-                    by advanced algorithms.</p>
+                <h2 class="section-title">Set Up</h2>
+                <p class="section-subtitle">Upload a target file with your targets of interest. OptiLib will find all
+                    compounds for the targets and construct a selectivity matrix for the optimization algorithm.</p>
             </div>
 
-            <div class="pipeline-timeline">
-                <!-- Step 1 -->
-                <div class="timeline-item" data-aos="fade-up">
-                    <div class="timeline-marker">
-                        <span class="timeline-number">1</span>
+            <div class="setup-workflow-grid">
+                <!-- Step 1: Target Ingestion & Validation -->
+                <div class="setup-step-card" data-aos="fade-up">
+                    <div class="setup-card-top">
+                        <h3 class="setup-card-title">Target Upload & Validation</h3>
+                        <p class="setup-card-desc">
+                            Upload your biological targets of interest. OptiLib validates each entry against the ChEMBL
+                            database in real time, resolving identifiers and confirming bioactivity assay coverage.
+                        </p>
                     </div>
-                    <div class="timeline-card">
-                        <h3>Upload Targets</h3>
-                        <p>Upload CSV or Excel files containing your biological targets of interest by name, ChEMBL
-                            ID, Gene Symbol, or UniProt Accession. The system validates each target against the ChEMBL
-                            database.</p>
+
+                    <div class="setup-interactive-preview">
+                        <!-- Drop zone mockup -->
+                        <div class="setup-dropzone-mock">
+                            <div class="setup-dropzone-icon">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                            </div>
+                            <div class="setup-dropzone-title">Upload Target Files</div>
+                            <div class="setup-dropzone-sub">Drop CSV or Excel (.xlsx) containing a "Target" column</div>
+                            <div class="setup-format-badges">
+                                <span>Target Name</span>
+                                <span>ChEMBL ID</span>
+                                <span>Gene Symbol</span>
+                                <span>UniProt</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="setup-feature-list">
+                        <div class="setup-feat-item">
+                            <span class="setup-feat-bullet">•</span>
+                            <div><strong>Flexible Input Formats:</strong> Upload one or more CSV or Excel (.xlsx) files.
+                                Multiple identification formats of targets are accepted.</div>
+                        </div>
+                        <div class="setup-feat-item">
+                            <span class="setup-feat-bullet">•</span>
+                            <div><strong>Automatic Validation:</strong> Real-time database queries separate matched and
+                                unmatched targets.</div>
+                        </div>
+                        <div class="setup-feat-item">
+                            <span class="setup-feat-bullet">•</span>
+                            <div><strong>Selectivity Cutoff:</strong> Configurable threshold eliminates non-selective
+                                compounds before matrix calculation begins.</div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Step 2 -->
-                <div class="timeline-item" data-aos="fade-up">
-                    <div class="timeline-marker">
-                        <span class="timeline-number">2</span>
+                <!-- Step 2: Selectivity Matrix & Pricing Pipeline -->
+                <div class="setup-step-card" data-aos="fade-up">
+                    <div class="setup-card-top">
+                        <h3 class="setup-card-title">Selectivity Matrix & Pricing</h3>
+                        <p class="setup-card-desc">
+                            OptiLib queries the ChEMBL database for selective candidate compounds, assigns a price to
+                            each compound, and builds the full
+                            compound × target selectivity matrix.
+                        </p>
                     </div>
-                    <div class="timeline-card">
-                        <h3>Build Selectivity Matrix</h3>
-                        <p>OptiLib queries ChEMBL to find compounds that are both potent and selective against your
-                            targets. A compound × target selectivity matrix is constructed, capturing how well each
-                            compound distinguishes between targets.</p>
+
+                    <div class="setup-interactive-preview">
+                        <!-- Pipeline stages preview -->
+                        <div class="setup-pipeline-card">
+                            <div class="setup-pipeline-step-v2">
+                                <div class="setup-step-marker">✓</div>
+                                <div class="setup-step-body">
+                                    <div class="setup-step-heading">1. Selective Compound Search</div>
+                                    <div class="setup-step-sub">Scans the database for selective compounds
+                                        against given targets</div>
+                                </div>
+                            </div>
+                            <div class="setup-pipeline-step-v2">
+                                <div class="setup-step-marker">✓</div>
+                                <div class="setup-step-body">
+                                    <div class="setup-step-heading">2. Price Search</div>
+                                    <div class="setup-step-sub">Assigns a price for each compound
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="setup-pipeline-step-v2">
+                                <div class="setup-step-marker">✓</div>
+                                <div class="setup-step-body">
+                                    <div class="setup-step-heading">3. Selectivity Matrix Formation</div>
+                                    <div class="setup-step-sub">Converts the data into a compounds × targets selectivity
+                                        matrix
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="setup-feature-list">
+                        <div class="setup-feat-item">
+                            <span class="setup-feat-bullet">•</span>
+                            <div><strong>Automated Bioactivity Discovery:</strong> The algorithm uses target-specific
+                                selectivity
+                                scores to discover selective compounds.</div>
+                        </div>
+                        <div class="setup-feat-item">
+                            <span class="setup-feat-bullet">•</span>
+                            <div><strong>Price Data:</strong> Uses the MolPort database to find real prices for
+                                compounds. If the compound is not on MolPort, the MolPrice machine learning model is
+                                used to predict prices from chemical structure.</div>
+                        </div>
+                        <div class="setup-feat-item">
+                            <span class="setup-feat-bullet">•</span>
+                            <div><strong>Compound × Target Matrix:</strong> Transforms the selectivity data into a
+                                standardized matrix ready for optimization.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ Optimization Section ═══ -->
+    <section class="section section-alt" id="optimization">
+        <div class="section-container">
+            <div class="section-header">
+                <h2 class="section-title">Optimization</h2>
+                <p class="section-subtitle">Fine-tune optimization parameters and watch the algorithm converge on
+                    optimal
+                    drug libraries in real time.</p>
+            </div>
+
+            <!-- Cockpit Dashboard (Asymmetric Grid) -->
+            <div class="opt-cockpit">
+                <!-- Left: Interactive Configuration Cockpit -->
+                <div class="opt-cockpit-panel" data-aos="fade-up">
+                    <div class="opt-panel-header">
+                        <div class="opt-panel-title-wrap">
+                            <div>
+                                <h3 class="opt-panel-title">Optimization Parameter Tuning</h3>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="opt-panel-desc">
+                        The optimization algorithm has four main parameters to tune: The weight of mean selectivity,
+                        weight of min selectivity, max percentage of missing targets and f-tolerance. These attribute
+                        the most to the final libraries produced by the algorithm.
+                    </p>
+
+                    <!-- Interactive parameter sliders -->
+                    <div class="opt-controls-container">
+                        <!-- Mean Selectivity Slider -->
+                        <div class="opt-slider-group">
+                            <div class="opt-slider-header">
+                                <span class="opt-slider-label">Weight of Mean Selectivity</span>
+                                <span class="opt-slider-val" id="optWeightMeanVal">0.50</span>
+                            </div>
+                            <input type="range" class="opt-slider" id="optWeightMean" min="0" max="1" step="0.05"
+                                value="0.5">
+                            <div class="opt-slider-sub">Prioritizes broad, high average selectivity across all targets
+                            </div>
+                        </div>
+
+                        <!-- Min Selectivity Slider -->
+                        <div class="opt-slider-group">
+                            <div class="opt-slider-header">
+                                <span class="opt-slider-label">Weight of Min Selectivity</span>
+                                <span class="opt-slider-val" id="optWeightMinVal">0.50</span>
+                            </div>
+                            <input type="range" class="opt-slider" id="optWeightMin" min="0" max="1" step="0.05"
+                                value="0.5">
+                            <div class="opt-slider-sub">Protects against weak coverage on the most difficult target
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Composite Formula Box -->
+                        <div class="opt-formula-box">
+                            <div class="opt-formula-header">Combined Selectivity Score</div>
+                            <div class="opt-formula-code">
+                                Final Score = (<span id="optFormulaW1" class="opt-highlight-teal">0.50</span> × Mean) +
+                                (<span id="optFormulaW2" class="opt-highlight-purple">0.50</span> × Min)
+                            </div>
+                        </div>
+
+                        <!-- Missing Target Tolerance Slider -->
+                        <div class="opt-slider-group">
+                            <div class="opt-slider-header">
+                                <span class="opt-slider-label">Max Percentage of Missing Targets</span>
+                                <span class="opt-slider-val" id="optMissingVal">10%</span>
+                            </div>
+                            <input type="range" class="opt-slider" id="optMissing" min="0" max="20" step="1" value="10">
+                            <div class="opt-slider-sub">Tolerance threshold for targets without an active compound
+                            </div>
+                        </div>
+
+                        <!-- F-Tolerance Slider -->
+                        <div class="opt-slider-group">
+                            <div class="opt-slider-header">
+                                <span class="opt-slider-label">F-Tolerance (Termination Threshold)</span>
+                                <span class="opt-slider-val" id="optFtolVal">0.0025</span>
+                            </div>
+                            <input type="range" class="opt-slider" id="optFtol" min="0.0005" max="0.0100" step="0.0005"
+                                value="0.0025">
+                            <div class="opt-slider-sub">Minimum Pareto front improvement required before early
+                                termination</div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Step 3 -->
-                <div class="timeline-item" data-aos="fade-up">
-                    <div class="timeline-marker">
-                        <span class="timeline-number">3</span>
+                <!-- Right: Real-time Convergence History Monitor -->
+                <div class="opt-cockpit-chart-card" data-aos="fade-up">
+                    <div class="opt-chart-card-header">
+                        <div>
+                            <h3 class="opt-chart-title">Optimization Progress History</h3>
+                        </div>
                     </div>
-                    <div class="timeline-card">
-                        <h3>Price Estimation</h3>
-                        <p>Compound prices are fetched from MolPort's database. For compounds not found, the integrated
-                            MolPrice neural network predicts prices from molecular structure, ensuring every compound
-                            has cost data.</p>
+
+                    <p class="opt-chart-desc">
+                        Track the algorithm's convergence in real time with a dual-axis chart that plots how the best
+                        selectivity score and lowest library cost evolve over generations. Flattening of the curves
+                        indicates the algorithm is converging to optimal solutions.
+                    </p>
+
+                    <!-- Plotly Dual Axis History Chart Container -->
+                    <div class="opt-chart-wrapper">
+                        <div class="chart-container" id="demoHistoryChart" style="height: 380px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Advanced Parameters Overview Card -->
+            <div class="opt-advanced-card" data-aos="fade-up">
+                <div class="opt-adv-card-header">
+                    <div class="opt-adv-badge-wrap">
+                    </div>
+                    <h3 class="opt-adv-card-title">Advanced Optimization Parameters</h3>
+                    <p class="opt-adv-card-desc">
+                        For users who want to fine-tune the algorithm, OptiLib has several advanced parameters.
+                        These are the population size, mutation multiplier, max generations and termination period.
+                        These allow the for the tuning of the quality of solutions, exploration and convergence of the
+                        algorithm.
+                    </p>
+                </div>
+
+                <div class="opt-adv-params-grid">
+                    <!-- Parameter 1: Population Size -->
+                    <div class="opt-adv-param-box">
+                        <div class="opt-adv-param-top">
+                            <div class="opt-adv-param-heading">
+                                <div>
+                                    <h4 class="opt-adv-param-name">Population Size</h4>
+                                </div>
+                            </div>
+                            <div class="opt-adv-param-badges">
+                                <span class="opt-adv-badge-val">Default: <strong>100</strong></span>
+                            </div>
+                        </div>
+                        <p class="opt-adv-param-desc">
+                            The number of candidate drug library solutions evaluated in each
+                            generation.
+                        </p>
+                        <div class="opt-adv-param-features">
+                            <div class="opt-adv-feat-item">
+                                <span class="opt-adv-feat-bullet">•</span>
+                                <div><strong>Performance Trade-off:</strong> Larger populations explore more chemical
+                                    combinations. While a larger population size may lead to
+                                    better solutions, it increases runtime. </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parameter 2: Mutation Multiplier -->
+                    <div class="opt-adv-param-box">
+                        <div class="opt-adv-param-top">
+                            <div class="opt-adv-param-heading">
+                                <div>
+                                    <h4 class="opt-adv-param-name">Mutation Multiplier</h4>
+                                </div>
+                            </div>
+                            <div class="opt-adv-param-badges">
+                                <span class="opt-adv-badge-val">Default: <strong>1.0</strong></span>
+                            </div>
+                        </div>
+                        <p class="opt-adv-param-desc">
+                            Adjusts the mutation rate of the algorithm, which controls the rate of random changes in the
+                            solutions.
+                        </p>
+                        <div class="opt-adv-param-features">
+                            <div class="opt-adv-feat-item">
+                                <span class="opt-adv-feat-bullet">•</span>
+                                <div><strong>Fine-Tuning:</strong> Higher values increase diversity of explored
+                                    candidate libraries, but may result in slower and sub-optimal convergence to optimal
+                                    solutions.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parameter 3: Max Generations -->
+                    <div class="opt-adv-param-box">
+                        <div class="opt-adv-param-top">
+                            <div class="opt-adv-param-heading">
+                                <div>
+                                    <h4 class="opt-adv-param-name">Max Generations</h4>
+                                </div>
+                            </div>
+                            <div class="opt-adv-param-badges">
+                                <span class="opt-adv-badge-val">Default: <strong>1000</strong></span>
+                            </div>
+                        </div>
+                        <p class="opt-adv-param-desc">
+                            The upper ceiling on evolutionary iterations the genetic algorithm is permitted to run
+                            before mandatory completion.
+                        </p>
+                        <div class="opt-adv-param-features">
+                            <div class="opt-adv-feat-item">
+                                <span class="opt-adv-feat-bullet">•</span>
+                                <div><strong>Execution Ceiling:</strong> Acts as a runtime safeguard ensuring execution
+                                    completes within budget. In practice, the optimizer halts much earlier once Pareto
+                                    convergence is reached.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parameter 4: Termination Period -->
+                    <div class="opt-adv-param-box">
+                        <div class="opt-adv-param-top">
+                            <div class="opt-adv-param-heading">
+                                <div>
+                                    <h4 class="opt-adv-param-name">Termination Period</h4>
+                                </div>
+                            </div>
+                            <div class="opt-adv-param-badges">
+                                <span class="opt-adv-badge-val">Default: <strong>30 gens</strong></span>
+                            </div>
+                        </div>
+                        <p class="opt-adv-param-desc">
+                            The rolling window of consecutive generations monitored to evaluate Pareto front improvement
+                            against F-Tolerance.
+                        </p>
+                        <div class="opt-adv-param-features">
+                            <div class="opt-adv-feat-item">
+                                <span class="opt-adv-feat-bullet">•</span>
+                                <div><strong>Plateau Detection:</strong> If objective improvement remains below
+                                    F-Tolerance for this duration, the algorithm automatically
+                                    stop the optimization. Higher values may improve solutions, but increase
+                                    optimization time.</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Step 4 -->
-                <div class="timeline-item" data-aos="fade-up">
-                    <div class="timeline-marker">
-                        <span class="timeline-number">4</span>
+                <!-- Bottom Synergy / Callout Footer -->
+                <div class="opt-adv-card-footer">
+                    <div class="opt-adv-footer-item">
+                        <div class="opt-adv-footer-content">
+                            <div class="opt-adv-footer-title">Smart Seed Initialization</div>
+                            <p class="opt-adv-footer-desc">Among random starting libraries, there are five "smart" seed
+                                libraries to help the performance of the algorithm.</p>
+                        </div>
                     </div>
-                    <div class="timeline-card">
-                        <h3>Drug Library Optimization</h3>
-                        <p>The algorithm simultaneously optimizes two competing objectives: maximizing biological
-                            selectivity coverage and minimizing total library cost. It evolves a population of candidate
-                            libraries over hundreds of generations to find the best trade-offs, known as the Pareto
-                            front.</p>
-                    </div>
-                </div>
-
-                <!-- Step 5 -->
-                <div class="timeline-item" data-aos="fade-up">
-                    <div class="timeline-marker">
-                        <span class="timeline-number">5</span>
-                    </div>
-                    <div class="timeline-card">
-                        <h3>Results Dashboard</h3>
-                        <p>Explore the Pareto front interactively, compare optimized libraries against the full compound
-                            pool, visualize selectivity heatmaps, and download the winning library in a rich,
-                            real-time dashboard.</p>
+                    <div class="opt-adv-footer-divider"></div>
+                    <div class="opt-adv-footer-item">
+                        <div class="opt-adv-footer-content">
+                            <div class="opt-adv-footer-title">Adaptive Early Stopping</div>
+                            <p class="opt-adv-footer-desc">F-Tolerance and Termination Period
+                                halt optimization dynamically as soon as the solutions stabilize, eliminating wasted
+                                computation time.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -157,10 +459,10 @@
     </section>
 
     <!-- ═══ Visualization Section ═══ -->
-    <section class="section section-alt" id="visualizations">
+    <section class="section" id="visualizations">
         <div class="section-container">
             <div class="section-header">
-                <h2 class="section-title">Visualizations</h2>
+                <h2 class="section-title">Visualization</h2>
                 <p class="section-subtitle">
                     OptiLib visualizes the optimal libraries with the Pareto front, selectivity heatmap and target
                     selectivity distribution, allowing you to inspect trade-offs, target coverage, and selectivity
@@ -298,180 +600,6 @@
         </div>
     </section>
 
-    <!-- ═══ Features Section ═══ -->
-    <section class="section" id="features">
-        <div class="section-container">
-            <div class="section-header">
-                <h2 class="section-title">Powerful Features</h2>
-                <p class="section-subtitle">Everything you need to build optimized drug libraries for your research.</p>
-            </div>
-
-            <div class="features-grid">
-                <div class="feature-card">
-                    <h3>Multi-Objective Optimization</h3>
-                    <p>NSGA-II simultaneously balances selectivity, target coverage, and cost, finding the most optimal
-                        compounds for your library.</p>
-                </div>
-
-                <div class="feature-card">
-                    <h3>Real-Time Progress</h3>
-                    <p>Watch the optimization unfold in real time with live generation tracking, progress indicators,
-                        and an interactive optimization history plot.</p>
-                </div>
-
-                <div class="feature-card">
-                    <h3>Interactive Pareto Front</h3>
-                    <p>Click any point on the Pareto front to instantly view its compounds, compare metrics,
-                        and explore the selectivity dristribution of targets.</p>
-                </div>
-
-                <div class="feature-card">
-                    <h3>Selectivity Heatmaps</h3>
-                    <p>Visualize exactly how each compound in your optimized library covers your targets with rich,
-                        interactive heatmaps.</p>
-                </div>
-
-                <div class="feature-card">
-                    <h3>Integrated Pricing</h3>
-                    <p>Leverages MolPort's database and MolPrice's machine learning model to provide accurate compound
-                        pricing.</p>
-                </div>
-
-                <div class="feature-card">
-                    <h3>Configurable Parameters</h3>
-                    <p>Fine-tune selectivity thresholds, the specific selectivity score used and amount of targets to
-                        match
-                        your specific research needs.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ═══ Algorithm Section ═══ -->
-    <section class="section section-alt" id="algorithm">
-        <div class="section-container">
-            <div class="section-header">
-                <h2 class="section-title">The NSGA-II Algorithm</h2>
-                <p class="section-subtitle">Understanding the evolutionary engine that powers OptiLib.</p>
-            </div>
-
-            <div class="algo-grid">
-                <div class="algo-explanation">
-                    <div class="algo-block">
-                        <h3>Evolutionary Approach</h3>
-                        <p>NSGA-II (Non-dominated Sorting Genetic Algorithm II) is a widely-used multi-objective
-                            optimization algorithm. It maintains a population of candidate drug libraries
-                            and evolves them through selection, crossover, and mutation, mimicking natural evolution to
-                            discover optimal trade-offs.</p>
-                    </div>
-                    <div class="algo-block">
-                        <h3>Two Competing Objectives</h3>
-                        <p>OptiLib optimizes two objectives that naturally compete:
-                            <strong>maximize selectivity</strong> and <strong>minimize cost</strong>.
-                        </p>
-                    </div>
-                    <div class="algo-block">
-                        <h3>Pareto Optimality</h3>
-                        <p>Instead of a single "best" answer, NSGA-II produces a <strong>Pareto front</strong>, a set
-                            of solutions where no solution is better than another in both objectives simultaneously.
-                            This
-                            lets researchers choose the library that best fits their budget and selectivity
-                            requirements.
-                        </p>
-                    </div>
-                    <div class="algo-block">
-                        <h3>Smart Initialization</h3>
-                        <p>OptiLib seeds the initial population with intelligently constructed libraries rather than
-                            random selections. This accelerates convergence and ensures the algorithm starts from a
-                            strong foundation, reaching better solutions faster.</p>
-                    </div>
-                </div>
-
-                <div class="algo-visual">
-                    <div class="algo-visual-card">
-                        <div class="algo-visual-header">Optimization Flow</div>
-                        <div class="algo-flow">
-                            <div class="algo-flow-step">
-                                <div class="algo-flow-icon">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                                        <polyline points="2 17 12 22 22 17"></polyline>
-                                        <polyline points="2 12 12 17 22 12"></polyline>
-                                    </svg>
-                                </div>
-                                <div class="algo-flow-label">Initialize Population</div>
-                            </div>
-                            <div class="algo-flow-arrow">↓</div>
-                            <div class="algo-flow-step">
-                                <div class="algo-flow-icon">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <line x1="18" y1="20" x2="18" y2="10"></line>
-                                        <line x1="12" y1="20" x2="12" y2="4"></line>
-                                        <line x1="6" y1="20" x2="6" y2="14"></line>
-                                    </svg>
-                                </div>
-                                <div class="algo-flow-label">Evaluate Fitness</div>
-                            </div>
-                            <div class="algo-flow-arrow">↓</div>
-                            <div class="algo-flow-step">
-                                <div class="algo-flow-icon">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <line x1="8" y1="6" x2="21" y2="6"></line>
-                                        <line x1="8" y1="12" x2="21" y2="12"></line>
-                                        <line x1="8" y1="18" x2="21" y2="18"></line>
-                                        <line x1="3" y1="6" x2="3.01" y2="6"></line>
-                                        <line x1="3" y1="12" x2="3.01" y2="12"></line>
-                                        <line x1="3" y1="18" x2="3.01" y2="18"></line>
-                                    </svg>
-                                </div>
-                                <div class="algo-flow-label">Non-dominated Sorting</div>
-                            </div>
-                            <div class="algo-flow-arrow">↓</div>
-                            <div class="algo-flow-step">
-                                <div class="algo-flow-icon">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <polyline points="16 3 21 3 21 8"></polyline>
-                                        <line x1="4" y1="20" x2="21" y2="3"></line>
-                                        <polyline points="21 16 21 21 16 21"></polyline>
-                                        <line x1="15" y1="15" x2="21" y2="21"></line>
-                                        <line x1="4" y1="4" x2="9" y2="9"></line>
-                                    </svg>
-                                </div>
-                                <div class="algo-flow-label">Crossover & Mutation</div>
-                            </div>
-                            <div class="algo-flow-arrow">↓</div>
-                            <div class="algo-flow-step">
-                                <div class="algo-flow-icon">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <polyline points="23 4 23 10 17 10"></polyline>
-                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-                                    </svg>
-                                </div>
-                                <div class="algo-flow-label">Next Generation</div>
-                            </div>
-                            <div class="algo-flow-arrow algo-flow-loop">↻ Repeat</div>
-                            <div class="algo-flow-step algo-flow-final">
-                                <div class="algo-flow-icon">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                                    </svg>
-                                </div>
-                                <div class="algo-flow-label">Pareto Front</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
     <!-- ═══ CTA Section ═══ -->
     <section class="cta-section">
         <div class="cta-glow"></div>
@@ -483,6 +611,27 @@
                 <span>Get Started</span>
                 <span class="btn-icon">→</span>
             </a>
+        </div>
+    </section>
+
+    <!-- ═══ References Section ═══ -->
+    <section class="references-section" id="references">
+        <div class="section-container">
+            <h3 class="references-title">References</h3>
+            <ul class="references-list">
+                <li class="reference-item">
+                    <span class="ref-num">[1]</span>
+                    <span class="ref-text">
+                        T. Wang, O. I. Pulkkinen, and T. Aittokallio, &ldquo;Target-specific compound selectivity for multi-target drug discovery and repurposing,&rdquo; <em>Frontiers in Pharmacology</em>, vol. 13, p. 1003480, 2022, doi: <a href="https://doi.org/10.3389/fphar.2022.1003480" target="_blank" rel="noopener noreferrer">10.3389/fphar.2022.1003480</a>.
+                    </span>
+                </li>
+                <li class="reference-item">
+                    <span class="ref-num">[2]</span>
+                    <span class="ref-text">
+                        F. Hastedt, K. Hellgardt, S. Yaliraki, D. Zhang, and A. del Rio Chanona, &ldquo;MolPrice: Assessing Synthetic Accessibility of Molecules based on Market Value,&rdquo; <em>ChemRxiv</em>, 2025, doi: <a href="https://doi.org/10.26434/chemrxiv-2025-psjf9" target="_blank" rel="noopener noreferrer">10.26434/chemrxiv-2025-psjf9</a>.
+                    </span>
+                </li>
+            </ul>
         </div>
     </section>
 
@@ -555,17 +704,66 @@
             });
         }, observerOptions);
 
-        document.querySelectorAll('.timeline-item, .feature-card, .algo-block, .algo-visual-card, .viz-item').forEach(el => {
+        document.querySelectorAll('.viz-item, .setup-step-card, .opt-cockpit-panel, .opt-cockpit-chart-card, .opt-advanced-card').forEach(el => {
             el.classList.add('animate-on-scroll');
             observer.observe(el);
         });
 
+        // ─── Optimization Parameter Simulator ───
+        const meanSlider = document.getElementById('optWeightMean');
+        const minSlider = document.getElementById('optWeightMin');
+        const meanVal = document.getElementById('optWeightMeanVal');
+        const minVal = document.getElementById('optWeightMinVal');
+        const formulaW1 = document.getElementById('optFormulaW1');
+        const formulaW2 = document.getElementById('optFormulaW2');
+        const missingSlider = document.getElementById('optMissing');
+        const missingVal = document.getElementById('optMissingVal');
+
+        if (meanSlider && minSlider) {
+            meanSlider.addEventListener('input', () => {
+                const val = parseFloat(meanSlider.value);
+                meanVal.textContent = val.toFixed(2);
+                const compVal = Math.max(0, 1.0 - val);
+                minSlider.value = compVal.toFixed(2);
+                minVal.textContent = compVal.toFixed(2);
+                if (formulaW1) formulaW1.textContent = val.toFixed(2);
+                if (formulaW2) formulaW2.textContent = compVal.toFixed(2);
+            });
+
+            minSlider.addEventListener('input', () => {
+                const val = parseFloat(minSlider.value);
+                minVal.textContent = val.toFixed(2);
+                const compVal = Math.max(0, 1.0 - val);
+                meanSlider.value = compVal.toFixed(2);
+                meanVal.textContent = compVal.toFixed(2);
+                if (formulaW1) formulaW1.textContent = compVal.toFixed(2);
+                if (formulaW2) formulaW2.textContent = val.toFixed(2);
+            });
+        }
+
+        if (missingSlider && missingVal) {
+            missingSlider.addEventListener('input', () => {
+                missingVal.textContent = missingSlider.value + '%';
+            });
+        }
+
+        const ftolSlider = document.getElementById('optFtol');
+        const ftolVal = document.getElementById('optFtolVal');
+
+        if (ftolSlider && ftolVal) {
+            ftolSlider.addEventListener('input', () => {
+                const val = parseFloat(ftolSlider.value);
+                ftolVal.textContent = val.toFixed(4);
+                updateDemoHistoryChart(val);
+            });
+        }
+
         // ─── Scroll-spy: highlight active nav link ───
         const spySections = [
-            { id: 'how-it-works', href: '#how-it-works' },
+            { id: 'set-up', href: '#set-up' },
+            { id: 'optimization', href: '#optimization' },
             { id: 'visualizations', href: '#visualizations' },
-            { id: 'features', href: '#features' },
-            { id: 'algorithm', href: '#algorithm' },
+            { id: 'references', href: '#references' },
         ];
 
         const allNavLinks = document.querySelectorAll('.navbar-links .nav-link:not(.nav-cta), .navbar-mobile-menu .nav-link:not(.nav-cta)');
@@ -932,11 +1130,114 @@
             });
         }
 
+        // ─── Demo History Chart ───
+        function updateDemoHistoryChart(ftol = 0.0025) {
+            const chartEl = document.getElementById('demoHistoryChart');
+            if (!chartEl) return;
+
+            // F-Tol controls convergence termination: lower ftol -> more generations, higher selectivity, lower cost
+            const normFtol = Math.min(1, Math.max(0, (ftol - 0.0005) / (0.0100 - 0.0005)));
+            const maxG = Math.round(280 - normFtol * 165);
+
+            const generations = [];
+            const selectivityData = [];
+            const costData = [];
+
+            for (let g = 1; g <= maxG; g++) {
+                generations.push(g);
+                const selProgress = 1 - Math.exp(-g / 40);
+                const selNoise = Math.sin(g * 0.3) * 0.008 * (1 - selProgress);
+                selectivityData.push(0.4 + 1.15 * selProgress + selNoise);
+                const costProgress = 1 - Math.exp(-g / 45);
+                const costNoise = Math.cos(g * 0.25) * 25 * (1 - costProgress);
+                costData.push(5200 - 3900 * costProgress + costNoise);
+            }
+
+            const traceSel = {
+                x: generations,
+                y: selectivityData,
+                name: 'Selectivity',
+                mode: 'lines+markers',
+                line: { color: '#12f3b9', width: 2 },
+                marker: { size: 3 },
+                hoverinfo: 'none',
+            };
+
+            const traceCost = {
+                x: generations,
+                y: costData,
+                name: 'Cost',
+                mode: 'lines+markers',
+                line: { color: '#9d7cff', width: 2 },
+                marker: { size: 3 },
+                yaxis: 'y2',
+                hoverinfo: 'none',
+            };
+
+            const layout = {
+                margin: { t: 20, r: 90, l: 60, b: 65 },
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0.15)',
+                font: { color: '#9898b8', family: 'Inter, sans-serif' },
+                xaxis: {
+                    title: { text: 'Generation', font: { size: 12, color: '#9898b8' }, standoff: 15 },
+                    gridcolor: 'rgba(120, 120, 255, 0.08)',
+                    automargin: true,
+                    fixedrange: true,
+                    range: [0, 300],
+                    tickmode: 'array',
+                    tickvals: [0, 50, 100, 150, 200, 250],
+                },
+                yaxis: {
+                    title: { text: 'Best Selectivity Score', font: { size: 12, color: '#12f3b9' }, standoff: 15 },
+                    gridcolor: 'rgba(120, 120, 255, 0.08)',
+                    color: '#12f3b9',
+                    automargin: true,
+                    fixedrange: true,
+                    range: [0.3, 1.7],
+                },
+                yaxis2: {
+                    title: { text: 'Lowest Cost (USD)', font: { size: 12, color: '#9d7cff' }, standoff: 15 },
+                    overlaying: 'y',
+                    side: 'right',
+                    color: '#9d7cff',
+                    gridcolor: 'rgba(0,0,0,0)',
+                    tickformat: '$,.0f',
+                    automargin: true,
+                    fixedrange: true,
+                    range: [1000, 5500],
+                },
+                showlegend: true,
+                legend: {
+                    font: { size: 10 },
+                    bgcolor: 'rgba(0,0,0,0.4)',
+                    bordercolor: 'rgba(120,120,255,0.15)',
+                    borderwidth: 1,
+                    x: 0,
+                    y: 1.1,
+                    orientation: 'h',
+                },
+                hovermode: false,
+            };
+
+            Plotly.react('demoHistoryChart', [traceSel, traceCost], layout, {
+                responsive: true,
+                displayModeBar: false,
+                scrollZoom: false,
+                doubleClick: false,
+            });
+        }
+
+        function initDemoHistoryChart() {
+            updateDemoHistoryChart(0.0025);
+        }
+
         // Initialize charts
         function initDemoCharts() {
             initDemoParetoChart();
             initDemoHeatmapChart();
             initDemoDistributionChart();
+            initDemoHistoryChart();
         }
 
         if (document.readyState === 'loading') {
@@ -949,6 +1250,7 @@
             Plotly.Plots.resize('demoParetoChart');
             Plotly.Plots.resize('demoHeatmapChart');
             Plotly.Plots.resize('demoDistributionChart');
+            Plotly.Plots.resize('demoHistoryChart');
         });
     </script>
 
