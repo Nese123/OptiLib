@@ -3320,6 +3320,22 @@ input[type="number"]:focus {
     text-decoration: underline;
 }
 
+/* Citation in-text links */
+.citation-ref {
+    color: var(--accent-teal);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.88em;
+    padding: 0 0.15rem;
+    transition: color var(--transition-fast), text-shadow var(--transition-fast);
+}
+
+.citation-ref:hover {
+    color: #fff;
+    text-decoration: underline;
+    text-shadow: 0 0 8px rgba(18, 243, 185, 0.4);
+}
+
 @media (max-width: 768px) {
     .references-section {
         padding: 2.5rem 1.5rem;

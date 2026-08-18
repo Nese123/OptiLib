@@ -266,15 +266,15 @@ def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0
 
 
 # ══════════════════════════════════════════════════════════════
-#  BEST SOLUTION SELECTION (Utopia Distance)
+#  BEST SOLUTION SELECTION (Knee Point / Secant Line Distance)
 # ═══════════════════════════════════════════════════════════════
 
 def select_best_solution(res, problem):
-    """Pick the best-compromise solution from the Pareto front using utopia distance.
+    """Pick the best-compromise knee point solution from the Pareto front.
 
     Converts the optimizer's internal objective values back to real-world units,
-    plots the Pareto front, and selects the solution closest to the ideal
-    (max selectivity, min cost) utopia point in normalized space.
+    plots the Pareto front, and identifies the knee point (elbow) using the
+    Maximum Perpendicular Distance to the Secant Line (Chord method) in normalized space.
 
     Returns:
         best_idx: Index of the winning solution in `res.X`.
@@ -319,17 +319,25 @@ def select_best_solution(res, problem):
     range_vals[range_vals == 0] = 1.0  # Avoid division by zero if all solutions share a value
     norm_front = (front_for_plotting - min_vals) / range_vals
 
-    # Utopia-point selection: find the solution with the minimum Euclidean distance
-    # to the theoretical "utopia" point. In our normalized space:
-    # Selectivity (index 0) should be maximized, so ideal is 1.0.
-    # Cost (index 1) should be minimized, so ideal is 0.0.
-    utopia_point = np.array([1.0, 0.0])
-    
-    # Calculate Euclidean distance from each point to the utopia point
-    distances = np.linalg.norm(norm_front - utopia_point, axis=1)
-    
-    # Choose the solution with the minimum distance
-    best_idx = np.argmin(distances)
+    # Knee-point selection: Maximum Perpendicular Distance to the Secant Line (Chord method)
+    # 1. Identify the extreme endpoints on the Pareto front (lowest and highest selectivity)
+    idx_min_sel = np.argmin(norm_front[:, 0])
+    idx_max_sel = np.argmax(norm_front[:, 0])
+    p1 = norm_front[idx_min_sel]  # Extreme low selectivity / low cost
+    p2 = norm_front[idx_max_sel]  # Extreme high selectivity / high cost
+
+    # 2. Vector of the secant line connecting the two extremes
+    line_vec = p2 - p1
+    line_len = np.linalg.norm(line_vec)
+
+    if line_len > 1e-9:
+        # Perpendicular distance from each point p to the line passing through p1 and p2:
+        # Distance = |(p2_x - p1_x)*(p_y - p1_y) - (p2_y - p1_y)*(p_x - p1_x)| / ||p2 - p1||
+        cross_product = (line_vec[0] * (norm_front[:, 1] - p1[1])) - (line_vec[1] * (norm_front[:, 0] - p1[0]))
+        distances = np.abs(cross_product) / line_len
+        best_idx = int(np.argmax(distances))
+    else:
+        best_idx = 0
 
     return best_idx, front
 

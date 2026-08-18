@@ -7,6 +7,7 @@ Full pipeline: Upload targets → ChEMBL query → selectivity matrix → NSGA-I
 import os
 import sys
 import json
+import sqlite3
 import threading
 import warnings
 import tempfile
@@ -396,7 +397,15 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
 
         # Get the actual names of the uploaded targets
         query0 = f"""
-            SELECT DISTINCT COALESCE(td.pref_name, td.chembl_id) AS Target_Name
+            SELECT DISTINCT COALESCE(
+                (SELECT csy.component_synonym 
+                 FROM target_components tc 
+                 JOIN component_synonyms csy ON tc.component_id = csy.component_id 
+                 WHERE tc.tid = td.tid AND csy.syn_type = 'GENE_SYMBOL' 
+                 LIMIT 1),
+                td.pref_name, 
+                td.chembl_id
+            ) AS Target_Name
             FROM target_dictionary td
             WHERE ({where_targets})
         """
@@ -414,7 +423,15 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                 cs.standard_inchi_key AS InChIKey,
                 cp.full_mwt AS MW,
                 td.chembl_id AS Target_ChEMBL_ID,
-                COALESCE(td.pref_name, td.chembl_id) AS Target_Name,
+                COALESCE(
+                    (SELECT csy.component_synonym 
+                     FROM target_components tc 
+                     JOIN component_synonyms csy ON tc.component_id = csy.component_id 
+                     WHERE tc.tid = td.tid AND csy.syn_type = 'GENE_SYMBOL' 
+                     LIMIT 1),
+                    td.pref_name,
+                    td.chembl_id
+                ) AS Target_Name,
                 cts.selectivity_score AS Selectivity_Score
             FROM compound_target_selectivity cts
             JOIN target_dictionary td ON cts.tid = td.tid
@@ -1101,13 +1118,72 @@ def select_solution():
         return jsonify({"error": str(e)}), 500
 
 
+def _get_target_info(target_list):
+    """
+    Returns (gene_symbols, full_names) for a list of target columns.
+    Maps to standard gene symbols (e.g. EGFR) and full preferred names (e.g. Epidermal growth factor receptor).
+    """
+    if not target_list:
+        return target_list, target_list
+    try:
+        db_path = str(DATABASE_DIR / "chembl_36.db")
+        if not os.path.exists(db_path):
+            return target_list, target_list
+        with sqlite3.connect(db_path) as conn:
+            placeholders = ",".join(["?"] * len(target_list))
+            query = f"""
+                SELECT td.chembl_id, td.pref_name, csy.component_synonym
+                FROM target_dictionary td
+                JOIN target_components tc ON td.tid = tc.tid
+                JOIN component_synonyms csy ON tc.component_id = csy.component_id
+                WHERE (
+                    td.pref_name COLLATE NOCASE IN ({placeholders}) OR
+                    td.chembl_id COLLATE NOCASE IN ({placeholders}) OR
+                    csy.component_synonym COLLATE NOCASE IN ({placeholders})
+                )
+                AND csy.syn_type = 'GENE_SYMBOL'
+                AND td.target_type = 'SINGLE PROTEIN'
+                AND td.organism = 'Homo sapiens'
+            """
+            rows = conn.execute(query, target_list * 3).fetchall()
+            
+            sym_map = {}
+            name_map = {}
+            for cid, pref_name, sym in rows:
+                p_name = pref_name or sym or cid
+                s_name = sym or pref_name or cid
+                if cid:
+                    sym_map[str(cid).lower()] = s_name
+                    name_map[str(cid).lower()] = p_name
+                if pref_name:
+                    sym_map[str(pref_name).lower()] = s_name
+                    name_map[str(pref_name).lower()] = p_name
+                if sym:
+                    sym_map[str(sym).lower()] = s_name
+                    name_map[str(sym).lower()] = p_name
+            
+            symbols = [sym_map.get(str(t).lower(), t) for t in target_list]
+            names = [name_map.get(str(t).lower(), t) for t in target_list]
+            return symbols, names
+    except Exception:
+        return target_list, target_list
+
+
+def _map_targets_to_gene_symbols(target_list):
+    """Map a list of target names/IDs/pref_names to their gene symbols if available."""
+    symbols, _ = _get_target_info(target_list)
+    return symbols
+
+
 def _build_heatmap_cache(df):
     """Pre-compute the heatmap JSON dict so /api/heatmap-data is instant."""
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
+    target_symbols, target_names = _get_target_info(sel_cols)
     return {
         "matrix": df[sel_cols].astype(object).where(pd.notna(df[sel_cols]), None).values.tolist(),
         "compounds": df["InChIKey"].tolist() if "InChIKey" in df.columns else df.index.tolist(),
-        "targets": sel_cols,
+        "targets": target_symbols,
+        "target_names": target_names,
     }
 
 
@@ -1125,12 +1201,13 @@ def heatmap_data():
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
     matrix = df[sel_cols].astype(object).where(pd.notna(df[sel_cols]), None).values.tolist()
     compounds = df["InChIKey"].tolist() if "InChIKey" in df.columns else df.index.tolist()
-    targets = sel_cols
+    targets, target_names = _get_target_info(sel_cols)
 
     return jsonify({
         "matrix": matrix,
         "compounds": compounds,
         "targets": targets,
+        "target_names": target_names,
     })
 
 

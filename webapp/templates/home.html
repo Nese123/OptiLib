@@ -93,7 +93,8 @@
                         <h3 class="setup-card-title">Target Upload & Validation</h3>
                         <p class="setup-card-desc">
                             Upload your biological targets of interest. OptiLib validates each entry against the ChEMBL
-                            database in real time, resolving identifiers and confirming bioactivity assay coverage.
+                            database <a href="#references" class="citation-ref">[1]</a> in real time, resolving
+                            identifiers and confirming bioactivity assay coverage.
                         </p>
                     </div>
 
@@ -143,7 +144,8 @@
                     <div class="setup-card-top">
                         <h3 class="setup-card-title">Selectivity Matrix & Pricing</h3>
                         <p class="setup-card-desc">
-                            OptiLib queries the ChEMBL database for selective candidate compounds, assigns a price to
+                            OptiLib queries the ChEMBL database <a href="#references" class="citation-ref">[1]</a> for
+                            selective candidate compounds, assigns a price to
                             each compound, and builds the full
                             compound × target selectivity matrix.
                         </p>
@@ -185,12 +187,15 @@
                             <span class="setup-feat-bullet">•</span>
                             <div><strong>Automated Bioactivity Discovery:</strong> The algorithm uses target-specific
                                 selectivity
-                                scores to discover selective compounds.</div>
+                                scores <a href="#references" class="citation-ref">[2]</a> to discover selective
+                                compounds.</div>
                         </div>
                         <div class="setup-feat-item">
                             <span class="setup-feat-bullet">•</span>
-                            <div><strong>Price Data:</strong> Uses the MolPort database to find real prices for
-                                compounds. If the compound is not on MolPort, the MolPrice machine learning model is
+                            <div><strong>Price Data:</strong> Uses the MolPort database <a href="#references"
+                                    class="citation-ref">[3]</a> to find real prices for
+                                compounds. If the compound is not on MolPort, the MolPrice machine learning model <a
+                                    href="#references" class="citation-ref">[4]</a> is
                                 used to predict prices from chemical structure.</div>
                         </div>
                         <div class="setup-feat-item">
@@ -209,9 +214,11 @@
         <div class="section-container">
             <div class="section-header">
                 <h2 class="section-title">Optimization</h2>
-                <p class="section-subtitle">Fine-tune optimization parameters and watch the algorithm converge on
-                    optimal
-                    drug libraries in real time.</p>
+                <p class="section-subtitle">OptiLib uses the NSGA-II multi-objective optimization algorithm to find the
+                    best drug libraries for your set of targets, integrated via the pymoo Python
+                    library <a href="#references" class="citation-ref">[5]</a>. The algorithm has many parameters to
+                    tweak. Run it with the default
+                    options or tweak them to your specific needs!</p>
             </div>
 
             <!-- Cockpit Dashboard (Asymmetric Grid) -->
@@ -274,7 +281,8 @@
                                 <span class="opt-slider-val" id="optMissingVal">10%</span>
                             </div>
                             <input type="range" class="opt-slider" id="optMissing" min="0" max="20" step="1" value="10">
-                            <div class="opt-slider-sub">Tolerance threshold for targets without an active compound
+                            <div class="opt-slider-sub">Amount of targets without an active compound in the final
+                                library (% of original amount)
                             </div>
                         </div>
 
@@ -286,8 +294,8 @@
                             </div>
                             <input type="range" class="opt-slider" id="optFtol" min="0.0005" max="0.0100" step="0.0005"
                                 value="0.0025">
-                            <div class="opt-slider-sub">Minimum Pareto front improvement required before early
-                                termination</div>
+                            <div class="opt-slider-sub">Minimum objective improvement required before stopping
+                                optimization</div>
                         </div>
                     </div>
                 </div>
@@ -622,13 +630,45 @@
                 <li class="reference-item">
                     <span class="ref-num">[1]</span>
                     <span class="ref-text">
-                        T. Wang, O. I. Pulkkinen, and T. Aittokallio, &ldquo;Target-specific compound selectivity for multi-target drug discovery and repurposing,&rdquo; <em>Frontiers in Pharmacology</em>, vol. 13, p. 1003480, 2022, doi: <a href="https://doi.org/10.3389/fphar.2022.1003480" target="_blank" rel="noopener noreferrer">10.3389/fphar.2022.1003480</a>.
+                        B. Zdrazil <em>et al.</em>, &ldquo;The ChEMBL Database in 2023: a drug discovery platform
+                        spanning multiple bioactivity data types and time periods,&rdquo; <em>Nucleic Acids
+                            Research</em>, vol. 52, no. D1, pp. D1180&ndash;D1192, 2024, doi: <a
+                            href="https://doi.org/10.1093/nar/gkad1004" target="_blank"
+                            rel="noopener noreferrer">10.1093/nar/gkad1004</a>.
                     </span>
                 </li>
                 <li class="reference-item">
                     <span class="ref-num">[2]</span>
                     <span class="ref-text">
-                        F. Hastedt, K. Hellgardt, S. Yaliraki, D. Zhang, and A. del Rio Chanona, &ldquo;MolPrice: Assessing Synthetic Accessibility of Molecules based on Market Value,&rdquo; <em>ChemRxiv</em>, 2025, doi: <a href="https://doi.org/10.26434/chemrxiv-2025-psjf9" target="_blank" rel="noopener noreferrer">10.26434/chemrxiv-2025-psjf9</a>.
+                        T. Wang, O. I. Pulkkinen, and T. Aittokallio, &ldquo;Target-specific compound selectivity for
+                        multi-target drug discovery and repurposing,&rdquo; <em>Frontiers in Pharmacology</em>, vol. 13,
+                        p. 1003480, 2022, doi: <a href="https://doi.org/10.3389/fphar.2022.1003480" target="_blank"
+                            rel="noopener noreferrer">10.3389/fphar.2022.1003480</a>.
+                    </span>
+                </li>
+                <li class="reference-item">
+                    <span class="ref-num">[3]</span>
+                    <span class="ref-text">
+                        MolPort. <em>MolPort Compound Database</em>. <a href="https://www.molport.com" target="_blank"
+                            rel="noopener noreferrer">https://www.molport.com</a>.
+                    </span>
+                </li>
+                <li class="reference-item">
+                    <span class="ref-num">[4]</span>
+                    <span class="ref-text">
+                        F. Hastedt, K. Hellgardt, S. Yaliraki, D. Zhang, and A. del Rio Chanona, &ldquo;MolPrice:
+                        Assessing Synthetic Accessibility of Molecules based on Market Value,&rdquo; <em>ChemRxiv</em>,
+                        2025, doi: <a href="https://doi.org/10.26434/chemrxiv-2025-psjf9" target="_blank"
+                            rel="noopener noreferrer">10.26434/chemrxiv-2025-psjf9</a>.
+                    </span>
+                </li>
+                <li class="reference-item">
+                    <span class="ref-num">[5]</span>
+                    <span class="ref-text">
+                        J. Blank and K. Deb, &ldquo;Pymoo: Multi-Objective Optimization in Python,&rdquo; <em>IEEE
+                            Access</em>, vol. 8, pp. 89497&ndash;89509, 2020, doi: <a
+                            href="https://doi.org/10.1109/ACCESS.2020.2990567" target="_blank"
+                            rel="noopener noreferrer">10.1109/ACCESS.2020.2990567</a>.
                     </span>
                 </li>
             </ul>
@@ -771,16 +811,21 @@
         function updateActiveNav() {
             const scrollY = window.scrollY;
             const navHeight = navbar.offsetHeight;
+            const scrollOffset = navHeight + 80;
+            const isBottom = (window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 50);
+
             let activeHref = '/'; // default to Home
 
-            for (const sec of spySections) {
-                const el = document.getElementById(sec.id);
-                if (el) {
-                    const top = el.offsetTop - navHeight - 80;
-                    const bottom = top + el.offsetHeight;
-                    if (scrollY >= top && scrollY < bottom) {
-                        activeHref = sec.href;
-                        break;
+            if (isBottom) {
+                activeHref = '#references';
+            } else {
+                for (const sec of spySections) {
+                    const el = document.getElementById(sec.id);
+                    if (el) {
+                        const top = el.offsetTop - scrollOffset;
+                        if (scrollY >= top) {
+                            activeHref = sec.href;
+                        }
                     }
                 }
             }
@@ -964,7 +1009,20 @@
             const chartEl = document.getElementById('demoHeatmapChart');
             if (!chartEl) return;
 
-            const targets = ['EGFR', 'BRAF', 'ERBB2', 'PIK3CA', 'CDK4', 'MTOR', 'JAK2', 'ALK', 'MET', 'KDR'];
+            const targetDetails = [
+                { symbol: 'EGFR', name: 'Epidermal growth factor receptor' },
+                { symbol: 'BRAF', name: 'B-Raf proto-oncogene, serine/threonine kinase' },
+                { symbol: 'ERBB2', name: 'Erb-B2 receptor tyrosine kinase 2' },
+                { symbol: 'PIK3CA', name: 'Phosphatidylinositol-4,5-bisphosphate 3-kinase catalytic subunit alpha' },
+                { symbol: 'CDK4', name: 'Cyclin-dependent kinase 4' },
+                { symbol: 'MTOR', name: 'Mechanistic target of rapamycin kinase' },
+                { symbol: 'JAK2', name: 'Janus kinase 2' },
+                { symbol: 'ALK', name: 'ALK receptor tyrosine kinase' },
+                { symbol: 'MET', name: 'MET proto-oncogene, receptor tyrosine kinase' },
+                { symbol: 'KDR', name: 'Kinase insert domain receptor' }
+            ];
+            const targets = targetDetails.map(t => t.symbol);
+            const targetNames = targetDetails.map(t => `${t.name} (${t.symbol})`);
             const compounds = ['CHEMBL25', 'CHEMBL1800', 'CHEMBL278', 'CHEMBL428', 'CHEMBL192', 'CHEMBL554', 'CHEMBL392', 'CHEMBL762', 'CHEMBL901', 'CHEMBL1122'];
             const matrix = [
                 [1.85, 0.42, -0.30, null, 0.30, 0.55, 0.40, 1.45, -0.20, 0.88],
@@ -984,7 +1042,7 @@
             );
 
             const customData = matrix.map((row, i) =>
-                row.map(() => compounds[i])
+                row.map((_, j) => [compounds[i], targetNames[j]])
             );
 
             const trace = {
@@ -995,7 +1053,7 @@
                 customdata: customData,
                 type: 'heatmap',
                 colorscale: 'Viridis',
-                hovertemplate: 'Target: %{x}<br>Compound: %{customdata}<br>Selectivity: %{text}<extra></extra>',
+                hovertemplate: 'Target: %{customdata[1]}<br>Compound: %{customdata[0]}<br>Selectivity: %{text}<extra></extra>',
                 colorbar: {
                     title: { text: 'Selectivity', font: { size: 11, color: '#9898b8' } },
                     tickfont: { color: '#9898b8', size: 10 },
@@ -1037,21 +1095,21 @@
             if (!chartEl) return;
 
             const stats = [
-                { target: 'MTOR', max: 1.95, median: 0.85, min: 0.40 },
-                { target: 'BRAF', max: 1.92, median: 0.75, min: 0.35 },
-                { target: 'ALK', max: 1.90, median: 1.10, min: 0.45 },
-                { target: 'ERBB2', max: 1.88, median: 0.20, min: -0.60 },
-                { target: 'EGFR', max: 1.85, median: 0.30, min: -0.50 },
-                { target: 'KDR', max: 1.85, median: -0.20, min: -0.70 },
-                { target: 'CDK4', max: 1.82, median: 0.65, min: 0.30 },
-                { target: 'JAK2', max: 1.80, median: 0.55, min: 0.25 },
-                { target: 'PIK3CA', max: 1.75, median: 0.10, min: -0.45 },
-                { target: 'MET', max: 1.75, median: -0.25, min: -0.65 }
+                { target: 'MTOR', fullName: 'Mechanistic target of rapamycin kinase', max: 1.95, median: 0.85, min: 0.40 },
+                { target: 'BRAF', fullName: 'B-Raf proto-oncogene, serine/threonine kinase', max: 1.92, median: 0.75, min: 0.35 },
+                { target: 'ALK', fullName: 'ALK receptor tyrosine kinase', max: 1.90, median: 1.10, min: 0.45 },
+                { target: 'ERBB2', fullName: 'Erb-B2 receptor tyrosine kinase 2', max: 1.88, median: 0.20, min: -0.60 },
+                { target: 'EGFR', fullName: 'Epidermal growth factor receptor', max: 1.85, median: 0.30, min: -0.50 },
+                { target: 'KDR', fullName: 'Kinase insert domain receptor', max: 1.85, median: -0.20, min: -0.70 },
+                { target: 'CDK4', fullName: 'Cyclin-dependent kinase 4', max: 1.82, median: 0.65, min: 0.30 },
+                { target: 'JAK2', fullName: 'Janus kinase 2', max: 1.80, median: 0.55, min: 0.25 },
+                { target: 'PIK3CA', fullName: 'Phosphatidylinositol-4,5-bisphosphate 3-kinase catalytic subunit alpha', max: 1.75, median: 0.10, min: -0.45 },
+                { target: 'MET', fullName: 'MET proto-oncogene, receptor tyrosine kinase', max: 1.75, median: -0.25, min: -0.65 }
             ];
 
             const x = stats.map((_, i) => i);
-            const hoverTemplate = '<b>%{customdata[3]}</b><br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
-            const customData = stats.map(s => [s.max, s.median, s.min, s.target]);
+            const hoverTemplate = '<b>%{customdata[4]}</b> (%{customdata[3]})<br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
+            const customData = stats.map(s => [s.max, s.median, s.min, s.target, s.fullName]);
 
             const traceMax = {
                 x: x,

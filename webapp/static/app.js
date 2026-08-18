@@ -1263,13 +1263,18 @@ async function loadHeatmap(prefetchedData) {
             if (!res.ok) return;
         }
 
+        const targetNames = (data.target_names || data.targets).map((name, j) => {
+            const symbol = data.targets[j];
+            return (name && name !== symbol) ? `${name} (${symbol})` : symbol;
+        });
+
         const hoverText = data.matrix.map(row =>
             row.map(val => val === null ? "No Data" : val.toFixed(2))
         );
 
         const truncCompounds = data.compounds.map((s) => s.length > 30 ? s.substring(0, 27) + '...' : s);
         const customData = data.matrix.map((row, i) =>
-            row.map(() => truncCompounds[i])
+            row.map((_, j) => [truncCompounds[i], targetNames[j]])
         );
 
         const trace = {
@@ -1280,7 +1285,7 @@ async function loadHeatmap(prefetchedData) {
             customdata: customData,
             type: 'heatmap',
             colorscale: 'Viridis',
-            hovertemplate: 'Target: %{x}<br>Compound: %{customdata}<br>Selectivity: %{text}<extra></extra>',
+            hovertemplate: 'Target: %{customdata[1]}<br>Compound: %{customdata[0]}<br>Selectivity: %{text}<extra></extra>',
             colorbar: {
                 title: { text: 'Selectivity', font: { size: 12, color: '#9898b8' } },
                 tickfont: { color: '#9898b8' },
@@ -1292,18 +1297,19 @@ async function loadHeatmap(prefetchedData) {
             plot_bgcolor: 'rgba(255,255,255,0.1)',
             font: { family: 'Inter, sans-serif', color: '#9898b8', size: 10 },
             xaxis: {
-                showticklabels: false,
+                title: { text: 'Targets', font: { size: 12, color: '#9898b8' }, standoff: 5 },
                 showgrid: false,
-                title: { text: 'Targets', font: { size: 12, color: '#9898b8' } },
                 side: 'top',
+                automargin: true,
+                tickfont: { color: '#9898b8', size: 10 },
             },
             yaxis: {
                 showticklabels: false,
                 showgrid: false,
                 autorange: 'reversed',
-                title: { text: 'Compounds', font: { size: 12, color: '#9898b8' } },
+                title: { text: 'Compounds', font: { size: 12, color: '#9898b8' }, standoff: 5 },
             },
-            margin: { l: 40, r: 20, t: 40, b: 40 },
+            margin: { l: 60, r: 35, t: 60, b: 45 },
         };
 
         Plotly.newPlot('heatmapChart', [trace], layout, {
@@ -1327,6 +1333,7 @@ async function loadDistributionChart(prefetchedData) {
 
         const numTargets = data.targets.length;
         const numCompounds = data.matrix.length;
+        const targetNames = data.target_names || data.targets;
 
         let stats = [];
         for (let j = 0; j < numTargets; j++) {
@@ -1352,8 +1359,14 @@ async function loadDistributionChart(prefetchedData) {
                 median = col[mid];
             }
 
+            const symbol = data.targets[j];
+            const fullName = targetNames[j] || symbol;
+            const displayName = (fullName && fullName !== symbol) ? `${fullName} (${symbol})` : symbol;
+
             stats.push({
-                target: data.targets[j],
+                target: symbol,
+                fullName: fullName,
+                displayName: displayName,
                 max: max,
                 median: median,
                 min: min
@@ -1364,8 +1377,8 @@ async function loadDistributionChart(prefetchedData) {
 
         const x = stats.map((s, i) => i);
 
-        const hoverTemplate = '<b>%{customdata[3]}</b><br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
-        const customData = stats.map(s => [s.max, s.median, s.min, s.target]);
+        const hoverTemplate = '<b>%{customdata[4]}</b><br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
+        const customData = stats.map(s => [s.max, s.median, s.min, s.target, s.displayName]);
 
         const traceMax = {
             x: x,
@@ -1406,11 +1419,15 @@ async function loadDistributionChart(prefetchedData) {
             plot_bgcolor: 'rgba(0,0,0,0.15)',
             font: { family: 'Inter, sans-serif', color: '#9898b8' },
             xaxis: {
-                showticklabels: false,
-                title: { text: 'Targets', font: { size: 13, color: '#9898b8' } },
+                title: { text: 'Targets', font: { size: 13, color: '#9898b8' }, standoff: 15 },
+                tickvals: stats.map((_, i) => i),
+                ticktext: stats.map(s => s.target),
+                tickfont: { color: '#9898b8', size: 10 },
+                tickangle: -45,
                 zeroline: false,
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
-                range: [-0.5, stats.length - 0.5]
+                range: [-0.85, stats.length - 0.15],
+                automargin: true,
             },
             yaxis: {
                 title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' }, standoff: 5 },
@@ -1427,7 +1444,7 @@ async function loadDistributionChart(prefetchedData) {
                 bordercolor: 'rgba(120,120,255,0.1)',
                 borderwidth: 1
             },
-            margin: { l: 55, r: 30, t: 20, b: 60 },
+            margin: { l: 55, r: 30, t: 20, b: 70 },
             hovermode: 'closest'
         };
 
