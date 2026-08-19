@@ -287,6 +287,21 @@
                         <input type="number" id="ftol" value="0.0025" min="0.0001" max="1.0" step="0.0001">
                     </div>
 
+                    <!-- Maximum Price Limit -->
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="maxPriceToggle" style="margin: 0;">
+                            <label for="maxPriceToggle" style="margin: 0; font-size: 0.9em; cursor: pointer;">Maximum
+                                Price Limit (USD)
+                                <span class="info-icon"
+                                    data-tooltip="When enabled, filters the Pareto front to only show solutions whose total library cost stays below the specified amount.">?</span></label>
+                        </div>
+                        <div id="maxPriceInputContainer" style="display: none; margin-top: 10px;">
+                            <input type="number" id="maxPriceValue" value="10000" step="100" min="1"
+                                placeholder="e.g. 10000" style="width: 50%;">
+                        </div>
+                    </div>
+
                     <!-- Advanced Settings -->
                     <div style="grid-column: 1 / -1;">
                         <!-- Advanced Settings Toggle -->
@@ -459,7 +474,8 @@
                                 Targets <strong id="heatmapTargetSliderRangeText"
                                     style="color: var(--text-primary); font-size: 0.78rem;">1–40</strong>
                                 <span id="heatmapTargetSliderTotalText"
-                                    style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; margin-left: 2px;">of 75</span>
+                                    style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; margin-left: 2px;">of
+                                    75</span>
                             </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <span id="heatmapTargetSliderMinLabel"
@@ -482,7 +498,8 @@
                                 <strong id="heatmapCompoundSliderRangeText"
                                     style="color: var(--text-primary); font-size: 0.78rem; display: block; margin-top: 1px; white-space: nowrap;">1–20</strong>
                                 <span id="heatmapCompoundSliderTotalText"
-                                    style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; display: block; margin-top: 1px; white-space: nowrap;">of 50</span>
+                                    style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; display: block; margin-top: 1px; white-space: nowrap;">of
+                                    50</span>
                             </div>
 
                             <span id="heatmapCompoundSliderMinLabel"
@@ -525,7 +542,8 @@
                             Targets <strong id="distributionSliderRangeText"
                                 style="color: var(--text-primary); font-size: 0.78rem;">1–40</strong>
                             <span id="distributionSliderTotalText"
-                                style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; margin-left: 2px;">of 75</span>
+                                style="font-size: 0.68rem; color: var(--text-muted); font-weight: 500; margin-left: 2px;">of
+                                75</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <span id="distributionSliderMinLabel"
@@ -590,6 +608,15 @@
         if (advancedSettingsToggle && advancedSettingsContainer) {
             advancedSettingsToggle.addEventListener('change', (e) => {
                 advancedSettingsContainer.style.display = e.target.checked ? 'block' : 'none';
+            });
+        }
+
+        // ─── Maximum Price Limit Toggle ───
+        const maxPriceToggle = document.getElementById('maxPriceToggle');
+        const maxPriceInputContainer = document.getElementById('maxPriceInputContainer');
+        if (maxPriceToggle && maxPriceInputContainer) {
+            maxPriceToggle.addEventListener('change', (e) => {
+                maxPriceInputContainer.style.display = e.target.checked ? 'block' : 'none';
             });
         }
     </script>

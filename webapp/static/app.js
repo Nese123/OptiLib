@@ -781,6 +781,12 @@ async function loadDatasetInfo() {
         $('#statDrugs').textContent = data.num_drugs.toLocaleString();
         $('#statTargets').textContent = data.num_targets.toLocaleString();
         $('#statCost').textContent = `$${data.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+        // Update pool cost reference in the Maximum Price Limit section
+        const poolCostEl = $('#maxPricePoolCost');
+        if (poolCostEl) {
+            poolCostEl.textContent = `$${data.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+        }
     } catch (err) {
         // Silent
     }
@@ -807,6 +813,7 @@ runOptBtn.addEventListener('click', async () => {
 
     initHistoryChart();
 
+    const maxPriceEnabled = $('#maxPriceToggle') && $('#maxPriceToggle').checked;
     const body = {
         weight_mean: parseFloat(weightMean.value),
         allowed_miss_pct: parseInt(allowedMiss.value) / 100.0,
@@ -815,6 +822,7 @@ runOptBtn.addEventListener('click', async () => {
         max_gen: parseInt($('#maxGen').value),
         ftol: parseFloat($('#ftol').value),
         term_period: parseInt($('#termPeriod').value),
+        max_price: maxPriceEnabled ? parseFloat($('#maxPriceValue').value) : null,
     };
 
     try {

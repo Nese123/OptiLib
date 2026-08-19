@@ -95,7 +95,7 @@ class WebappCallback(Callback):
             G = self.last_pop_G
             F = self.last_pop_F
 
-            feasible_idx = np.where(G <= 0)[0]
+            feasible_idx = np.where(G.ravel() <= 0)[0] if G.ndim == 1 else np.where(np.all(G <= 0, axis=1))[0]
             if len(feasible_idx) > 0:
                 feasible_F = F[feasible_idx]
                 min_obj1 = np.min(feasible_F[:, 0])
@@ -710,6 +710,8 @@ def run_optimization_route():
     max_gen = int(data.get("max_gen", 1000))
     ftol = float(data.get("ftol", 0.0025))
     term_period = int(data.get("term_period", 30))
+    max_price_raw = data.get("max_price", None)
+    max_price = float(max_price_raw) if max_price_raw is not None else None
 
     # Clamp values
     pop_size = max(pop_size, 5)
@@ -729,7 +731,7 @@ def run_optimization_route():
 
     thread = threading.Thread(
         target=_run_nsga2,
-        args=(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol, term_period),
+        args=(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol, term_period, max_price),
         daemon=True,
     )
     thread.start()
@@ -812,7 +814,7 @@ def stop_opt_state():
     return jsonify({"status": "stop_requested"})
 
 
-def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol=0.0025, term_period=30):
+def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol=0.0025, term_period=30, max_price=None):
     """Run NSGA-II optimization using the loaded dataset."""
     cb = None  # Keep callback accessible for early-stop result extraction
     problem = None
@@ -857,7 +859,7 @@ def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max
         res_F = res.F.copy()
         del res
 
-        _process_and_store_results(res_X, res_F, best_idx, front, problem)
+        _process_and_store_results(res_X, res_F, best_idx, front, problem, max_price=max_price)
 
         with _lock:
             opt_state["status"] = "complete"
@@ -866,7 +868,7 @@ def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max
         # Early stop: extract results from the callback's saved population snapshot
         if cb is not None and cb.last_pop_X is not None and problem is not None:
             try:
-                _process_stopped_results(cb, problem)
+                _process_stopped_results(cb, problem, max_price=max_price)
             except Exception as inner_e:
                 with _lock:
                     opt_state["status"] = "error"
@@ -883,7 +885,7 @@ def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max
         traceback.print_exc()
 
 
-def _process_stopped_results(cb, problem):
+def _process_stopped_results(cb, problem, max_price=None):
     """Build and store results from the callback's population snapshot after early stop."""
     # Filter to feasible solutions (constraint G <= 0)
     G = cb.last_pop_G
@@ -903,14 +905,71 @@ def _process_stopped_results(cb, problem):
     res_light = _LightResult(res_X, res_F)
     best_idx, front = select_best_solution(res_light, problem)
 
-    _process_and_store_results(res_X, res_F, best_idx, front, problem)
+    _process_and_store_results(res_X, res_F, best_idx, front, problem, max_price=max_price)
 
     with _lock:
         opt_state["status"] = "complete"
 
 
-def _process_and_store_results(res_X, res_F, best_idx, front, problem):
+def _find_knee_point(front):
+    """Find the knee point (elbow) on a 2D Pareto front using the chord method.
+
+    Uses the Maximum Perpendicular Distance to the Secant Line connecting
+    the two extreme points on the front, in normalized space.
+
+    Args:
+        front: 2D array of shape (N, 2) with real-world [selectivity, cost].
+
+    Returns:
+        best_idx: Index of the knee point in the front array.
+    """
+    if len(front) <= 1:
+        return 0
+
+    # Normalize to [0, 1]
+    min_vals = np.min(front, axis=0)
+    max_vals = np.max(front, axis=0)
+    range_vals = max_vals - min_vals
+    range_vals[range_vals == 0] = 1.0
+    norm_front = (front - min_vals) / range_vals
+
+    # Extreme endpoints
+    idx_min_sel = np.argmin(norm_front[:, 0])
+    idx_max_sel = np.argmax(norm_front[:, 0])
+    p1 = norm_front[idx_min_sel]
+    p2 = norm_front[idx_max_sel]
+
+    line_vec = p2 - p1
+    line_len = np.linalg.norm(line_vec)
+
+    if line_len > 1e-9:
+        cross_product = (line_vec[0] * (norm_front[:, 1] - p1[1])) - (line_vec[1] * (norm_front[:, 0] - p1[0]))
+        distances = np.abs(cross_product) / line_len
+        return int(np.argmax(distances))
+    return 0
+
+
+def _process_and_store_results(res_X, res_F, best_idx, front, problem, max_price=None):
     """Common result processing shared by normal completion and early stop."""
+
+    # ── Post-optimization price filter ──
+    # Instead of constraining the optimizer (which impoverishes its gene pool),
+    # we filter the full Pareto front to only keep solutions within budget.
+    if max_price is not None:
+        price_mask = front[:, 1] <= max_price
+        if not np.any(price_mask):
+            cheapest = front[:, 1].min()
+            raise ValueError(
+                f"No solutions found within the price limit of ${max_price:,.0f}. "
+                f"The cheapest Pareto-optimal solution costs ${cheapest:,.0f}. "
+                f"Try increasing the limit."
+            )
+        res_X = res_X[price_mask]
+        res_F = res_F[price_mask]
+        front = front[price_mask]
+        # Re-select the knee point from the filtered front
+        best_idx = _find_knee_point(front)
+
     # Load matrix from CSV on demand (avoids keeping large DataFrame resident)
     with _lock:
         matrix_file = dataset["matrix_file"]
