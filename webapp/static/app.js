@@ -1582,12 +1582,57 @@ async function loadDistributionChart(prefetchedData) {
         const hoverTemplate = '<b>%{customdata[4]}</b><br>Max: %{customdata[0]:.2f}<br>Median: %{customdata[1]:.2f}<br>Min: %{customdata[2]:.2f}<extra></extra>';
         const customData = stats.map(s => [s.max, s.median, s.min, s.target, s.displayName]);
 
+        const minBases = [];
+        const minLens = [];
+        const medBases = [];
+        const medLens = [];
+        const maxBases = [];
+        const maxLens = [];
+
+        stats.forEach(s => {
+            const mn = s.min;
+            const md = s.median;
+            const mx = s.max;
+
+            // Min Segment (Green)
+            if (mn >= 0) {
+                minBases.push(0);
+                minLens.push(mn);
+            } else {
+                minBases.push(mn);
+                const minTop = Math.min(md, 0);
+                minLens.push(minTop - mn);
+            }
+
+            // Median Segment (Blue)
+            if (md >= 0) {
+                const medBase = Math.max(0, mn);
+                medBases.push(medBase);
+                medLens.push(md - medBase);
+            } else {
+                medBases.push(md);
+                const medTop = Math.min(mx, 0);
+                medLens.push(medTop - md);
+            }
+
+            // Max Segment (Purple)
+            if (mx >= 0) {
+                const maxBase = Math.max(0, md);
+                maxBases.push(maxBase);
+                maxLens.push(mx - maxBase);
+            } else {
+                maxBases.push(mx);
+                maxLens.push(0 - mx);
+            }
+        });
+
         const traceMax = {
             x: x,
-            y: stats.map(s => s.max),
+            y: maxLens,
+            base: maxBases,
             name: 'Max',
             type: 'bar',
-            marker: { color: 'rgba(132, 94, 247, 0.5)' },
+            marker: { color: 'rgba(132, 94, 247, 0.8)' },
             width: 0.85,
             hovertemplate: hoverTemplate,
             customdata: customData
@@ -1595,10 +1640,11 @@ async function loadDistributionChart(prefetchedData) {
 
         const traceMedian = {
             x: x,
-            y: stats.map(s => s.median),
+            y: medLens,
+            base: medBases,
             name: 'Median',
             type: 'bar',
-            marker: { color: 'rgba(77, 171, 247, 0.75)' },
+            marker: { color: 'rgba(77, 171, 247, 0.85)' },
             width: 0.85,
             hovertemplate: hoverTemplate,
             customdata: customData
@@ -1606,7 +1652,8 @@ async function loadDistributionChart(prefetchedData) {
 
         const traceMin = {
             x: x,
-            y: stats.map(s => s.min),
+            y: minLens,
+            base: minBases,
             name: 'Min',
             type: 'bar',
             marker: { color: 'rgba(56, 217, 169, 0.95)' },
@@ -1639,6 +1686,7 @@ async function loadDistributionChart(prefetchedData) {
             yaxis: {
                 title: { text: 'Selectivity Score', font: { size: 13, color: '#9898b8' }, standoff: 5 },
                 gridcolor: 'rgba(120, 120, 255, 0.08)',
+                zeroline: true,
                 zerolinecolor: 'rgba(255, 255, 255, 0.45)',
                 zerolinewidth: 2,
                 ticks: 'outside',
