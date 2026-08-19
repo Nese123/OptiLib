@@ -325,10 +325,10 @@ async function handlePriceFileUpload(file) {
         const data = await parseJsonResponse(res);
 
         if (res.ok) {
-            uploadedPriceData = { 
-                filename: file.name, 
+            uploadedPriceData = {
+                filename: file.name,
                 num_prices: data.num_prices,
-                compounds: data.compounds || [] 
+                compounds: data.compounds || []
             };
             sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
             renderPriceBadge(uploadedPriceData);
@@ -479,7 +479,7 @@ function renderPriceBadge(data) {
 
                 const compoundName = c.split(' ->')[0];
                 const msg = document.createElement('span');
-                msg.textContent = `Are you sure you want to remove the compound ${compoundName}?`;
+                msg.textContent = `Are you sure you want to remove the price for compound ${compoundName}?`;
                 msg.style.color = '#ff4a4a';
 
                 const btnContainer = document.createElement('div');
