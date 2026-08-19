@@ -173,6 +173,9 @@ affinity_upload_state = {
 }
 
 price_upload_state = {
+    "df": None,
+    "resolved_compounds": {},
+    "formatted_compounds": [],
     "price_map": {},            # key (normalized identifier) -> price (float)
     "filename": "",
     "count": 0,
@@ -768,15 +771,34 @@ def upload_prices():
                 price_map[res["smiles"].strip()] = price_val
             if res["pref_name"]:
                 price_map[res["pref_name"].lower()] = price_val
-                
+
+    formatted_compounds = []
+    for c in unique_cmpds:
+        info = resolved_cmpds.get(c, {})
+        ik = info.get("inchi_key") or ""
+        cid = info.get("chembl_id") or ""
+        if ik and cid:
+            display_str = f"{c} -> {ik} ({cid})"
+        elif ik:
+            display_str = f"{c} -> {ik}"
+        elif cid:
+            display_str = f"{c} -> ({cid})"
+        else:
+            display_str = f"{c}"
+        formatted_compounds.append(display_str)
+
     with _lock:
+        price_upload_state["df"] = clean_df
+        price_upload_state["resolved_compounds"] = resolved_cmpds
+        price_upload_state["formatted_compounds"] = formatted_compounds
         price_upload_state["price_map"] = price_map
         price_upload_state["filename"] = file.filename
         price_upload_state["count"] = len(clean_df)
         
     return jsonify({
         "num_prices": len(clean_df),
-        "filename": file.filename
+        "filename": file.filename,
+        "compounds": formatted_compounds,
     })
 
 
@@ -979,9 +1001,82 @@ def clear_affinity():
     return jsonify({"status": "cleared"})
 
 
+@app.route("/api/remove-price-compound", methods=["POST"])
+def remove_price_compound():
+    """Remove a single compound from the uploaded price dataset."""
+    data = request.get_json(force=True) or {}
+    compound_str = data.get("compound", "").strip()
+    if not compound_str:
+        return jsonify({"error": "No compound specified"}), 400
+
+    compound_raw = compound_str.split(" ->")[0].strip().lower()
+
+    with _lock:
+        raw_df = price_upload_state.get("df")
+        if raw_df is None or raw_df.empty:
+            return jsonify({"error": "No price data found"}), 400
+
+        mask = (
+            (raw_df["Compound"].astype(str).str.strip().str.lower() != compound_raw) &
+            (raw_df["Compound"].astype(str).str.strip() != compound_str)
+        )
+        new_df = raw_df[mask].copy()
+
+        formatted_compounds = [
+            fc for fc in price_upload_state.get("formatted_compounds", [])
+            if fc != compound_str and fc.split(" ->")[0].strip().lower() != compound_raw
+        ]
+
+        if new_df.empty or not formatted_compounds:
+            price_upload_state["df"] = None
+            price_upload_state["resolved_compounds"] = {}
+            price_upload_state["formatted_compounds"] = []
+            price_upload_state["price_map"] = {}
+            price_upload_state["filename"] = ""
+            price_upload_state["count"] = 0
+            return jsonify({
+                "num_prices": 0,
+                "filename": "",
+                "compounds": [],
+            })
+
+        resolved_cmpds = price_upload_state.get("resolved_compounds", {})
+        price_map = {}
+        for _, row in new_df.iterrows():
+            raw_c = str(row["Compound"]).strip()
+            price_val = float(row["Price"])
+            price_map[raw_c.lower()] = price_val
+            price_map[raw_c.upper()] = price_val
+
+            res = resolved_cmpds.get(raw_c)
+            if res:
+                if res["chembl_id"]:
+                    price_map[res["chembl_id"].upper()] = price_val
+                if res["inchi_key"]:
+                    price_map[res["inchi_key"].upper()] = price_val
+                if res["smiles"]:
+                    price_map[res["smiles"].strip()] = price_val
+                if res["pref_name"]:
+                    price_map[res["pref_name"].lower()] = price_val
+
+        price_upload_state["df"] = new_df
+        price_upload_state["price_map"] = price_map
+        price_upload_state["formatted_compounds"] = formatted_compounds
+        price_upload_state["count"] = len(new_df)
+
+        return jsonify({
+            "num_prices": len(new_df),
+            "filename": price_upload_state.get("filename", ""),
+            "compounds": formatted_compounds,
+        })
+
+
 @app.route("/api/clear-prices", methods=["POST"])
 def clear_prices():
     with _lock:
+        price_upload_state["df"] = None
+        price_upload_state["resolved_compounds"] = {}
+        price_upload_state["formatted_compounds"] = []
         price_upload_state["price_map"] = {}
         price_upload_state["filename"] = ""
         price_upload_state["count"] = 0
@@ -1775,6 +1870,9 @@ def reset_state():
             "formatted_compounds": [],
         })
         price_upload_state.update({
+            "df": None,
+            "resolved_compounds": {},
+            "formatted_compounds": [],
             "price_map": {},
             "filename": "",
             "count": 0,

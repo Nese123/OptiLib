@@ -325,7 +325,11 @@ async function handlePriceFileUpload(file) {
         const data = await parseJsonResponse(res);
 
         if (res.ok) {
-            uploadedPriceData = { filename: file.name, num_prices: data.num_prices };
+            uploadedPriceData = { 
+                filename: file.name, 
+                num_prices: data.num_prices,
+                compounds: data.compounds || [] 
+            };
             sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
             renderPriceBadge(uploadedPriceData);
         } else {
@@ -442,6 +446,138 @@ function renderPriceBadge(data) {
     box.appendChild(leftSide);
     box.appendChild(rightSide);
     priceFileInfo.appendChild(box);
+
+    // Below the box: Compounds list (similar to affinity data uploading section)
+    if (data.compounds && data.compounds.length > 0) {
+        const listLabel = document.createElement('div');
+        listLabel.className = 'affinity-list-label';
+        listLabel.style.marginTop = '0.75rem';
+        listLabel.style.marginBottom = '0.35rem';
+        listLabel.textContent = 'Compounds:';
+        priceFileInfo.appendChild(listLabel);
+
+        const cmpdListEl = document.createElement('div');
+        cmpdListEl.className = 'target-list';
+        cmpdListEl.id = 'priceCompoundList';
+        cmpdListEl.style.marginTop = '0';
+        cmpdListEl.style.marginBottom = '0';
+        cmpdListEl.style.maxHeight = '120px';
+
+        data.compounds.forEach(c => {
+            const item = document.createElement('div');
+            item.className = 'target-list-item';
+
+            const textSpan = document.createElement('span');
+            textSpan.textContent = c;
+
+            const delBtn = document.createElement('span');
+            delBtn.textContent = '❌';
+            delBtn.className = 'target-list-delete';
+            delBtn.title = 'Remove compound';
+            delBtn.onclick = () => {
+                item.innerHTML = '';
+
+                const compoundName = c.split(' ->')[0];
+                const msg = document.createElement('span');
+                msg.textContent = `Are you sure you want to remove the compound ${compoundName}?`;
+                msg.style.color = '#ff4a4a';
+
+                const btnContainer = document.createElement('div');
+                btnContainer.style.display = 'flex';
+                btnContainer.style.gap = '8px';
+
+                const yesBtn = document.createElement('button');
+                yesBtn.className = 'btn btn-primary';
+                yesBtn.style.padding = '0.15rem 0.5rem';
+                yesBtn.style.fontSize = '0.75rem';
+                yesBtn.style.minWidth = '40px';
+                yesBtn.textContent = 'Yes';
+                yesBtn.onclick = async () => {
+                    try {
+                        const res = await fetch('/api/remove-price-compound', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ compound: c }),
+                        });
+                        const resData = await parseJsonResponse(res);
+                        if (res.ok) {
+                            if (!resData.compounds || resData.compounds.length === 0) {
+                                try {
+                                    await fetch('/api/clear-prices', { method: 'POST' });
+                                } catch (e) { }
+                                uploadedPriceData = null;
+                                sessionStorage.removeItem('uploadedPriceData');
+                                priceFileInfo.style.display = 'none';
+                                priceFileInfo.innerHTML = '';
+                                const priceFileInput = $('#priceFileInput');
+                                if (priceFileInput) priceFileInput.value = '';
+                            } else {
+                                uploadedPriceData.num_prices = resData.num_prices;
+                                uploadedPriceData.compounds = resData.compounds || [];
+                                sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
+                                renderPriceBadge(uploadedPriceData);
+                            }
+                        } else {
+                            uploadedPriceData.compounds = (uploadedPriceData.compounds || []).filter(item => item !== c);
+                            uploadedPriceData.num_prices = uploadedPriceData.compounds.length;
+                            if (uploadedPriceData.compounds.length === 0) {
+                                try {
+                                    await fetch('/api/clear-prices', { method: 'POST' });
+                                } catch (e) { }
+                                uploadedPriceData = null;
+                                sessionStorage.removeItem('uploadedPriceData');
+                                priceFileInfo.style.display = 'none';
+                                priceFileInfo.innerHTML = '';
+                                const priceFileInput = $('#priceFileInput');
+                                if (priceFileInput) priceFileInput.value = '';
+                            } else {
+                                sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
+                                renderPriceBadge(uploadedPriceData);
+                            }
+                        }
+                    } catch (e) {
+                        uploadedPriceData.compounds = (uploadedPriceData.compounds || []).filter(item => item !== c);
+                        uploadedPriceData.num_prices = uploadedPriceData.compounds.length;
+                        if (uploadedPriceData.compounds.length === 0) {
+                            try {
+                                await fetch('/api/clear-prices', { method: 'POST' });
+                            } catch (err) { }
+                            uploadedPriceData = null;
+                            sessionStorage.removeItem('uploadedPriceData');
+                            priceFileInfo.style.display = 'none';
+                            priceFileInfo.innerHTML = '';
+                            const priceFileInput = $('#priceFileInput');
+                            if (priceFileInput) priceFileInput.value = '';
+                        } else {
+                            sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
+                            renderPriceBadge(uploadedPriceData);
+                        }
+                    }
+                };
+
+                const noBtn = document.createElement('button');
+                noBtn.className = 'btn btn-secondary';
+                noBtn.style.padding = '0.15rem 0.5rem';
+                noBtn.style.fontSize = '0.75rem';
+                noBtn.style.minWidth = '40px';
+                noBtn.textContent = 'No';
+                noBtn.onclick = () => renderPriceBadge(data);
+
+                btnContainer.appendChild(yesBtn);
+                btnContainer.appendChild(noBtn);
+
+                item.appendChild(msg);
+                item.appendChild(btnContainer);
+            };
+
+            item.appendChild(textSpan);
+            item.appendChild(delBtn);
+            cmpdListEl.appendChild(item);
+        });
+
+        priceFileInfo.appendChild(cmpdListEl);
+    }
+
     priceFileInfo.style.display = 'block';
 }
 
