@@ -161,6 +161,7 @@ opt_results = {
 
 # Custom uploaded data state
 affinity_upload_state = {
+    "files": {},                # filename -> { "df": df, "resolved_compounds": dict, "resolved_targets": dict, "formatted_compounds": list, "formatted_targets": list }
     "df": None,                 # Parsed DataFrame with columns [Compound_Raw, Target_Raw, Affinity]
     "resolved_compounds": {},   # raw_id -> dict(chembl_id, pref_name, inchi_key, smiles)
     "resolved_targets": {},     # raw_id -> dict(chembl_id, pref_name, gene_symbol, canonical_name)
@@ -172,7 +173,99 @@ affinity_upload_state = {
     "formatted_compounds": [],
 }
 
+def _recompute_affinity_state():
+    """Recompute combined dataframe, resolved entities, and stats across all uploaded affinity files."""
+    files_dict = affinity_upload_state.get("files", {})
+    if not files_dict:
+        affinity_upload_state["df"] = None
+        affinity_upload_state["resolved_compounds"] = {}
+        affinity_upload_state["resolved_targets"] = {}
+        affinity_upload_state["num_compounds"] = 0
+        affinity_upload_state["num_targets"] = 0
+        affinity_upload_state["num_datapoints"] = 0
+        affinity_upload_state["unique_targets"] = []
+        affinity_upload_state["formatted_targets"] = []
+        affinity_upload_state["formatted_compounds"] = []
+        return
+
+    all_dfs = []
+    all_resolved_compounds = {}
+    all_resolved_targets = {}
+
+    for fname, fdata in list(files_dict.items()):
+        fdf = fdata.get("df")
+        if fdf is not None and not fdf.empty:
+            all_dfs.append(fdf)
+            all_resolved_compounds.update(fdata.get("resolved_compounds", {}))
+            all_resolved_targets.update(fdata.get("resolved_targets", {}))
+
+    if not all_dfs:
+        affinity_upload_state["df"] = None
+        affinity_upload_state["resolved_compounds"] = {}
+        affinity_upload_state["resolved_targets"] = {}
+        affinity_upload_state["num_compounds"] = 0
+        affinity_upload_state["num_targets"] = 0
+        affinity_upload_state["num_datapoints"] = 0
+        affinity_upload_state["unique_targets"] = []
+        affinity_upload_state["formatted_targets"] = []
+        affinity_upload_state["formatted_compounds"] = []
+        return
+
+    combined_df = pd.concat(all_dfs, ignore_index=True).drop_duplicates()
+    unique_compounds = combined_df["Compound_Raw"].unique().tolist()
+    unique_targets = combined_df["Target_Raw"].unique().tolist()
+
+    missing_compounds = [c for c in unique_compounds if c not in all_resolved_compounds]
+    if missing_compounds:
+        all_resolved_compounds.update(_resolve_compounds(missing_compounds))
+
+    missing_targets = [t for t in unique_targets if t not in all_resolved_targets]
+    if missing_targets:
+        all_resolved_targets.update(_resolve_targets(missing_targets))
+
+    formatted_compounds = []
+    for c in unique_compounds:
+        info = all_resolved_compounds.get(c, {})
+        ik = info.get("inchi_key") or ""
+        cid = info.get("chembl_id") or ""
+        if ik and cid:
+            display_str = f"{c} -> {ik} ({cid})"
+        elif ik:
+            display_str = f"{c} -> {ik}"
+        elif cid:
+            display_str = f"{c} -> ({cid})"
+        else:
+            display_str = f"{c}"
+        formatted_compounds.append(display_str)
+
+    formatted_targets = []
+    for t in unique_targets:
+        info = all_resolved_targets.get(t, {})
+        if info.get("is_chembl"):
+            name = info.get("pref_name") or info.get("gene_symbol") or info.get("chembl_id")
+            gene_sym = info.get("gene_symbol") or info.get("chembl_id")
+            if gene_sym:
+                display_str = f"{t} -> {name} ({gene_sym})"
+            else:
+                display_str = f"{t} -> {name}"
+        else:
+            display_str = f"{t}"
+        formatted_targets.append(display_str)
+
+    affinity_upload_state["df"] = combined_df
+    affinity_upload_state["resolved_compounds"] = all_resolved_compounds
+    affinity_upload_state["resolved_targets"] = all_resolved_targets
+    affinity_upload_state["num_compounds"] = len(unique_compounds)
+    affinity_upload_state["num_targets"] = len(unique_targets)
+    affinity_upload_state["num_datapoints"] = len(combined_df)
+    affinity_upload_state["unique_targets"] = [
+        all_resolved_targets[t]["canonical_name"] for t in unique_targets if t in all_resolved_targets
+    ]
+    affinity_upload_state["formatted_compounds"] = formatted_compounds
+    affinity_upload_state["formatted_targets"] = formatted_targets
+
 price_upload_state = {
+    "files": {},                # filename -> { "df": df, "resolved_compounds": dict, "formatted_compounds": list }
     "df": None,
     "resolved_compounds": {},
     "formatted_compounds": [],
@@ -180,6 +273,83 @@ price_upload_state = {
     "filename": "",
     "count": 0,
 }
+
+def _recompute_price_state():
+    """Recompute combined dataframe, price_map, and formatted_compounds across all uploaded files in price_upload_state['files']."""
+    files_dict = price_upload_state.get("files", {})
+    if not files_dict:
+        price_upload_state["df"] = None
+        price_upload_state["resolved_compounds"] = {}
+        price_upload_state["formatted_compounds"] = []
+        price_upload_state["price_map"] = {}
+        price_upload_state["filename"] = ""
+        price_upload_state["count"] = 0
+        return
+
+    all_dfs = []
+    all_resolved = {}
+    filenames = []
+
+    for fname, fdata in list(files_dict.items()):
+        fdf = fdata.get("df")
+        if fdf is not None and not fdf.empty:
+            all_dfs.append(fdf)
+            filenames.append(fname)
+            all_resolved.update(fdata.get("resolved_compounds", {}))
+
+    if not all_dfs:
+        price_upload_state["df"] = None
+        price_upload_state["resolved_compounds"] = {}
+        price_upload_state["formatted_compounds"] = []
+        price_upload_state["price_map"] = {}
+        price_upload_state["filename"] = ""
+        price_upload_state["count"] = 0
+        return
+
+    combined_df = pd.concat(all_dfs, ignore_index=True)
+    combined_df = combined_df.drop_duplicates(subset=["Compound"], keep="last")
+
+    unique_cmpds = combined_df["Compound"].unique().tolist()
+
+    price_map = {}
+    for _, row in combined_df.iterrows():
+        raw_c = str(row["Compound"]).strip()
+        price_val = float(row["Price"])
+        price_map[raw_c.lower()] = price_val
+        price_map[raw_c.upper()] = price_val
+
+        res = all_resolved.get(raw_c)
+        if res:
+            if res.get("chembl_id"):
+                price_map[res["chembl_id"].upper()] = price_val
+            if res.get("inchi_key"):
+                price_map[res["inchi_key"].upper()] = price_val
+            if res.get("smiles"):
+                price_map[res["smiles"].strip()] = price_val
+            if res.get("pref_name"):
+                price_map[res["pref_name"].lower()] = price_val
+
+    formatted_compounds = []
+    for c in unique_cmpds:
+        info = all_resolved.get(c, {})
+        ik = info.get("inchi_key") or ""
+        cid = info.get("chembl_id") or ""
+        if ik and cid:
+            display_str = f"{c} -> {ik} ({cid})"
+        elif ik:
+            display_str = f"{c} -> {ik}"
+        elif cid:
+            display_str = f"{c} -> ({cid})"
+        else:
+            display_str = f"{c}"
+        formatted_compounds.append(display_str)
+
+    price_upload_state["df"] = combined_df
+    price_upload_state["resolved_compounds"] = all_resolved
+    price_upload_state["formatted_compounds"] = formatted_compounds
+    price_upload_state["price_map"] = price_map
+    price_upload_state["filename"] = ", ".join(filenames)
+    price_upload_state["count"] = len(combined_df)
 
 # Thread lock for state access
 _lock = threading.Lock()
@@ -572,16 +742,17 @@ def upload_targets():
 
 @app.route("/api/upload-affinity", methods=["POST"])
 def upload_affinity():
-    """Accept CSV/Excel with compound, target, and affinity value."""
+    """Accept CSV/Excel with compound, target, and affinity value (supports incremental multi-file upload)."""
     files = request.files.getlist("files[]") or request.files.getlist("file")
     if not files and "file" in request.files:
         files = [request.files["file"]]
     if not files:
         return jsonify({"error": "No files uploaded"}), 400
-        
-    all_dfs = []
+
+    uploaded_files_summary = []
+
     for file in files:
-        if file.filename == "":
+        if not file or file.filename == "":
             continue
         try:
             filename = file.filename.lower()
@@ -593,11 +764,11 @@ def upload_affinity():
                 return jsonify({"error": f"Unsupported file type for {file.filename}. Use CSV or Excel (.xlsx)."}), 400
         except Exception as e:
             return jsonify({"error": f"Failed to read {file.filename}: {str(e)}"}), 400
-            
+
         cmpd_col = None
         tgt_col = None
         aff_col = None
-        
+
         for col in df.columns:
             clean_col = col.strip().lower().replace(" ", "_").replace("-", "_")
             if clean_col in ("compound", "compound_id", "compound_name", "drug", "drug_id", "molecule", "molecule_id", "ligand", "id"):
@@ -609,202 +780,265 @@ def upload_affinity():
             elif clean_col in ("affinity", "affinity_pkd", "affinity_value", "pkd", "pic50", "pki", "value", "score", "activity", "potency"):
                 if aff_col is None:
                     aff_col = col
-                    
+
         # Fallback by column index if 3 columns
         if len(df.columns) >= 3 and (cmpd_col is None or tgt_col is None or aff_col is None):
             cols = list(df.columns)
             if cmpd_col is None: cmpd_col = cols[0]
             if tgt_col is None: tgt_col = cols[1]
             if aff_col is None: aff_col = cols[2]
-            
+
         if cmpd_col is None or tgt_col is None or aff_col is None:
             return jsonify({
                 "error": f"Could not identify Compound, Target, and Affinity columns in {file.filename}. "
                          f"Please ensure columns are named 'Compound', 'Target', and 'Affinity'."
             }), 400
-            
-        # Clean and extract
+
         sub_df = pd.DataFrame({
             "Compound_Raw": df[cmpd_col].dropna().astype(str).str.strip(),
             "Target_Raw": df[tgt_col].dropna().astype(str).str.strip(),
             "Affinity": pd.to_numeric(df[aff_col], errors="coerce")
         }).dropna()
-        
-        all_dfs.append(sub_df)
-        
-    if not all_dfs:
-        return jsonify({"error": "No valid affinity data found."}), 400
-        
-    combined_df = pd.concat(all_dfs, ignore_index=True).drop_duplicates()
-    if combined_df.empty:
-        return jsonify({"error": "No valid data rows found in uploaded files."}), 400
-        
-    unique_compounds = combined_df["Compound_Raw"].unique().tolist()
-    unique_targets = combined_df["Target_Raw"].unique().tolist()
-    
-    if len(unique_targets) < 2:
-        return jsonify({"error": f"Dataset must contain at least 2 distinct targets (found {len(unique_targets)})."}), 400
-        
-    # Resolve entities
-    resolved_compounds = _resolve_compounds(unique_compounds)
-    resolved_targets = _resolve_targets(unique_targets)
-    
-    formatted_compounds = []
-    for c in unique_compounds:
-        info = resolved_compounds.get(c, {})
-        ik = info.get("inchi_key") or ""
-        cid = info.get("chembl_id") or ""
-        if ik and cid:
-            display_str = f"{c} -> {ik} ({cid})"
-        elif ik:
-            display_str = f"{c} -> {ik}"
-        elif cid:
-            display_str = f"{c} -> ({cid})"
-        else:
-            display_str = f"{c}"
-        formatted_compounds.append(display_str)
+        sub_df = sub_df.drop_duplicates()
 
-    formatted_targets = []
-    for t in unique_targets:
-        info = resolved_targets.get(t, {})
-        if info.get("is_chembl"):
-            name = info.get("pref_name") or info.get("gene_symbol") or info.get("chembl_id")
-            gene_sym = info.get("gene_symbol") or info.get("chembl_id")
-            if gene_sym:
-                display_str = f"{t} -> {name} ({gene_sym})"
+        if sub_df.empty:
+            return jsonify({"error": f"No valid data rows found in {file.filename}."}), 400
+
+        file_compounds = sub_df["Compound_Raw"].unique().tolist()
+        file_targets = sub_df["Target_Raw"].unique().tolist()
+
+        res_compounds = _resolve_compounds(file_compounds)
+        res_targets = _resolve_targets(file_targets)
+
+        formatted_c = []
+        for c in file_compounds:
+            info = res_compounds.get(c, {})
+            ik = info.get("inchi_key") or ""
+            cid = info.get("chembl_id") or ""
+            if ik and cid:
+                formatted_c.append(f"{c} -> {ik} ({cid})")
+            elif ik:
+                formatted_c.append(f"{c} -> {ik}")
+            elif cid:
+                formatted_c.append(f"{c} -> ({cid})")
             else:
-                display_str = f"{t} -> {name}"
-        else:
-            display_str = f"{t}"
-        formatted_targets.append(display_str)
+                formatted_c.append(f"{c}")
+
+        formatted_t = []
+        for t in file_targets:
+            info = res_targets.get(t, {})
+            if info.get("is_chembl"):
+                name = info.get("pref_name") or info.get("gene_symbol") or info.get("chembl_id")
+                gene_sym = info.get("gene_symbol") or info.get("chembl_id")
+                if gene_sym:
+                    formatted_t.append(f"{t} -> {name} ({gene_sym})")
+                else:
+                    formatted_t.append(f"{t} -> {name}")
+            else:
+                formatted_t.append(f"{t}")
+
+        with _lock:
+            if "files" not in affinity_upload_state:
+                affinity_upload_state["files"] = {}
+            affinity_upload_state["files"][file.filename] = {
+                "df": sub_df,
+                "resolved_compounds": res_compounds,
+                "resolved_targets": res_targets,
+                "formatted_compounds": formatted_c,
+                "formatted_targets": formatted_t,
+            }
+
+        uploaded_files_summary.append({
+            "name": file.filename,
+            "num_datapoints": len(sub_df),
+            "num_compounds": len(file_compounds),
+            "num_targets": len(file_targets),
+            "compounds": formatted_c,
+            "targets": formatted_t,
+        })
+
+    if not uploaded_files_summary:
+        return jsonify({"error": "No valid affinity files processed."}), 400
 
     with _lock:
-        affinity_upload_state["df"] = combined_df
-        affinity_upload_state["resolved_compounds"] = resolved_compounds
-        affinity_upload_state["resolved_targets"] = resolved_targets
-        affinity_upload_state["num_compounds"] = len(unique_compounds)
-        affinity_upload_state["num_targets"] = len(unique_targets)
-        affinity_upload_state["num_datapoints"] = len(combined_df)
-        affinity_upload_state["unique_targets"] = [resolved_targets[t]["canonical_name"] for t in unique_targets]
-        affinity_upload_state["formatted_compounds"] = formatted_compounds
-        affinity_upload_state["formatted_targets"] = formatted_targets
-        
+        _recompute_affinity_state()
+        all_files_list = [
+            {
+                "name": fname,
+                "num_datapoints": len(fdata["df"]),
+                "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
+                "num_targets": len(fdata["df"]["Target_Raw"].unique()),
+                "compounds": fdata["formatted_compounds"],
+                "targets": fdata["formatted_targets"],
+            }
+            for fname, fdata in affinity_upload_state["files"].items()
+        ]
+
     return jsonify({
-        "num_compounds": len(unique_compounds),
-        "num_targets": len(unique_targets),
-        "num_datapoints": len(combined_df),
-        "compounds": formatted_compounds,
-        "targets": formatted_targets,
+        "uploaded_files": uploaded_files_summary,
+        "all_files": all_files_list,
+        "num_compounds": affinity_upload_state["num_compounds"],
+        "num_targets": affinity_upload_state["num_targets"],
+        "num_datapoints": affinity_upload_state["num_datapoints"],
+        "compounds": affinity_upload_state["formatted_compounds"],
+        "targets": affinity_upload_state["formatted_targets"],
     })
 
 
 @app.route("/api/upload-prices", methods=["POST"])
 def upload_prices():
-    """Accept CSV/Excel with compound and price."""
+    """Accept CSV/Excel with compound and price (supports incremental multi-file upload)."""
     files = request.files.getlist("files[]") or request.files.getlist("file")
     if not files and "file" in request.files:
         files = [request.files["file"]]
     if not files:
         return jsonify({"error": "No price file uploaded"}), 400
-        
-    file = files[0]
-    if file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
-        
-    try:
-        filename = file.filename.lower()
-        if filename.endswith(".csv"):
-            df = pd.read_csv(file)
-        elif filename.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(file)
-        else:
-            return jsonify({"error": "Unsupported file type for price file. Use CSV or Excel (.xlsx)."}), 400
-    except Exception as e:
-        return jsonify({"error": f"Failed to read price file: {str(e)}"}), 400
-        
-    cmpd_col = None
-    price_col = None
-    
-    for col in df.columns:
-        clean_col = col.strip().lower().replace(" ", "_").replace("-", "_")
-        if clean_col in ("compound", "compound_id", "compound_name", "drug", "drug_id", "molecule", "molecule_id", "ligand", "id", "inchikey", "smiles", "name"):
-            if cmpd_col is None: cmpd_col = col
-        elif clean_col in ("price", "price_usd_per_mg", "price_usd", "price_per_mg", "cost", "cost_usd", "usd_per_mg"):
-            if price_col is None: price_col = col
-            
-    if len(df.columns) >= 2 and (cmpd_col is None or price_col is None):
-        cols = list(df.columns)
-        if cmpd_col is None: cmpd_col = cols[0]
-        if price_col is None: price_col = cols[1]
-        
-    if cmpd_col is None or price_col is None:
-        return jsonify({
-            "error": "Could not identify Compound and Price columns. Please use 'Compound' and 'Price'."
-        }), 400
-        
-    clean_df = pd.DataFrame({
-        "Compound": df[cmpd_col].dropna().astype(str).str.strip(),
-        "Price": pd.to_numeric(df[price_col], errors="coerce")
-    }).dropna()
-    clean_df = clean_df[clean_df["Price"] > 0]
-    
-    if clean_df.empty:
-        return jsonify({"error": "No valid positive price rows found."}), 400
-        
-    unique_cmpds = clean_df["Compound"].unique().tolist()
-    resolved_cmpds = _resolve_compounds(unique_cmpds)
-    
-    price_map = {}
-    for _, row in clean_df.iterrows():
-        raw_c = str(row["Compound"]).strip()
-        price_val = float(row["Price"])
-        price_map[raw_c.lower()] = price_val
-        price_map[raw_c.upper()] = price_val
-        
-        res = resolved_cmpds.get(raw_c)
-        if res:
-            if res["chembl_id"]:
-                price_map[res["chembl_id"].upper()] = price_val
-            if res["inchi_key"]:
-                price_map[res["inchi_key"].upper()] = price_val
-            if res["smiles"]:
-                price_map[res["smiles"].strip()] = price_val
-            if res["pref_name"]:
-                price_map[res["pref_name"].lower()] = price_val
 
-    formatted_compounds = []
-    for c in unique_cmpds:
-        info = resolved_cmpds.get(c, {})
-        ik = info.get("inchi_key") or ""
-        cid = info.get("chembl_id") or ""
-        if ik and cid:
-            display_str = f"{c} -> {ik} ({cid})"
-        elif ik:
-            display_str = f"{c} -> {ik}"
-        elif cid:
-            display_str = f"{c} -> ({cid})"
-        else:
-            display_str = f"{c}"
-        formatted_compounds.append(display_str)
+    uploaded_files_summary = []
+
+    for file in files:
+        if not file or file.filename == "":
+            continue
+
+        try:
+            filename = file.filename.lower()
+            if filename.endswith(".csv"):
+                df = pd.read_csv(file)
+            elif filename.endswith((".xlsx", ".xls")):
+                df = pd.read_excel(file)
+            else:
+                return jsonify({"error": f"Unsupported file type for {file.filename}. Use CSV or Excel (.xlsx)."}), 400
+        except Exception as e:
+            return jsonify({"error": f"Failed to read price file {file.filename}: {str(e)}"}), 400
+
+        cmpd_col = None
+        price_col = None
+
+        for col in df.columns:
+            clean_col = col.strip().lower().replace(" ", "_").replace("-", "_")
+            if clean_col in ("compound", "compound_id", "compound_name", "drug", "drug_id", "molecule", "molecule_id", "ligand", "id", "inchikey", "smiles", "name"):
+                if cmpd_col is None: cmpd_col = col
+            elif clean_col in ("price", "price_usd_per_mg", "price_usd", "price_per_mg", "cost", "cost_usd", "usd_per_mg"):
+                if price_col is None: price_col = col
+
+        if len(df.columns) >= 2 and (cmpd_col is None or price_col is None):
+            cols = list(df.columns)
+            if cmpd_col is None: cmpd_col = cols[0]
+            if price_col is None: price_col = cols[1]
+
+        if cmpd_col is None or price_col is None:
+            return jsonify({
+                "error": f"Could not identify Compound and Price columns in {file.filename}. Please use 'Compound' and 'Price'."
+            }), 400
+
+        clean_df = pd.DataFrame({
+            "Compound": df[cmpd_col].dropna().astype(str).str.strip(),
+            "Price": pd.to_numeric(df[price_col], errors="coerce")
+        }).dropna()
+        clean_df = clean_df[clean_df["Price"] > 0]
+        clean_df = clean_df.drop_duplicates(subset=["Compound"], keep="last")
+
+        if clean_df.empty:
+            return jsonify({"error": f"No valid positive price rows found in {file.filename}."}), 400
+
+        unique_cmpds = clean_df["Compound"].unique().tolist()
+        resolved_cmpds = _resolve_compounds(unique_cmpds)
+
+        file_formatted = []
+        for c in unique_cmpds:
+            info = resolved_cmpds.get(c, {})
+            ik = info.get("inchi_key") or ""
+            cid = info.get("chembl_id") or ""
+            if ik and cid:
+                display_str = f"{c} -> {ik} ({cid})"
+            elif ik:
+                display_str = f"{c} -> {ik}"
+            elif cid:
+                display_str = f"{c} -> ({cid})"
+            else:
+                display_str = f"{c}"
+            file_formatted.append(display_str)
+
+        with _lock:
+            if "files" not in price_upload_state:
+                price_upload_state["files"] = {}
+            price_upload_state["files"][file.filename] = {
+                "df": clean_df,
+                "resolved_compounds": resolved_cmpds,
+                "formatted_compounds": file_formatted,
+            }
+
+        uploaded_files_summary.append({
+            "name": file.filename,
+            "num_prices": len(clean_df),
+            "compounds": file_formatted
+        })
+
+    if not uploaded_files_summary:
+        return jsonify({"error": "No valid price files uploaded."}), 400
 
     with _lock:
-        price_upload_state["df"] = clean_df
-        price_upload_state["resolved_compounds"] = resolved_cmpds
-        price_upload_state["formatted_compounds"] = formatted_compounds
-        price_upload_state["price_map"] = price_map
-        price_upload_state["filename"] = file.filename
-        price_upload_state["count"] = len(clean_df)
-        
+        _recompute_price_state()
+        combined_df = price_upload_state.get("df")
+        formatted_compounds = price_upload_state.get("formatted_compounds", [])
+        total_unique = len(combined_df) if combined_df is not None else 0
+        all_files_list = [
+            {
+                "name": fname,
+                "num_prices": len(fdata["df"]),
+                "compounds": fdata["formatted_compounds"]
+            }
+            for fname, fdata in price_upload_state["files"].items()
+        ]
+
     return jsonify({
-        "num_prices": len(clean_df),
-        "filename": file.filename,
+        "uploaded_files": uploaded_files_summary,
+        "all_files": all_files_list,
+        "num_prices": total_unique,
+        "filename": price_upload_state.get("filename", ""),
         "compounds": formatted_compounds,
+    })
+
+
+@app.route("/api/remove-affinity-file", methods=["POST"])
+def remove_affinity_file():
+    """Remove a specific uploaded affinity file by name."""
+    data = request.get_json(force=True) or {}
+    filename = data.get("filename", "").strip()
+    if not filename:
+        return jsonify({"error": "No filename specified"}), 400
+
+    with _lock:
+        files_dict = affinity_upload_state.get("files", {})
+        if filename in files_dict:
+            del files_dict[filename]
+        _recompute_affinity_state()
+
+        all_files_list = [
+            {
+                "name": fname,
+                "num_datapoints": len(fdata["df"]),
+                "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
+                "num_targets": len(fdata["df"]["Target_Raw"].unique()),
+                "compounds": fdata["formatted_compounds"],
+                "targets": fdata["formatted_targets"],
+            }
+            for fname, fdata in files_dict.items()
+        ]
+
+    return jsonify({
+        "all_files": all_files_list,
+        "num_compounds": affinity_upload_state["num_compounds"],
+        "num_targets": affinity_upload_state["num_targets"],
+        "num_datapoints": affinity_upload_state["num_datapoints"],
+        "compounds": affinity_upload_state["formatted_compounds"],
+        "targets": affinity_upload_state["formatted_targets"],
     })
 
 
 @app.route("/api/remove-affinity-target", methods=["POST"])
 def remove_affinity_target():
-    """Remove a single target from the uploaded affinity dataset."""
+    """Remove a single target from the uploaded affinity dataset across all files."""
     data = request.get_json(force=True) or {}
     target_str = data.get("target", "").strip()
     if not target_str:
@@ -813,90 +1047,56 @@ def remove_affinity_target():
     target_raw = target_str.split(" ->")[0].strip().lower()
 
     with _lock:
-        raw_df = affinity_upload_state.get("df")
-        if raw_df is None or raw_df.empty:
-            return jsonify({"error": "No affinity data found"}), 400
+        files_dict = affinity_upload_state.get("files", {})
+        for fname, fdata in list(files_dict.items()):
+            fdf = fdata.get("df")
+            if fdf is not None and not fdf.empty:
+                mask = (
+                    (fdf["Target_Raw"].astype(str).str.strip().str.lower() != target_raw) &
+                    (fdf["Target_Raw"].astype(str).str.strip() != target_str)
+                )
+                filtered_df = fdf[mask].copy()
+                if filtered_df.empty:
+                    del files_dict[fname]
+                else:
+                    fdata["df"] = filtered_df
+                    fdata["formatted_targets"] = [
+                        ft for ft in fdata.get("formatted_targets", [])
+                        if ft != target_str and ft.split(" ->")[0].strip().lower() != target_raw
+                    ]
+                    file_cmpds_set = set(filtered_df["Compound_Raw"].unique())
+                    fdata["formatted_compounds"] = [
+                        fc for fc in fdata.get("formatted_compounds", [])
+                        if fc.split(" ->")[0].strip() in file_cmpds_set
+                    ]
 
-        mask = (
-            (raw_df["Target_Raw"].astype(str).str.strip().str.lower() != target_raw) &
-            (raw_df["Target_Raw"].astype(str).str.strip() != target_str)
-        )
-        new_df = raw_df[mask].copy()
+        _recompute_affinity_state()
 
-        formatted_targets = [
-            ft for ft in affinity_upload_state.get("formatted_targets", [])
-            if ft != target_str and ft.split(" ->")[0].strip().lower() != target_raw
+        all_files_list = [
+            {
+                "name": fname,
+                "num_datapoints": len(fdata["df"]),
+                "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
+                "num_targets": len(fdata["df"]["Target_Raw"].unique()),
+                "compounds": fdata["formatted_compounds"],
+                "targets": fdata["formatted_targets"],
+            }
+            for fname, fdata in files_dict.items()
         ]
 
-        if new_df.empty or not formatted_targets:
-            affinity_upload_state["df"] = None
-            affinity_upload_state["resolved_compounds"] = {}
-            affinity_upload_state["resolved_targets"] = {}
-            affinity_upload_state["num_compounds"] = 0
-            affinity_upload_state["num_targets"] = 0
-            affinity_upload_state["num_datapoints"] = 0
-            affinity_upload_state["unique_targets"] = []
-            affinity_upload_state["formatted_targets"] = []
-            affinity_upload_state["formatted_compounds"] = []
-            return jsonify({
-                "num_compounds": 0,
-                "num_targets": 0,
-                "num_datapoints": 0,
-                "compounds": [],
-                "targets": []
-            })
-
-        unique_compounds = new_df["Compound_Raw"].unique().tolist()
-        unique_targets = new_df["Target_Raw"].unique().tolist()
-        unique_compounds_set = set(c.lower() for c in unique_compounds)
-
-        formatted_compounds = [
-            fc for fc in affinity_upload_state.get("formatted_compounds", [])
-            if fc.split(" ->")[0].strip().lower() in unique_compounds_set
-        ]
-
-        resolved_targets = affinity_upload_state.get("resolved_targets", {})
-
-        if not formatted_compounds:
-            affinity_upload_state["df"] = None
-            affinity_upload_state["resolved_compounds"] = {}
-            affinity_upload_state["resolved_targets"] = {}
-            affinity_upload_state["num_compounds"] = 0
-            affinity_upload_state["num_targets"] = 0
-            affinity_upload_state["num_datapoints"] = 0
-            affinity_upload_state["unique_targets"] = []
-            affinity_upload_state["formatted_targets"] = []
-            affinity_upload_state["formatted_compounds"] = []
-            return jsonify({
-                "num_compounds": 0,
-                "num_targets": 0,
-                "num_datapoints": 0,
-                "compounds": [],
-                "targets": []
-            })
-
-        affinity_upload_state["df"] = new_df
-        affinity_upload_state["num_compounds"] = len(unique_compounds)
-        affinity_upload_state["num_targets"] = len(unique_targets)
-        affinity_upload_state["num_datapoints"] = len(new_df)
-        affinity_upload_state["unique_targets"] = [
-            resolved_targets[t]["canonical_name"] for t in unique_targets if t in resolved_targets
-        ]
-        affinity_upload_state["formatted_compounds"] = formatted_compounds
-        affinity_upload_state["formatted_targets"] = formatted_targets
-
-        return jsonify({
-            "num_compounds": len(unique_compounds),
-            "num_targets": len(unique_targets),
-            "num_datapoints": len(new_df),
-            "compounds": formatted_compounds,
-            "targets": formatted_targets
-        })
+    return jsonify({
+        "all_files": all_files_list,
+        "num_compounds": affinity_upload_state["num_compounds"],
+        "num_targets": affinity_upload_state["num_targets"],
+        "num_datapoints": affinity_upload_state["num_datapoints"],
+        "compounds": affinity_upload_state["formatted_compounds"],
+        "targets": affinity_upload_state["formatted_targets"],
+    })
 
 
 @app.route("/api/remove-affinity-compound", methods=["POST"])
 def remove_affinity_compound():
-    """Remove a single compound from the uploaded affinity dataset."""
+    """Remove a single compound from the uploaded affinity dataset across all files."""
     data = request.get_json(force=True) or {}
     compound_str = data.get("compound", "").strip()
     if not compound_str:
@@ -905,100 +1105,93 @@ def remove_affinity_compound():
     compound_raw = compound_str.split(" ->")[0].strip().lower()
 
     with _lock:
-        raw_df = affinity_upload_state.get("df")
-        if raw_df is None or raw_df.empty:
-            return jsonify({"error": "No affinity data found"}), 400
+        files_dict = affinity_upload_state.get("files", {})
+        for fname, fdata in list(files_dict.items()):
+            fdf = fdata.get("df")
+            if fdf is not None and not fdf.empty:
+                mask = (
+                    (fdf["Compound_Raw"].astype(str).str.strip().str.lower() != compound_raw) &
+                    (fdf["Compound_Raw"].astype(str).str.strip() != compound_str)
+                )
+                filtered_df = fdf[mask].copy()
+                if filtered_df.empty:
+                    del files_dict[fname]
+                else:
+                    fdata["df"] = filtered_df
+                    fdata["formatted_compounds"] = [
+                        fc for fc in fdata.get("formatted_compounds", [])
+                        if fc != compound_str and fc.split(" ->")[0].strip().lower() != compound_raw
+                    ]
+                    file_tgts_set = set(filtered_df["Target_Raw"].unique())
+                    fdata["formatted_targets"] = [
+                        ft for ft in fdata.get("formatted_targets", [])
+                        if ft.split(" ->")[0].strip() in file_tgts_set
+                    ]
 
-        mask = (
-            (raw_df["Compound_Raw"].astype(str).str.strip().str.lower() != compound_raw) &
-            (raw_df["Compound_Raw"].astype(str).str.strip() != compound_str)
-        )
-        new_df = raw_df[mask].copy()
+        _recompute_affinity_state()
 
-        formatted_compounds = [
-            fc for fc in affinity_upload_state.get("formatted_compounds", [])
-            if fc != compound_str and fc.split(" ->")[0].strip().lower() != compound_raw
+        all_files_list = [
+            {
+                "name": fname,
+                "num_datapoints": len(fdata["df"]),
+                "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
+                "num_targets": len(fdata["df"]["Target_Raw"].unique()),
+                "compounds": fdata["formatted_compounds"],
+                "targets": fdata["formatted_targets"],
+            }
+            for fname, fdata in files_dict.items()
         ]
 
-        if new_df.empty or not formatted_compounds:
-            affinity_upload_state["df"] = None
-            affinity_upload_state["resolved_compounds"] = {}
-            affinity_upload_state["resolved_targets"] = {}
-            affinity_upload_state["num_compounds"] = 0
-            affinity_upload_state["num_targets"] = 0
-            affinity_upload_state["num_datapoints"] = 0
-            affinity_upload_state["unique_targets"] = []
-            affinity_upload_state["formatted_targets"] = []
-            affinity_upload_state["formatted_compounds"] = []
-            return jsonify({
-                "num_compounds": 0,
-                "num_targets": 0,
-                "num_datapoints": 0,
-                "compounds": [],
-                "targets": []
-            })
-
-        unique_compounds = new_df["Compound_Raw"].unique().tolist()
-        unique_targets = new_df["Target_Raw"].unique().tolist()
-        unique_targets_set = set(t.lower() for t in unique_targets)
-
-        formatted_targets = [
-            ft for ft in affinity_upload_state.get("formatted_targets", [])
-            if ft.split(" ->")[0].strip().lower() in unique_targets_set
-        ]
-
-        resolved_targets = affinity_upload_state.get("resolved_targets", {})
-
-        if not formatted_targets:
-            affinity_upload_state["df"] = None
-            affinity_upload_state["resolved_compounds"] = {}
-            affinity_upload_state["resolved_targets"] = {}
-            affinity_upload_state["num_compounds"] = 0
-            affinity_upload_state["num_targets"] = 0
-            affinity_upload_state["num_datapoints"] = 0
-            affinity_upload_state["unique_targets"] = []
-            affinity_upload_state["formatted_targets"] = []
-            affinity_upload_state["formatted_compounds"] = []
-            return jsonify({
-                "num_compounds": 0,
-                "num_targets": 0,
-                "num_datapoints": 0,
-                "compounds": [],
-                "targets": []
-            })
-
-        affinity_upload_state["df"] = new_df
-        affinity_upload_state["num_compounds"] = len(unique_compounds)
-        affinity_upload_state["num_targets"] = len(unique_targets)
-        affinity_upload_state["num_datapoints"] = len(new_df)
-        affinity_upload_state["unique_targets"] = [
-            resolved_targets[t]["canonical_name"] for t in unique_targets if t in resolved_targets
-        ]
-        affinity_upload_state["formatted_compounds"] = formatted_compounds
-        affinity_upload_state["formatted_targets"] = formatted_targets
-
-        return jsonify({
-            "num_compounds": len(unique_compounds),
-            "num_targets": len(unique_targets),
-            "num_datapoints": len(new_df),
-            "compounds": formatted_compounds,
-            "targets": formatted_targets
-        })
+    return jsonify({
+        "all_files": all_files_list,
+        "num_compounds": affinity_upload_state["num_compounds"],
+        "num_targets": affinity_upload_state["num_targets"],
+        "num_datapoints": affinity_upload_state["num_datapoints"],
+        "compounds": affinity_upload_state["formatted_compounds"],
+        "targets": affinity_upload_state["formatted_targets"],
+    })
 
 
 @app.route("/api/clear-affinity", methods=["POST"])
 def clear_affinity():
     with _lock:
-        affinity_upload_state["df"] = None
-        affinity_upload_state["resolved_compounds"] = {}
-        affinity_upload_state["resolved_targets"] = {}
-        affinity_upload_state["num_compounds"] = 0
-        affinity_upload_state["num_targets"] = 0
-        affinity_upload_state["num_datapoints"] = 0
-        affinity_upload_state["unique_targets"] = []
-        affinity_upload_state["formatted_targets"] = []
-        affinity_upload_state["formatted_compounds"] = []
+        affinity_upload_state["files"] = {}
+        _recompute_affinity_state()
     return jsonify({"status": "cleared"})
+
+
+@app.route("/api/remove-price-file", methods=["POST"])
+def remove_price_file():
+    """Remove a specific uploaded price file by name."""
+    data = request.get_json(force=True) or {}
+    filename = data.get("filename", "").strip()
+    if not filename:
+        return jsonify({"error": "No filename specified"}), 400
+
+    with _lock:
+        files_dict = price_upload_state.get("files", {})
+        if filename in files_dict:
+            del files_dict[filename]
+        _recompute_price_state()
+
+        combined_df = price_upload_state.get("df")
+        formatted_compounds = price_upload_state.get("formatted_compounds", [])
+        total_unique = len(combined_df) if combined_df is not None else 0
+        all_files_list = [
+            {
+                "name": fname,
+                "num_prices": len(fdata["df"]),
+                "compounds": fdata["formatted_compounds"]
+            }
+            for fname, fdata in files_dict.items()
+        ]
+
+    return jsonify({
+        "all_files": all_files_list,
+        "num_prices": total_unique,
+        "filename": price_upload_state.get("filename", ""),
+        "compounds": formatted_compounds,
+    })
 
 
 @app.route("/api/remove-price-compound", methods=["POST"])
@@ -1012,68 +1205,47 @@ def remove_price_compound():
     compound_raw = compound_str.split(" ->")[0].strip().lower()
 
     with _lock:
-        raw_df = price_upload_state.get("df")
-        if raw_df is None or raw_df.empty:
-            return jsonify({"error": "No price data found"}), 400
+        files_dict = price_upload_state.get("files", {})
+        for fname, fdata in list(files_dict.items()):
+            fdf = fdata.get("df")
+            if fdf is not None and not fdf.empty:
+                mask = (
+                    (fdf["Compound"].astype(str).str.strip().str.lower() != compound_raw) &
+                    (fdf["Compound"].astype(str).str.strip() != compound_str)
+                )
+                new_fdf = fdf[mask].copy()
+                fdata["df"] = new_fdf
+                fdata["formatted_compounds"] = [
+                    fc for fc in fdata.get("formatted_compounds", [])
+                    if fc != compound_str and fc.split(" ->")[0].strip().lower() != compound_raw
+                ]
 
-        mask = (
-            (raw_df["Compound"].astype(str).str.strip().str.lower() != compound_raw) &
-            (raw_df["Compound"].astype(str).str.strip() != compound_str)
-        )
-        new_df = raw_df[mask].copy()
+        _recompute_price_state()
 
-        formatted_compounds = [
-            fc for fc in price_upload_state.get("formatted_compounds", [])
-            if fc != compound_str and fc.split(" ->")[0].strip().lower() != compound_raw
+        combined_df = price_upload_state.get("df")
+        formatted_compounds = price_upload_state.get("formatted_compounds", [])
+        total_unique = len(combined_df) if combined_df is not None else 0
+        all_files_list = [
+            {
+                "name": fname,
+                "num_prices": len(fdata["df"]),
+                "compounds": fdata["formatted_compounds"]
+            }
+            for fname, fdata in files_dict.items()
         ]
 
-        if new_df.empty or not formatted_compounds:
-            price_upload_state["df"] = None
-            price_upload_state["resolved_compounds"] = {}
-            price_upload_state["formatted_compounds"] = []
-            price_upload_state["price_map"] = {}
-            price_upload_state["filename"] = ""
-            price_upload_state["count"] = 0
-            return jsonify({
-                "num_prices": 0,
-                "filename": "",
-                "compounds": [],
-            })
-
-        resolved_cmpds = price_upload_state.get("resolved_compounds", {})
-        price_map = {}
-        for _, row in new_df.iterrows():
-            raw_c = str(row["Compound"]).strip()
-            price_val = float(row["Price"])
-            price_map[raw_c.lower()] = price_val
-            price_map[raw_c.upper()] = price_val
-
-            res = resolved_cmpds.get(raw_c)
-            if res:
-                if res["chembl_id"]:
-                    price_map[res["chembl_id"].upper()] = price_val
-                if res["inchi_key"]:
-                    price_map[res["inchi_key"].upper()] = price_val
-                if res["smiles"]:
-                    price_map[res["smiles"].strip()] = price_val
-                if res["pref_name"]:
-                    price_map[res["pref_name"].lower()] = price_val
-
-        price_upload_state["df"] = new_df
-        price_upload_state["price_map"] = price_map
-        price_upload_state["formatted_compounds"] = formatted_compounds
-        price_upload_state["count"] = len(new_df)
-
-        return jsonify({
-            "num_prices": len(new_df),
-            "filename": price_upload_state.get("filename", ""),
-            "compounds": formatted_compounds,
-        })
+    return jsonify({
+        "all_files": all_files_list,
+        "num_prices": total_unique,
+        "filename": price_upload_state.get("filename", ""),
+        "compounds": formatted_compounds,
+    })
 
 
 @app.route("/api/clear-prices", methods=["POST"])
 def clear_prices():
     with _lock:
+        price_upload_state["files"] = {}
         price_upload_state["df"] = None
         price_upload_state["resolved_compounds"] = {}
         price_upload_state["formatted_compounds"] = []
@@ -1859,6 +2031,7 @@ def reset_state():
             "weight_min": None,
         })
         affinity_upload_state.update({
+            "files": {},
             "df": None,
             "resolved_compounds": {},
             "resolved_targets": {},
@@ -1870,6 +2043,7 @@ def reset_state():
             "formatted_compounds": [],
         })
         price_upload_state.update({
+            "files": {},
             "df": None,
             "resolved_compounds": {},
             "formatted_compounds": [],

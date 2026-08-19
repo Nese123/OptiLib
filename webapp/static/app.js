@@ -8,8 +8,9 @@ let uploadMode = sessionStorage.getItem('uploadMode') || 'target'; // 'target' |
 let uploadedChemblIds = [];
 let uploadedMatchedCount = 0;
 let uploadedFilesData = [];
+let uploadedAffinityFilesData = [];
 let uploadedAffinityData = null;
-let uploadedPriceData = null;
+let uploadedPriceFilesData = [];
 
 try {
     const stored = sessionStorage.getItem('uploadedFilesData');
@@ -21,18 +22,47 @@ try {
 }
 
 try {
-    const storedAff = sessionStorage.getItem('uploadedAffinityData');
-    if (storedAff) {
-        uploadedAffinityData = JSON.parse(storedAff);
+    const storedAffFiles = sessionStorage.getItem('uploadedAffinityFilesData');
+    if (storedAffFiles) {
+        uploadedAffinityFilesData = JSON.parse(storedAffFiles);
+    } else {
+        const storedAff = sessionStorage.getItem('uploadedAffinityData');
+        if (storedAff) {
+            const oldData = JSON.parse(storedAff);
+            if (oldData && oldData.name) {
+                uploadedAffinityFilesData = [{
+                    name: oldData.name,
+                    data: oldData,
+                    allCompounds: oldData.compounds || [],
+                    allTargets: oldData.targets || [],
+                    totalCompounds: oldData.num_compounds || 0,
+                    totalTargets: oldData.num_targets || 0,
+                    totalDatapoints: oldData.num_datapoints || 0
+                }];
+            }
+        }
     }
 } catch (e) {
     console.error('Failed to restore affinity data', e);
 }
 
 try {
-    const storedPrice = sessionStorage.getItem('uploadedPriceData');
-    if (storedPrice) {
-        uploadedPriceData = JSON.parse(storedPrice);
+    const storedPriceFiles = sessionStorage.getItem('uploadedPriceFilesData');
+    if (storedPriceFiles) {
+        uploadedPriceFilesData = JSON.parse(storedPriceFiles);
+    } else {
+        const storedPrice = sessionStorage.getItem('uploadedPriceData');
+        if (storedPrice) {
+            const oldData = JSON.parse(storedPrice);
+            if (oldData && oldData.filename) {
+                uploadedPriceFilesData = [{
+                    name: oldData.filename,
+                    data: oldData,
+                    allCompounds: oldData.compounds || [],
+                    totalUnique: oldData.num_prices || (oldData.compounds || []).length
+                }];
+            }
+        }
     }
 } catch (e) {
     console.error('Failed to restore price data', e);
@@ -56,13 +86,13 @@ window.addEventListener('DOMContentLoaded', async () => {
             renderFiles();
         }
     } else {
-        if (uploadedAffinityData) {
-            renderAffinitySummary(uploadedAffinityData);
+        if (uploadedAffinityFilesData && uploadedAffinityFilesData.length > 0) {
+            renderAffinityFiles();
         }
     }
 
-    if (uploadedPriceData) {
-        renderPriceBadge(uploadedPriceData);
+    if (uploadedPriceFilesData && uploadedPriceFilesData.length > 0) {
+        renderPriceFiles();
     }
 
     try {
@@ -220,11 +250,12 @@ function setupModeSwitcher() {
             if (exampleDownloadBtn) exampleDownloadBtn.href = '/static/example_affinity.xlsx';
             if (exampleDownloadText) exampleDownloadText.textContent = 'Download Example Affinity Data';
             if (validationSummary) validationSummary.style.display = 'none';
-            if (uploadedAffinityData) {
-                renderAffinitySummary(uploadedAffinityData);
+            if (uploadedAffinityFilesData && uploadedAffinityFilesData.length > 0) {
+                renderAffinityFiles();
             } else {
                 if (fileInfo) fileInfo.style.display = 'none';
                 if (removeAllBtnContainer) removeAllBtnContainer.style.display = 'none';
+                if (affinitySummary) affinitySummary.style.display = 'none';
                 if (thresholdControl) thresholdControl.style.display = 'none';
                 if (buildMatrixBtn) buildMatrixBtn.disabled = true;
             }
@@ -242,6 +273,10 @@ function setupModeSwitcher() {
 function setupPriceUpload() {
     const priceDropZone = $('#priceDropZone');
     const priceFileInput = $('#priceFileInput');
+    const priceRemoveAllBtn = $('#priceRemoveAllBtn');
+    const priceRemoveAllConfirm = $('#priceRemoveAllConfirm');
+    const priceRemoveAllYesBtn = $('#priceRemoveAllYesBtn');
+    const priceRemoveAllNoBtn = $('#priceRemoveAllNoBtn');
 
     if (!priceDropZone || !priceFileInput) return;
 
@@ -276,8 +311,7 @@ function setupPriceUpload() {
         e.stopPropagation();
         priceDropZone.classList.remove('drag-over');
         if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
-            priceFileInput.files = e.dataTransfer.files;
-            handlePriceFileUpload(e.dataTransfer.files[0]);
+            handlePriceFileUpload(Array.from(e.dataTransfer.files));
         }
     });
 
@@ -286,7 +320,7 @@ function setupPriceUpload() {
         e.stopPropagation();
         priceDropZone.classList.remove('drag-over');
         if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
-            handlePriceFileUpload(e.dataTransfer.files[0]);
+            handlePriceFileUpload(Array.from(e.dataTransfer.files));
         }
     });
 
@@ -296,9 +330,30 @@ function setupPriceUpload() {
 
     priceFileInput.addEventListener('change', () => {
         if (priceFileInput.files && priceFileInput.files.length) {
-            handlePriceFileUpload(priceFileInput.files[0]);
+            handlePriceFileUpload(Array.from(priceFileInput.files));
         }
     });
+
+    if (priceRemoveAllBtn && priceRemoveAllConfirm && priceRemoveAllYesBtn && priceRemoveAllNoBtn) {
+        priceRemoveAllBtn.addEventListener('click', () => {
+            priceRemoveAllBtn.style.display = 'none';
+            priceRemoveAllConfirm.style.display = 'flex';
+        });
+
+        priceRemoveAllYesBtn.addEventListener('click', async () => {
+            try {
+                await fetch('/api/clear-prices', { method: 'POST' });
+            } catch (err) { }
+            uploadedPriceFilesData = [];
+            sessionStorage.removeItem('uploadedPriceFilesData');
+            renderPriceFiles();
+        });
+
+        priceRemoveAllNoBtn.addEventListener('click', () => {
+            priceRemoveAllConfirm.style.display = 'none';
+            priceRemoveAllBtn.style.display = 'inline-block';
+        });
+    }
 }
 
 async function parseJsonResponse(res) {
@@ -316,269 +371,279 @@ async function parseJsonResponse(res) {
     return {};
 }
 
-async function handlePriceFileUpload(file) {
-    const formData = new FormData();
-    formData.append('file', file);
+async function handlePriceFileUpload(files) {
+    const fileList = Array.isArray(files) ? files : (files instanceof FileList ? Array.from(files) : [files]);
+    if (!fileList.length) return;
 
-    try {
-        const res = await fetch('/api/upload-prices', { method: 'POST', body: formData });
-        const data = await parseJsonResponse(res);
+    for (let f of fileList) {
+        const formData = new FormData();
+        formData.append('files[]', f);
 
-        if (res.ok) {
-            uploadedPriceData = {
-                filename: file.name,
-                num_prices: data.num_prices,
-                compounds: data.compounds || []
-            };
-            sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
-            renderPriceBadge(uploadedPriceData);
-        } else {
-            showError(uploadError, data.error || `Failed to process price file: ${file.name}`);
+        try {
+            const res = await fetch('/api/upload-prices', { method: 'POST', body: formData });
+            const data = await parseJsonResponse(res);
+
+            if (res.ok) {
+                if (Array.isArray(data.all_files)) {
+                    uploadedPriceFilesData = data.all_files.map(af => ({
+                        name: af.name,
+                        data: af,
+                        allCompounds: data.compounds || [],
+                        totalUnique: data.num_prices
+                    }));
+                } else {
+                    const existingIdx = uploadedPriceFilesData.findIndex(item => item.name === f.name);
+                    const fileSummary = (data.uploaded_files && data.uploaded_files[0]) || {
+                        name: f.name,
+                        num_prices: data.num_prices,
+                        compounds: data.compounds || []
+                    };
+                    const fileEntry = {
+                        name: f.name,
+                        data: fileSummary,
+                        allCompounds: data.compounds || [],
+                        totalUnique: data.num_prices
+                    };
+                    if (existingIdx >= 0) {
+                        uploadedPriceFilesData[existingIdx] = fileEntry;
+                    } else {
+                        uploadedPriceFilesData.push(fileEntry);
+                    }
+                }
+            } else {
+                showError(uploadError, data.error || `Failed to process price file: ${f.name}`);
+            }
+        } catch (err) {
+            showError(uploadError, `Price upload error: ${err.message}`);
         }
-    } catch (err) {
-        showError(uploadError, `Price upload error: ${err.message}`);
     }
+
+    renderPriceFiles();
 }
 
-function renderPriceBadge(data) {
+function renderPriceFiles() {
     const priceFileInfo = $('#priceFileInfo');
-    if (!priceFileInfo) return;
+    const priceRemoveAllBtnContainer = $('#priceRemoveAllBtnContainer');
+    const priceRemoveAllBtn = $('#priceRemoveAllBtn');
+    const priceRemoveAllConfirm = $('#priceRemoveAllConfirm');
+    const priceValidationSummary = $('#priceValidationSummary');
+    const priceMatchedCount = $('#priceMatchedCount');
+    const priceCompoundList = $('#priceCompoundList');
+    const priceFileInput = $('#priceFileInput');
 
-    if (!data) {
-        priceFileInfo.style.display = 'none';
-        priceFileInfo.innerHTML = '';
-        return;
-    }
+    if (!priceFileInfo) return;
 
     priceFileInfo.innerHTML = '';
 
-    const box = document.createElement('div');
-    box.className = 'file-selected';
-    box.style.margin = '0';
-    box.style.display = 'flex';
-    box.style.justifyContent = 'space-between';
-    box.style.alignItems = 'center';
-    box.style.background = 'rgba(157, 124, 255, 0.08)';
-    box.style.borderColor = 'rgba(157, 124, 255, 0.3)';
-
-    const leftSide = document.createElement('div');
-    leftSide.style.display = 'flex';
-    leftSide.style.alignItems = 'center';
-    leftSide.style.gap = '0.5rem';
-
-    const iconSpan = document.createElement('span');
-    iconSpan.textContent = '🏷️';
-
-    const textSpan = document.createElement('span');
-    textSpan.id = 'priceFileName';
-    textSpan.style.fontWeight = '500';
-    textSpan.textContent = data.filename || 'prices.xlsx';
-
-    const badgeSpan = document.createElement('span');
-    badgeSpan.id = 'priceFileBadge';
-    badgeSpan.style.fontSize = '0.75rem';
-    badgeSpan.style.background = 'rgba(18, 243, 185, 0.2)';
-    badgeSpan.style.color = 'var(--accent-teal)';
-    badgeSpan.style.padding = '2px 6px';
-    badgeSpan.style.borderRadius = '4px';
-    badgeSpan.textContent = `${data.num_prices} prices loaded`;
-
-    leftSide.appendChild(iconSpan);
-    leftSide.appendChild(textSpan);
-    leftSide.appendChild(badgeSpan);
-
-    const rightSide = document.createElement('div');
-    const deleteBtn = document.createElement('span');
-    deleteBtn.id = 'removePriceBtn';
-    deleteBtn.textContent = '❌';
-    deleteBtn.style.cursor = 'pointer';
-    deleteBtn.style.color = '#ff4a4a';
-    deleteBtn.title = 'Remove custom price file';
-
-    deleteBtn.onclick = (e) => {
-        if (e) e.stopPropagation();
-        box.innerHTML = '';
-
-        const msg = document.createElement('span');
-        msg.textContent = `Are you sure you want to delete ${data.filename || 'prices.xlsx'}?`;
-        msg.style.color = '#ff4a4a';
-        msg.style.fontSize = '0.9rem';
-
-        const btnContainer = document.createElement('div');
-        btnContainer.style.display = 'flex';
-        btnContainer.style.gap = '8px';
-
-        const yesBtn = document.createElement('button');
-        yesBtn.className = 'btn btn-primary';
-        yesBtn.style.padding = '0.25rem 0.75rem';
-        yesBtn.style.fontSize = '0.85rem';
-        yesBtn.style.minWidth = '50px';
-        yesBtn.textContent = 'Yes';
-        yesBtn.onclick = async () => {
-            try {
-                await fetch('/api/clear-prices', { method: 'POST' });
-            } catch (err) { }
-            uploadedPriceData = null;
-            sessionStorage.removeItem('uploadedPriceData');
-            priceFileInfo.style.display = 'none';
-            priceFileInfo.innerHTML = '';
-            const priceFileInput = $('#priceFileInput');
-            if (priceFileInput) priceFileInput.value = '';
-        };
-
-        const noBtn = document.createElement('button');
-        noBtn.className = 'btn btn-secondary';
-        noBtn.style.padding = '0.25rem 0.75rem';
-        noBtn.style.fontSize = '0.85rem';
-        noBtn.style.minWidth = '50px';
-        noBtn.textContent = 'No';
-        noBtn.onclick = () => renderPriceBadge(data);
-
-        btnContainer.appendChild(yesBtn);
-        btnContainer.appendChild(noBtn);
-
-        box.appendChild(msg);
-        box.appendChild(btnContainer);
-    };
-
-    rightSide.appendChild(deleteBtn);
-
-    box.appendChild(leftSide);
-    box.appendChild(rightSide);
-    priceFileInfo.appendChild(box);
-
-    // Below the box: Compounds list (similar to affinity data uploading section)
-    if (data.compounds && data.compounds.length > 0) {
-        const listLabel = document.createElement('div');
-        listLabel.className = 'affinity-list-label';
-        listLabel.style.marginTop = '0.75rem';
-        listLabel.style.marginBottom = '0.35rem';
-        listLabel.textContent = 'Compounds:';
-        priceFileInfo.appendChild(listLabel);
-
-        const cmpdListEl = document.createElement('div');
-        cmpdListEl.className = 'target-list';
-        cmpdListEl.id = 'priceCompoundList';
-        cmpdListEl.style.marginTop = '0';
-        cmpdListEl.style.marginBottom = '0';
-        cmpdListEl.style.maxHeight = '120px';
-
-        data.compounds.forEach(c => {
-            const item = document.createElement('div');
-            item.className = 'target-list-item';
-
-            const textSpan = document.createElement('span');
-            textSpan.textContent = c;
-
-            const delBtn = document.createElement('span');
-            delBtn.textContent = '❌';
-            delBtn.className = 'target-list-delete';
-            delBtn.title = 'Remove compound';
-            delBtn.onclick = () => {
-                item.innerHTML = '';
-
-                const compoundName = c.split(' ->')[0];
-                const msg = document.createElement('span');
-                msg.textContent = `Are you sure you want to remove the price for compound ${compoundName}?`;
-                msg.style.color = '#ff4a4a';
-
-                const btnContainer = document.createElement('div');
-                btnContainer.style.display = 'flex';
-                btnContainer.style.gap = '8px';
-
-                const yesBtn = document.createElement('button');
-                yesBtn.className = 'btn btn-primary';
-                yesBtn.style.padding = '0.15rem 0.5rem';
-                yesBtn.style.fontSize = '0.75rem';
-                yesBtn.style.minWidth = '40px';
-                yesBtn.textContent = 'Yes';
-                yesBtn.onclick = async () => {
-                    try {
-                        const res = await fetch('/api/remove-price-compound', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ compound: c }),
-                        });
-                        const resData = await parseJsonResponse(res);
-                        if (res.ok) {
-                            if (!resData.compounds || resData.compounds.length === 0) {
-                                try {
-                                    await fetch('/api/clear-prices', { method: 'POST' });
-                                } catch (e) { }
-                                uploadedPriceData = null;
-                                sessionStorage.removeItem('uploadedPriceData');
-                                priceFileInfo.style.display = 'none';
-                                priceFileInfo.innerHTML = '';
-                                const priceFileInput = $('#priceFileInput');
-                                if (priceFileInput) priceFileInput.value = '';
-                            } else {
-                                uploadedPriceData.num_prices = resData.num_prices;
-                                uploadedPriceData.compounds = resData.compounds || [];
-                                sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
-                                renderPriceBadge(uploadedPriceData);
-                            }
-                        } else {
-                            uploadedPriceData.compounds = (uploadedPriceData.compounds || []).filter(item => item !== c);
-                            uploadedPriceData.num_prices = uploadedPriceData.compounds.length;
-                            if (uploadedPriceData.compounds.length === 0) {
-                                try {
-                                    await fetch('/api/clear-prices', { method: 'POST' });
-                                } catch (e) { }
-                                uploadedPriceData = null;
-                                sessionStorage.removeItem('uploadedPriceData');
-                                priceFileInfo.style.display = 'none';
-                                priceFileInfo.innerHTML = '';
-                                const priceFileInput = $('#priceFileInput');
-                                if (priceFileInput) priceFileInput.value = '';
-                            } else {
-                                sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
-                                renderPriceBadge(uploadedPriceData);
-                            }
-                        }
-                    } catch (e) {
-                        uploadedPriceData.compounds = (uploadedPriceData.compounds || []).filter(item => item !== c);
-                        uploadedPriceData.num_prices = uploadedPriceData.compounds.length;
-                        if (uploadedPriceData.compounds.length === 0) {
-                            try {
-                                await fetch('/api/clear-prices', { method: 'POST' });
-                            } catch (err) { }
-                            uploadedPriceData = null;
-                            sessionStorage.removeItem('uploadedPriceData');
-                            priceFileInfo.style.display = 'none';
-                            priceFileInfo.innerHTML = '';
-                            const priceFileInput = $('#priceFileInput');
-                            if (priceFileInput) priceFileInput.value = '';
-                        } else {
-                            sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
-                            renderPriceBadge(uploadedPriceData);
-                        }
-                    }
-                };
-
-                const noBtn = document.createElement('button');
-                noBtn.className = 'btn btn-secondary';
-                noBtn.style.padding = '0.15rem 0.5rem';
-                noBtn.style.fontSize = '0.75rem';
-                noBtn.style.minWidth = '40px';
-                noBtn.textContent = 'No';
-                noBtn.onclick = () => renderPriceBadge(data);
-
-                btnContainer.appendChild(yesBtn);
-                btnContainer.appendChild(noBtn);
-
-                item.appendChild(msg);
-                item.appendChild(btnContainer);
-            };
-
-            item.appendChild(textSpan);
-            item.appendChild(delBtn);
-            cmpdListEl.appendChild(item);
-        });
-
-        priceFileInfo.appendChild(cmpdListEl);
+    if (!uploadedPriceFilesData || uploadedPriceFilesData.length === 0) {
+        priceFileInfo.style.display = 'none';
+        if (priceRemoveAllBtnContainer) priceRemoveAllBtnContainer.style.display = 'none';
+        if (priceValidationSummary) priceValidationSummary.style.display = 'none';
+        if (priceFileInput) priceFileInput.value = '';
+        sessionStorage.removeItem('uploadedPriceFilesData');
+        return;
     }
 
-    priceFileInfo.style.display = 'block';
+    sessionStorage.setItem('uploadedPriceFilesData', JSON.stringify(uploadedPriceFilesData));
+
+    priceFileInfo.style.display = 'flex';
+    if (priceRemoveAllBtnContainer) {
+        priceRemoveAllBtnContainer.style.display = 'block';
+        if (priceRemoveAllBtn) priceRemoveAllBtn.style.display = 'inline-block';
+        if (priceRemoveAllConfirm) priceRemoveAllConfirm.style.display = 'none';
+    }
+
+    uploadedPriceFilesData.forEach(fileData => {
+        const box = document.createElement('div');
+        box.className = 'file-selected';
+        box.style.marginTop = '0';
+        box.style.display = 'flex';
+        box.style.justifyContent = 'space-between';
+        box.style.alignItems = 'center';
+
+        const leftSide = document.createElement('div');
+        leftSide.style.display = 'flex';
+        leftSide.style.alignItems = 'center';
+        leftSide.style.gap = '0.75rem';
+
+        const iconSpan = document.createElement('span');
+        iconSpan.textContent = '📎';
+        const textSpan = document.createElement('span');
+        textSpan.textContent = fileData.name;
+
+        leftSide.appendChild(iconSpan);
+        leftSide.appendChild(textSpan);
+
+        const rightSide = document.createElement('div');
+        const deleteBtn = document.createElement('span');
+        deleteBtn.textContent = '❌';
+        deleteBtn.style.cursor = 'pointer';
+        deleteBtn.style.color = '#ff4a4a';
+        deleteBtn.title = `Remove ${fileData.name}`;
+
+        deleteBtn.onclick = () => {
+            box.innerHTML = '';
+
+            const msg = document.createElement('span');
+            msg.textContent = `Are you sure you want to delete ${fileData.name}?`;
+            msg.style.color = '#ff4a4a';
+            msg.style.fontSize = '0.9rem';
+
+            const btnContainer = document.createElement('div');
+            btnContainer.style.display = 'flex';
+            btnContainer.style.gap = '8px';
+
+            const yesBtn = document.createElement('button');
+            yesBtn.className = 'btn btn-primary';
+            yesBtn.style.padding = '0.25rem 0.75rem';
+            yesBtn.style.fontSize = '0.85rem';
+            yesBtn.style.minWidth = '50px';
+            yesBtn.textContent = 'Yes';
+            yesBtn.onclick = async () => {
+                try {
+                    const res = await fetch('/api/remove-price-file', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename: fileData.name })
+                    });
+                    const resData = await parseJsonResponse(res);
+                    if (res.ok && Array.isArray(resData.all_files)) {
+                        uploadedPriceFilesData = resData.all_files.map(af => ({
+                            name: af.name,
+                            data: af,
+                            allCompounds: resData.compounds || [],
+                            totalUnique: resData.num_prices
+                        }));
+                    } else {
+                        uploadedPriceFilesData = uploadedPriceFilesData.filter(d => d.name !== fileData.name);
+                    }
+                } catch (e) {
+                    uploadedPriceFilesData = uploadedPriceFilesData.filter(d => d.name !== fileData.name);
+                }
+                renderPriceFiles();
+            };
+
+            const noBtn = document.createElement('button');
+            noBtn.className = 'btn btn-secondary';
+            noBtn.style.padding = '0.25rem 0.75rem';
+            noBtn.style.fontSize = '0.85rem';
+            noBtn.style.minWidth = '50px';
+            noBtn.textContent = 'No';
+            noBtn.onclick = () => renderPriceFiles();
+
+            btnContainer.appendChild(yesBtn);
+            btnContainer.appendChild(noBtn);
+
+            box.appendChild(msg);
+            box.appendChild(btnContainer);
+        };
+
+        rightSide.appendChild(deleteBtn);
+        box.appendChild(leftSide);
+        box.appendChild(rightSide);
+        priceFileInfo.appendChild(box);
+    });
+
+    // Compute unique compounds across all files
+    let allCompounds = [];
+    let totalUnique = 0;
+    if (uploadedPriceFilesData.length > 0 && uploadedPriceFilesData[0].allCompounds && uploadedPriceFilesData[0].allCompounds.length > 0) {
+        allCompounds = uploadedPriceFilesData[0].allCompounds;
+        totalUnique = uploadedPriceFilesData[0].totalUnique || allCompounds.length;
+    } else {
+        uploadedPriceFilesData.forEach(f => {
+            if (f.data && Array.isArray(f.data.compounds)) {
+                allCompounds.push(...f.data.compounds);
+            }
+        });
+        allCompounds = [...new Set(allCompounds)];
+        totalUnique = allCompounds.length;
+    }
+
+    if (priceValidationSummary) {
+        priceValidationSummary.style.display = 'block';
+        if (priceMatchedCount) {
+            priceMatchedCount.textContent = `${totalUnique} unique prices loaded`;
+        }
+
+        if (priceCompoundList) {
+            priceCompoundList.innerHTML = '';
+            allCompounds.forEach(c => {
+                const item = document.createElement('div');
+                item.className = 'target-list-item';
+
+                const textSpan = document.createElement('span');
+                textSpan.textContent = c;
+
+                const delBtn = document.createElement('span');
+                delBtn.textContent = '❌';
+                delBtn.className = 'target-list-delete';
+                delBtn.title = 'Remove compound';
+                delBtn.onclick = () => {
+                    item.innerHTML = '';
+
+                    const compoundName = c.split(' ->')[0];
+                    const msg = document.createElement('span');
+                    msg.textContent = `Are you sure you want to remove the price for compound ${compoundName}?`;
+                    msg.style.color = '#ff4a4a';
+
+                    const btnContainer = document.createElement('div');
+                    btnContainer.style.display = 'flex';
+                    btnContainer.style.gap = '8px';
+
+                    const yesBtn = document.createElement('button');
+                    yesBtn.className = 'btn btn-primary';
+                    yesBtn.style.padding = '0.15rem 0.5rem';
+                    yesBtn.style.fontSize = '0.75rem';
+                    yesBtn.style.minWidth = '40px';
+                    yesBtn.textContent = 'Yes';
+                    yesBtn.onclick = async () => {
+                        try {
+                            const res = await fetch('/api/remove-price-compound', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ compound: c })
+                            });
+                            const resData = await parseJsonResponse(res);
+                            if (res.ok) {
+                                if (Array.isArray(resData.all_files)) {
+                                    uploadedPriceFilesData = resData.all_files.map(af => ({
+                                        name: af.name,
+                                        data: af,
+                                        allCompounds: resData.compounds || [],
+                                        totalUnique: resData.num_prices
+                                    }));
+                                }
+                                if (resData.num_prices === 0 || !resData.compounds || resData.compounds.length === 0) {
+                                    uploadedPriceFilesData = [];
+                                    sessionStorage.removeItem('uploadedPriceFilesData');
+                                }
+                            }
+                        } catch (e) { }
+                        renderPriceFiles();
+                    };
+
+                    const noBtn = document.createElement('button');
+                    noBtn.className = 'btn btn-secondary';
+                    noBtn.style.padding = '0.15rem 0.5rem';
+                    noBtn.style.fontSize = '0.75rem';
+                    noBtn.style.minWidth = '40px';
+                    noBtn.textContent = 'No';
+                    noBtn.onclick = () => renderPriceFiles();
+
+                    btnContainer.appendChild(yesBtn);
+                    btnContainer.appendChild(noBtn);
+
+                    item.appendChild(msg);
+                    item.appendChild(btnContainer);
+                };
+
+                item.appendChild(textSpan);
+                item.appendChild(delBtn);
+                priceCompoundList.appendChild(item);
+            });
+        }
+    }
 }
 
 // Remove All buttons
@@ -595,13 +660,10 @@ removeAllYesBtn.addEventListener('click', async () => {
         try {
             await fetch('/api/clear-affinity', { method: 'POST' });
         } catch (e) { }
-        uploadedAffinityData = null;
+        uploadedAffinityFilesData = [];
+        sessionStorage.removeItem('uploadedAffinityFilesData');
         sessionStorage.removeItem('uploadedAffinityData');
-        if (affinitySummary) affinitySummary.style.display = 'none';
-        if (fileInfo) fileInfo.style.display = 'none';
-        if (removeAllBtnContainer) removeAllBtnContainer.style.display = 'none';
-        if (thresholdControl) thresholdControl.style.display = 'none';
-        if (buildMatrixBtn) buildMatrixBtn.disabled = true;
+        renderAffinityFiles();
     }
     removeAllConfirm.style.display = 'none';
     removeAllBtn.style.display = 'inline-block';
@@ -666,33 +728,62 @@ async function handleFileUpload(files) {
     uploadError.style.display = 'none';
 
     if (uploadMode === 'affinity') {
-        // Handle affinity data upload
-        const formData = new FormData();
-        for (let f of files) {
+        const fileList = Array.isArray(files) ? files : (files instanceof FileList ? Array.from(files) : [files]);
+        if (!fileList.length) return;
+
+        for (let f of fileList) {
+            const formData = new FormData();
             formData.append('files[]', f);
-        }
 
-        try {
-            const res = await fetch('/api/upload-affinity', { method: 'POST', body: formData });
-            const data = await parseJsonResponse(res);
+            try {
+                const res = await fetch('/api/upload-affinity', { method: 'POST', body: formData });
+                const data = await parseJsonResponse(res);
 
-            if (res.ok) {
-                uploadedAffinityData = {
-                    name: files.map(f => f.name).join(', '),
-                    num_compounds: data.num_compounds,
-                    num_targets: data.num_targets,
-                    num_datapoints: data.num_datapoints,
-                    compounds: data.compounds || [],
-                    targets: data.targets || []
-                };
-                sessionStorage.setItem('uploadedAffinityData', JSON.stringify(uploadedAffinityData));
-                renderAffinitySummary(uploadedAffinityData);
-            } else {
-                showError(uploadError, data.error || 'Failed to process affinity data file.');
+                if (res.ok) {
+                    if (Array.isArray(data.all_files)) {
+                        uploadedAffinityFilesData = data.all_files.map(af => ({
+                            name: af.name,
+                            data: af,
+                            allCompounds: data.compounds || [],
+                            allTargets: data.targets || [],
+                            totalCompounds: data.num_compounds,
+                            totalTargets: data.num_targets,
+                            totalDatapoints: data.num_datapoints
+                        }));
+                    } else {
+                        const existingIdx = uploadedAffinityFilesData.findIndex(item => item.name === f.name);
+                        const fileSummary = (data.uploaded_files && data.uploaded_files[0]) || {
+                            name: f.name,
+                            num_compounds: data.num_compounds,
+                            num_targets: data.num_targets,
+                            num_datapoints: data.num_datapoints,
+                            compounds: data.compounds || [],
+                            targets: data.targets || []
+                        };
+                        const fileEntry = {
+                            name: f.name,
+                            data: fileSummary,
+                            allCompounds: data.compounds || [],
+                            allTargets: data.targets || [],
+                            totalCompounds: data.num_compounds,
+                            totalTargets: data.num_targets,
+                            totalDatapoints: data.num_datapoints
+                        };
+                        if (existingIdx >= 0) {
+                            uploadedAffinityFilesData[existingIdx] = fileEntry;
+                        } else {
+                            uploadedAffinityFilesData.push(fileEntry);
+                        }
+                    }
+                } else {
+                    showError(uploadError, data.error || `Failed to process affinity file: ${f.name}`);
+                }
+            } catch (err) {
+                showError(uploadError, `Affinity upload error: ${err.message}`);
             }
-        } catch (err) {
-            showError(uploadError, `Upload error: ${err.message}`);
         }
+
+        renderAffinityFiles();
         return;
     }
 
@@ -944,290 +1035,335 @@ function renderFiles() {
     }
 }
 
-function renderAffinitySummary(data) {
-    if (!data || ((!data.targets || data.targets.length === 0) && (!data.compounds || data.compounds.length === 0))) {
+function renderAffinityFiles() {
+    if (!uploadedAffinityFilesData || uploadedAffinityFilesData.length === 0) {
         if (affinitySummary) affinitySummary.style.display = 'none';
-        if (fileInfo) fileInfo.style.display = 'none';
+        if (fileInfo) {
+            fileInfo.style.display = 'none';
+            fileInfo.innerHTML = '';
+        }
         if (removeAllBtnContainer) removeAllBtnContainer.style.display = 'none';
+        if (thresholdControl) thresholdControl.style.display = 'none';
+        if (buildMatrixBtn) buildMatrixBtn.disabled = true;
+        if (fileInput) fileInput.value = '';
+        sessionStorage.removeItem('uploadedAffinityFilesData');
+        return;
+    }
+
+    sessionStorage.setItem('uploadedAffinityFilesData', JSON.stringify(uploadedAffinityFilesData));
+
+    fileInfo.innerHTML = '';
+    fileInfo.style.display = 'flex';
+    if (removeAllBtnContainer) {
+        removeAllBtnContainer.style.display = 'block';
+        if (removeAllBtn) removeAllBtn.style.display = 'inline-block';
+        if (removeAllConfirm) removeAllConfirm.style.display = 'none';
+    }
+
+    // Render individual file cards
+    uploadedAffinityFilesData.forEach(fileData => {
+        const box = document.createElement('div');
+        box.className = 'file-selected';
+        box.style.marginTop = '0';
+        box.style.display = 'flex';
+        box.style.justifyContent = 'space-between';
+        box.style.alignItems = 'center';
+
+        const leftSide = document.createElement('div');
+        leftSide.style.display = 'flex';
+        leftSide.style.alignItems = 'center';
+        leftSide.style.gap = '0.75rem';
+
+        const iconSpan = document.createElement('span');
+        iconSpan.textContent = '🧪';
+        const textSpan = document.createElement('span');
+        textSpan.textContent = fileData.name;
+
+        leftSide.appendChild(iconSpan);
+        leftSide.appendChild(textSpan);
+
+        const rightSide = document.createElement('div');
+        const deleteBtn = document.createElement('span');
+        deleteBtn.textContent = '❌';
+        deleteBtn.style.cursor = 'pointer';
+        deleteBtn.style.color = '#ff4a4a';
+        deleteBtn.title = `Remove ${fileData.name}`;
+
+        deleteBtn.onclick = () => {
+            box.innerHTML = '';
+
+            const msg = document.createElement('span');
+            msg.textContent = `Are you sure you want to delete ${fileData.name}?`;
+            msg.style.color = '#ff4a4a';
+            msg.style.fontSize = '0.9rem';
+
+            const btnContainer = document.createElement('div');
+            btnContainer.style.display = 'flex';
+            btnContainer.style.gap = '8px';
+
+            const yesBtn = document.createElement('button');
+            yesBtn.className = 'btn btn-primary';
+            yesBtn.style.padding = '0.25rem 0.75rem';
+            yesBtn.style.fontSize = '0.85rem';
+            yesBtn.style.minWidth = '50px';
+            yesBtn.textContent = 'Yes';
+            yesBtn.onclick = async () => {
+                try {
+                    const res = await fetch('/api/remove-affinity-file', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename: fileData.name })
+                    });
+                    const resData = await parseJsonResponse(res);
+                    if (res.ok && Array.isArray(resData.all_files)) {
+                        uploadedAffinityFilesData = resData.all_files.map(af => ({
+                            name: af.name,
+                            data: af,
+                            allCompounds: resData.compounds || [],
+                            allTargets: resData.targets || [],
+                            totalCompounds: resData.num_compounds,
+                            totalTargets: resData.num_targets,
+                            totalDatapoints: resData.num_datapoints
+                        }));
+                    } else {
+                        uploadedAffinityFilesData = uploadedAffinityFilesData.filter(d => d.name !== fileData.name);
+                    }
+                } catch (e) {
+                    uploadedAffinityFilesData = uploadedAffinityFilesData.filter(d => d.name !== fileData.name);
+                }
+                renderAffinityFiles();
+            };
+
+            const noBtn = document.createElement('button');
+            noBtn.className = 'btn btn-secondary';
+            noBtn.style.padding = '0.25rem 0.75rem';
+            noBtn.style.fontSize = '0.85rem';
+            noBtn.style.minWidth = '50px';
+            noBtn.textContent = 'No';
+            noBtn.onclick = () => renderAffinityFiles();
+
+            btnContainer.appendChild(yesBtn);
+            btnContainer.appendChild(noBtn);
+
+            box.appendChild(msg);
+            box.appendChild(btnContainer);
+        };
+
+        rightSide.appendChild(deleteBtn);
+        box.appendChild(leftSide);
+        box.appendChild(rightSide);
+        fileInfo.appendChild(box);
+    });
+
+    // Reconcile cumulative lists and counts
+    let allCompounds = [];
+    let allTargets = [];
+    let totalCompounds = 0;
+    let totalTargets = 0;
+    let totalDatapoints = 0;
+
+    if (uploadedAffinityFilesData.length > 0 && uploadedAffinityFilesData[0].allCompounds) {
+        allCompounds = uploadedAffinityFilesData[0].allCompounds || [];
+        allTargets = uploadedAffinityFilesData[0].allTargets || [];
+        totalCompounds = uploadedAffinityFilesData[0].totalCompounds !== undefined ? uploadedAffinityFilesData[0].totalCompounds : allCompounds.length;
+        totalTargets = uploadedAffinityFilesData[0].totalTargets !== undefined ? uploadedAffinityFilesData[0].totalTargets : allTargets.length;
+        totalDatapoints = uploadedAffinityFilesData[0].totalDatapoints || 0;
+    } else {
+        uploadedAffinityFilesData.forEach(f => {
+            if (f.data) {
+                if (Array.isArray(f.data.compounds)) allCompounds.push(...f.data.compounds);
+                if (Array.isArray(f.data.targets)) allTargets.push(...f.data.targets);
+                totalDatapoints += (f.data.num_datapoints || 0);
+            }
+        });
+        allCompounds = [...new Set(allCompounds)];
+        allTargets = [...new Set(allTargets)];
+        totalCompounds = allCompounds.length;
+        totalTargets = allTargets.length;
+    }
+
+    if (totalTargets === 0 && totalCompounds === 0) {
+        if (affinitySummary) affinitySummary.style.display = 'none';
         if (thresholdControl) thresholdControl.style.display = 'none';
         if (buildMatrixBtn) buildMatrixBtn.disabled = true;
         return;
     }
 
-    fileInfo.innerHTML = '';
-    const box = document.createElement('div');
-    box.className = 'file-selected';
-    box.style.margin = '0';
-    box.style.display = 'flex';
-    box.style.justifyContent = 'space-between';
-    box.style.alignItems = 'center';
+    if (affinitySummary) {
+        affinitySummary.style.display = 'block';
 
-    const left = document.createElement('div');
-    left.style.display = 'flex';
-    left.style.alignItems = 'center';
-    left.style.gap = '0.75rem';
-    left.innerHTML = `<span>🧪</span><span>${data.name}</span>`;
+        const cmpdCountEl = $('#affinityCompoundCount');
+        const tgtCountEl = $('#affinityTargetCount');
+        const ptsCountEl = $('#affinityPointsCount');
+        const cmpdListEl = $('#affinityCompoundList');
+        const tgtListEl = $('#affinityTargetList');
 
-    const right = document.createElement('div');
-    const delBtn = document.createElement('span');
-    delBtn.textContent = '❌';
-    delBtn.style.cursor = 'pointer';
-    delBtn.style.color = '#ff4a4a';
-    delBtn.onclick = () => {
-        box.innerHTML = '';
+        if (cmpdCountEl) cmpdCountEl.textContent = totalCompounds;
+        if (tgtCountEl) tgtCountEl.textContent = totalTargets;
+        if (ptsCountEl) ptsCountEl.textContent = totalDatapoints;
 
-        const msg = document.createElement('span');
-        msg.textContent = `Are you sure you want to delete ${data.name}?`;
-        msg.style.color = '#ff4a4a';
-        msg.style.fontSize = '0.9rem';
+        // Compound List
+        if (cmpdListEl) {
+            cmpdListEl.innerHTML = '';
+            allCompounds.forEach(c => {
+                const item = document.createElement('div');
+                item.className = 'target-list-item';
 
-        const btnContainer = document.createElement('div');
-        btnContainer.style.display = 'flex';
-        btnContainer.style.gap = '8px';
+                const textSpan = document.createElement('span');
+                textSpan.textContent = c;
 
-        const yesBtn = document.createElement('button');
-        yesBtn.className = 'btn btn-primary';
-        yesBtn.style.padding = '0.25rem 0.75rem';
-        yesBtn.style.fontSize = '0.85rem';
-        yesBtn.style.minWidth = '50px';
-        yesBtn.textContent = 'Yes';
-        yesBtn.onclick = async () => {
-            try {
-                await fetch('/api/clear-affinity', { method: 'POST' });
-            } catch (e) { }
-            uploadedAffinityData = null;
-            sessionStorage.removeItem('uploadedAffinityData');
-            affinitySummary.style.display = 'none';
-            fileInfo.style.display = 'none';
-            removeAllBtnContainer.style.display = 'none';
-            thresholdControl.style.display = 'none';
-            buildMatrixBtn.disabled = true;
-        };
+                const delBtn = document.createElement('span');
+                delBtn.textContent = '❌';
+                delBtn.className = 'target-list-delete';
+                delBtn.title = 'Remove compound';
+                delBtn.onclick = () => {
+                    item.innerHTML = '';
 
-        const noBtn = document.createElement('button');
-        noBtn.className = 'btn btn-secondary';
-        noBtn.style.padding = '0.25rem 0.75rem';
-        noBtn.style.fontSize = '0.85rem';
-        noBtn.style.minWidth = '50px';
-        noBtn.textContent = 'No';
-        noBtn.onclick = () => renderAffinitySummary(data);
+                    const compoundName = c.split(' ->')[0];
+                    const msg = document.createElement('span');
+                    msg.textContent = `Are you sure you want to remove the compound ${compoundName}?`;
+                    msg.style.color = '#ff4a4a';
 
-        btnContainer.appendChild(yesBtn);
-        btnContainer.appendChild(noBtn);
+                    const btnContainer = document.createElement('div');
+                    btnContainer.style.display = 'flex';
+                    btnContainer.style.gap = '8px';
 
-        box.appendChild(msg);
-        box.appendChild(btnContainer);
-    };
-    right.appendChild(delBtn);
-
-    box.appendChild(left);
-    box.appendChild(right);
-    fileInfo.appendChild(box);
-    fileInfo.style.display = 'flex';
-    removeAllBtnContainer.style.display = 'block';
-    removeAllBtn.style.display = 'inline-block';
-    removeAllConfirm.style.display = 'none';
-
-    // Stats
-    const cmpdCountEl = $('#affinityCompoundCount');
-    const tgtCountEl = $('#affinityTargetCount');
-    const ptsCountEl = $('#affinityPointsCount');
-    const cmpdListEl = $('#affinityCompoundList');
-    const tgtListEl = $('#affinityTargetList');
-
-    if (cmpdCountEl) cmpdCountEl.textContent = data.num_compounds;
-    if (tgtCountEl) tgtCountEl.textContent = data.num_targets;
-    if (ptsCountEl) ptsCountEl.textContent = data.num_datapoints;
-
-    // Compound List
-    if (cmpdListEl && data.compounds) {
-        cmpdListEl.innerHTML = '';
-        data.compounds.forEach(c => {
-            const item = document.createElement('div');
-            item.className = 'target-list-item';
-
-            const textSpan = document.createElement('span');
-            textSpan.textContent = c;
-
-            const delBtn = document.createElement('span');
-            delBtn.textContent = '❌';
-            delBtn.className = 'target-list-delete';
-            delBtn.title = 'Remove compound';
-            delBtn.onclick = () => {
-                item.innerHTML = '';
-
-                const compoundName = c.split(' ->')[0];
-                const msg = document.createElement('span');
-                msg.textContent = `Are you sure you want to remove the compound ${compoundName}?`;
-                msg.style.color = '#ff4a4a';
-
-                const btnContainer = document.createElement('div');
-                btnContainer.style.display = 'flex';
-                btnContainer.style.gap = '8px';
-
-                const yesBtn = document.createElement('button');
-                yesBtn.className = 'btn btn-primary';
-                yesBtn.style.padding = '0.15rem 0.5rem';
-                yesBtn.style.fontSize = '0.75rem';
-                yesBtn.style.minWidth = '40px';
-                yesBtn.textContent = 'Yes';
-                yesBtn.onclick = async () => {
-                    try {
-                        const res = await fetch('/api/remove-affinity-compound', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ compound: c }),
-                        });
-                        const resData = await parseJsonResponse(res);
-                        if (res.ok) {
-                            uploadedAffinityData.num_compounds = resData.num_compounds;
-                            uploadedAffinityData.num_targets = resData.num_targets;
-                            uploadedAffinityData.num_datapoints = resData.num_datapoints;
-                            uploadedAffinityData.compounds = resData.compounds || [];
-                            uploadedAffinityData.targets = resData.targets || [];
-                        } else {
-                            uploadedAffinityData.compounds = (uploadedAffinityData.compounds || []).filter(item => item !== c);
-                            uploadedAffinityData.num_compounds = uploadedAffinityData.compounds.length;
-                        }
-                    } catch (e) {
-                        uploadedAffinityData.compounds = (uploadedAffinityData.compounds || []).filter(item => item !== c);
-                        uploadedAffinityData.num_compounds = uploadedAffinityData.compounds.length;
-                    }
-
-                    if (!uploadedAffinityData.compounds || uploadedAffinityData.compounds.length === 0 || !uploadedAffinityData.targets || uploadedAffinityData.targets.length === 0) {
+                    const yesBtn = document.createElement('button');
+                    yesBtn.className = 'btn btn-primary';
+                    yesBtn.style.padding = '0.15rem 0.5rem';
+                    yesBtn.style.fontSize = '0.75rem';
+                    yesBtn.style.minWidth = '40px';
+                    yesBtn.textContent = 'Yes';
+                    yesBtn.onclick = async () => {
                         try {
-                            await fetch('/api/clear-affinity', { method: 'POST' });
+                            const res = await fetch('/api/remove-affinity-compound', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ compound: c }),
+                            });
+                            const resData = await parseJsonResponse(res);
+                            if (res.ok && Array.isArray(resData.all_files)) {
+                                uploadedAffinityFilesData = resData.all_files.map(af => ({
+                                    name: af.name,
+                                    data: af,
+                                    allCompounds: resData.compounds || [],
+                                    allTargets: resData.targets || [],
+                                    totalCompounds: resData.num_compounds,
+                                    totalTargets: resData.num_targets,
+                                    totalDatapoints: resData.num_datapoints
+                                }));
+                                if (resData.num_compounds === 0 || resData.num_targets === 0) {
+                                    uploadedAffinityFilesData = [];
+                                    sessionStorage.removeItem('uploadedAffinityFilesData');
+                                }
+                            }
                         } catch (e) { }
-                        uploadedAffinityData = null;
-                        sessionStorage.removeItem('uploadedAffinityData');
-                        affinitySummary.style.display = 'none';
-                        fileInfo.style.display = 'none';
-                        removeAllBtnContainer.style.display = 'none';
-                        thresholdControl.style.display = 'none';
-                        buildMatrixBtn.disabled = true;
-                    } else {
-                        sessionStorage.setItem('uploadedAffinityData', JSON.stringify(uploadedAffinityData));
-                        renderAffinitySummary(uploadedAffinityData);
-                    }
+                        renderAffinityFiles();
+                    };
+
+                    const noBtn = document.createElement('button');
+                    noBtn.className = 'btn btn-secondary';
+                    noBtn.style.padding = '0.15rem 0.5rem';
+                    noBtn.style.fontSize = '0.75rem';
+                    noBtn.style.minWidth = '40px';
+                    noBtn.textContent = 'No';
+                    noBtn.onclick = () => renderAffinityFiles();
+
+                    btnContainer.appendChild(yesBtn);
+                    btnContainer.appendChild(noBtn);
+
+                    item.appendChild(msg);
+                    item.appendChild(btnContainer);
                 };
 
-                const noBtn = document.createElement('button');
-                noBtn.className = 'btn btn-secondary';
-                noBtn.style.padding = '0.15rem 0.5rem';
-                noBtn.style.fontSize = '0.75rem';
-                noBtn.style.minWidth = '40px';
-                noBtn.textContent = 'No';
-                noBtn.onclick = () => renderAffinitySummary(data);
+                item.appendChild(textSpan);
+                item.appendChild(delBtn);
+                cmpdListEl.appendChild(item);
+            });
+        }
 
-                btnContainer.appendChild(yesBtn);
-                btnContainer.appendChild(noBtn);
+        // Target List
+        if (tgtListEl) {
+            tgtListEl.innerHTML = '';
+            allTargets.forEach(t => {
+                const item = document.createElement('div');
+                item.className = 'target-list-item';
 
-                item.appendChild(msg);
-                item.appendChild(btnContainer);
-            };
+                const textSpan = document.createElement('span');
+                textSpan.textContent = t;
 
-            item.appendChild(textSpan);
-            item.appendChild(delBtn);
-            cmpdListEl.appendChild(item);
-        });
-    }
+                const delBtn = document.createElement('span');
+                delBtn.textContent = '❌';
+                delBtn.className = 'target-list-delete';
+                delBtn.title = 'Remove target';
+                delBtn.onclick = () => {
+                    item.innerHTML = '';
 
-    // Target List
-    if (tgtListEl && data.targets) {
-        tgtListEl.innerHTML = '';
-        data.targets.forEach(t => {
-            const item = document.createElement('div');
-            item.className = 'target-list-item';
+                    const targetName = t.split(' ->')[0];
+                    const msg = document.createElement('span');
+                    msg.textContent = `Are you sure you want to remove the target ${targetName}?`;
+                    msg.style.color = '#ff4a4a';
 
-            const textSpan = document.createElement('span');
-            textSpan.textContent = t;
+                    const btnContainer = document.createElement('div');
+                    btnContainer.style.display = 'flex';
+                    btnContainer.style.gap = '8px';
 
-            const delBtn = document.createElement('span');
-            delBtn.textContent = '❌';
-            delBtn.className = 'target-list-delete';
-            delBtn.title = 'Remove target';
-            delBtn.onclick = () => {
-                item.innerHTML = '';
-
-                const targetName = t.split(' ->')[0];
-                const msg = document.createElement('span');
-                msg.textContent = `Are you sure you want to remove the target ${targetName}?`;
-                msg.style.color = '#ff4a4a';
-
-                const btnContainer = document.createElement('div');
-                btnContainer.style.display = 'flex';
-                btnContainer.style.gap = '8px';
-
-                const yesBtn = document.createElement('button');
-                yesBtn.className = 'btn btn-primary';
-                yesBtn.style.padding = '0.15rem 0.5rem';
-                yesBtn.style.fontSize = '0.75rem';
-                yesBtn.style.minWidth = '40px';
-                yesBtn.textContent = 'Yes';
-                yesBtn.onclick = async () => {
-                    try {
-                        const res = await fetch('/api/remove-affinity-target', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ target: t }),
-                        });
-                        const resData = await parseJsonResponse(res);
-                        if (res.ok) {
-                            uploadedAffinityData.num_compounds = resData.num_compounds;
-                            uploadedAffinityData.num_targets = resData.num_targets;
-                            uploadedAffinityData.num_datapoints = resData.num_datapoints;
-                            uploadedAffinityData.compounds = resData.compounds || [];
-                            uploadedAffinityData.targets = resData.targets || [];
-                        } else {
-                            uploadedAffinityData.targets = (uploadedAffinityData.targets || []).filter(item => item !== t);
-                            uploadedAffinityData.num_targets = uploadedAffinityData.targets.length;
-                        }
-                    } catch (e) {
-                        uploadedAffinityData.targets = (uploadedAffinityData.targets || []).filter(item => item !== t);
-                        uploadedAffinityData.num_targets = uploadedAffinityData.targets.length;
-                    }
-
-                    if (!uploadedAffinityData.targets || uploadedAffinityData.targets.length === 0 || !uploadedAffinityData.compounds || uploadedAffinityData.compounds.length === 0) {
+                    const yesBtn = document.createElement('button');
+                    yesBtn.className = 'btn btn-primary';
+                    yesBtn.style.padding = '0.15rem 0.5rem';
+                    yesBtn.style.fontSize = '0.75rem';
+                    yesBtn.style.minWidth = '40px';
+                    yesBtn.textContent = 'Yes';
+                    yesBtn.onclick = async () => {
                         try {
-                            await fetch('/api/clear-affinity', { method: 'POST' });
+                            const res = await fetch('/api/remove-affinity-target', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ target: t }),
+                            });
+                            const resData = await parseJsonResponse(res);
+                            if (res.ok && Array.isArray(resData.all_files)) {
+                                uploadedAffinityFilesData = resData.all_files.map(af => ({
+                                    name: af.name,
+                                    data: af,
+                                    allCompounds: resData.compounds || [],
+                                    allTargets: resData.targets || [],
+                                    totalCompounds: resData.num_compounds,
+                                    totalTargets: resData.num_targets,
+                                    totalDatapoints: resData.num_datapoints
+                                }));
+                                if (resData.num_compounds === 0 || resData.num_targets === 0) {
+                                    uploadedAffinityFilesData = [];
+                                    sessionStorage.removeItem('uploadedAffinityFilesData');
+                                }
+                            }
                         } catch (e) { }
-                        uploadedAffinityData = null;
-                        sessionStorage.removeItem('uploadedAffinityData');
-                        affinitySummary.style.display = 'none';
-                        fileInfo.style.display = 'none';
-                        removeAllBtnContainer.style.display = 'none';
-                        thresholdControl.style.display = 'none';
-                        buildMatrixBtn.disabled = true;
-                    } else {
-                        sessionStorage.setItem('uploadedAffinityData', JSON.stringify(uploadedAffinityData));
-                        renderAffinitySummary(uploadedAffinityData);
-                    }
+                        renderAffinityFiles();
+                    };
+
+                    const noBtn = document.createElement('button');
+                    noBtn.className = 'btn btn-secondary';
+                    noBtn.style.padding = '0.15rem 0.5rem';
+                    noBtn.style.fontSize = '0.75rem';
+                    noBtn.style.minWidth = '40px';
+                    noBtn.textContent = 'No';
+                    noBtn.onclick = () => renderAffinityFiles();
+
+                    btnContainer.appendChild(yesBtn);
+                    btnContainer.appendChild(noBtn);
+
+                    item.appendChild(msg);
+                    item.appendChild(btnContainer);
                 };
 
-                const noBtn = document.createElement('button');
-                noBtn.className = 'btn btn-secondary';
-                noBtn.style.padding = '0.15rem 0.5rem';
-                noBtn.style.fontSize = '0.75rem';
-                noBtn.style.minWidth = '40px';
-                noBtn.textContent = 'No';
-                noBtn.onclick = () => renderAffinitySummary(data);
-
-                btnContainer.appendChild(yesBtn);
-                btnContainer.appendChild(noBtn);
-
-                item.appendChild(msg);
-                item.appendChild(btnContainer);
-            };
-
-            item.appendChild(textSpan);
-            item.appendChild(delBtn);
-            tgtListEl.appendChild(item);
-        });
+                item.appendChild(textSpan);
+                item.appendChild(delBtn);
+                tgtListEl.appendChild(item);
+            });
+        }
     }
 
-    affinitySummary.style.display = 'block';
-
-    if (data.targets && data.targets.length >= 2) {
+    if (totalTargets >= 2 && totalCompounds > 0) {
         thresholdControl.style.display = 'block';
         buildMatrixBtn.disabled = false;
     } else {
@@ -1783,13 +1919,17 @@ async function resetAllState() {
 
     // Clear session storage
     sessionStorage.removeItem('uploadedFilesData');
+    sessionStorage.removeItem('uploadedAffinityFilesData');
     sessionStorage.removeItem('uploadedAffinityData');
+    sessionStorage.removeItem('uploadedPriceFilesData');
     sessionStorage.removeItem('uploadedPriceData');
     sessionStorage.removeItem('currentStep');
 
     // Clear state variables
     uploadedFilesData = [];
+    uploadedAffinityFilesData = [];
     uploadedAffinityData = null;
+    uploadedPriceFilesData = [];
     uploadedPriceData = null;
     uploadedChemblIds = [];
     uploadedMatchedCount = 0;
@@ -1803,6 +1943,10 @@ async function resetAllState() {
         priceFileInfo.style.display = 'none';
         priceFileInfo.innerHTML = '';
     }
+    const priceRemoveAllBtnContainer = $('#priceRemoveAllBtnContainer');
+    if (priceRemoveAllBtnContainer) priceRemoveAllBtnContainer.style.display = 'none';
+    const priceValidationSummary = $('#priceValidationSummary');
+    if (priceValidationSummary) priceValidationSummary.style.display = 'none';
 
     if (uploadError) uploadError.style.display = 'none';
     const pipelineError = $('#pipelineError');

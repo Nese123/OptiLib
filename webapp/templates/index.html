@@ -158,13 +158,42 @@
                         </a>
                     </div>
                     <div class="price-drop-zone" id="priceDropZone">
-                        <div class="price-drop-text">Drag & drop a custom price file, or click to browse</div>
+                        <div class="price-drop-text">Drag & drop custom price file(s), or click to browse</div>
                         <div class="price-drop-hint">CSV or Excel (.xlsx) with "Compound" and "Price" (USD/mg) column
                             · Accepts compound names,
                             ChEMBL IDs, SMILES Strings, or InChIKeys for compound IDs</div>
-                        <input type="file" id="priceFileInput" accept=".csv,.xlsx,.xls">
+                        <input type="file" id="priceFileInput" accept=".csv,.xlsx,.xls" multiple>
                     </div>
-                    <div id="priceFileInfo" style="display: none; margin-top: 0.5rem;"></div>
+                    <div id="priceFileInfo" style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
+                    </div>
+
+                    <div id="priceRemoveAllBtnContainer" style="display: none; margin-top: 0.75rem; text-align: right;">
+                        <button class="btn btn-secondary" id="priceRemoveAllBtn"
+                            style="padding: 0.4rem 1rem; font-size: 0.85rem; color: #ff4a4a; border-color: rgba(255, 74, 74, 0.3); background: rgba(255, 74, 74, 0.05);">
+                            Remove All
+                        </button>
+                        <div id="priceRemoveAllConfirm"
+                            style="display: none; align-items: center; justify-content: flex-end; gap: 8px;">
+                            <span style="color: #ff4a4a; font-size: 0.9rem;">Are you sure you want to remove all price
+                                data?</span>
+                            <button class="btn btn-primary" id="priceRemoveAllYesBtn"
+                                style="padding: 0.25rem 0.75rem; font-size: 0.85rem; min-width: 50px;">Yes</button>
+                            <button class="btn btn-secondary" id="priceRemoveAllNoBtn"
+                                style="padding: 0.25rem 0.75rem; font-size: 0.85rem; min-width: 50px;">No</button>
+                        </div>
+                    </div>
+
+                    <!-- Price Validation / Summary -->
+                    <div class="validation-summary" id="priceValidationSummary" style="display: none; margin-top: 1rem;">
+                        <div class="validation-row matched" id="priceMatchedRow">
+                            <span>✅</span>
+                            <span id="priceMatchedCount">0 unique prices loaded</span>
+                        </div>
+                        <div class="affinity-list-label" id="priceCompoundLabel"
+                            style="margin-top: 0.75rem; margin-bottom: 0.35rem;">Compounds:</div>
+                        <div class="target-list" id="priceCompoundList"
+                            style="margin-top: 0; margin-bottom: 0; max-height: 120px;"></div>
+                    </div>
                 </div>
 
                 <!-- Selectivity Threshold -->
