@@ -7,7 +7,7 @@
     <meta name="description"
         content="NSGA-II Drug Library Optimization — Upload disease targets, build selectivity matrices, and optimize compound libraries interactively.">
     <title>OptiLib — Optimization Tool</title>
-    <link rel="stylesheet" href="/static/style.css?v=1.1">
+    <link rel="stylesheet" href="/static/style.css?v=1.3">
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%%22 y=%2250%%22 dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2280%22>💊</text></svg>">
@@ -52,24 +52,35 @@
         </nav>
 
         <!-- ═══════════════════════════════════════════════════════ -->
-        <!--  STEP 1: Upload Targets                                 -->
+        <!--  STEP 1: Upload Data                                    -->
         <!-- ═══════════════════════════════════════════════════════ -->
         <section class="step-section active" id="step-1">
             <div class="card">
-                <h2 class="card-title"><span class="icon">📂</span> Upload Target List</h2>
+                <!-- Mode Switcher -->
+                <div class="mode-switch-container" id="uploadModeSwitch">
+                    <button type="button" class="mode-tab-btn active" id="modeTargetBtn" data-mode="target">
+                        <span>Target List</span>
+                    </button>
+                    <button type="button" class="mode-tab-btn" id="modeAffinityBtn" data-mode="affinity">
+                        <span>Custom Affinity Data</span>
+                    </button>
+                </div>
+
+                <h2 class="card-title" id="step1Title"><span class="icon">📂</span> Upload Target List</h2>
 
                 <div class="drop-zone" id="dropZone">
                     <span class="upload-icon">📄</span>
-                    <div class="upload-text">Drag & drop your files here, or click to browse</div>
-                    <div class="upload-hint">CSV or Excel (.xlsx) with a "Target" column · Accepts target names, ChEMBL
+                    <div class="upload-text" id="dropZoneText">Drag & drop your files here, or click to browse</div>
+                    <div class="upload-hint" id="dropZoneHint">CSV or Excel (.xlsx) with a "Target" column · Accepts
+                        target names, ChEMBL
                         IDs, Gene Symbols, or UniProt Accessions</div>
                     <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" multiple>
                 </div>
 
                 <div style="margin-top: 1.5rem; text-align: center;">
                     <a href="/static/example_targets.xlsx" download="example_targets.xlsx" class="btn btn-secondary"
-                        style="padding: 0.5rem 1rem; font-size: 0.9rem;">
-                        <span class="btn-icon">📥</span> Download Example File
+                        id="exampleDownloadBtn" style="padding: 0.5rem 1rem; font-size: 0.9rem;">
+                        <span class="btn-icon">📥</span> <span id="exampleDownloadText">Download Example Targets</span>
                     </a>
                 </div>
 
@@ -79,12 +90,12 @@
                 <div id="removeAllBtnContainer" style="display: none; margin-top: 0.75rem; text-align: right;">
                     <button class="btn btn-secondary" id="removeAllBtn"
                         style="padding: 0.4rem 1rem; font-size: 0.85rem; color: #ff4a4a; border-color: rgba(255, 74, 74, 0.3); background: rgba(255, 74, 74, 0.05);">
-                        Remove All Targets
+                        Remove All
                     </button>
                     <div id="removeAllConfirm"
                         style="display: none; align-items: center; justify-content: flex-end; gap: 8px;">
                         <span style="color: #ff4a4a; font-size: 0.9rem;">Are you sure you want to remove all
-                            targets?</span>
+                            data?</span>
                         <button class="btn btn-primary" id="removeAllYesBtn"
                             style="padding: 0.25rem 0.75rem; font-size: 0.85rem; min-width: 50px;">Yes</button>
                         <button class="btn btn-secondary" id="removeAllNoBtn"
@@ -92,7 +103,7 @@
                     </div>
                 </div>
 
-                <!-- Validation Results -->
+                <!-- Validation Results (Target Mode) -->
                 <div class="validation-summary" id="validationSummary" style="display: none;">
                     <div class="validation-row matched" id="matchedRow">
                         <span>✅</span>
@@ -107,8 +118,70 @@
                     <div class="target-list" id="unmatchedList" style="display: none;"></div>
                 </div>
 
+                <!-- Affinity Data Summary (Affinity Mode) -->
+                <div class="validation-summary" id="affinitySummary" style="display: none;">
+                    <div class="validation-row matched">
+                        <span>✅</span>
+                        <span id="affinitySummaryTitle">Affinity dataset ready</span>
+                    </div>
+                    <div class="affinity-stats-grid">
+                        <div class="affinity-stat-chip">
+                            <div class="affinity-stat-value" id="affinityCompoundCount">0</div>
+                            <div class="affinity-stat-label">Compounds</div>
+                        </div>
+                        <div class="affinity-stat-chip">
+                            <div class="affinity-stat-value" id="affinityTargetCount">0</div>
+                            <div class="affinity-stat-label">Targets</div>
+                        </div>
+                        <div class="affinity-stat-chip">
+                            <div class="affinity-stat-value" id="affinityPointsCount">0</div>
+                            <div class="affinity-stat-label">Measurements</div>
+                        </div>
+                    </div>
+                    <div class="affinity-list-label">Compounds:</div>
+                    <div class="target-list" id="affinityCompoundList"
+                        style="margin-top: 0; margin-bottom: 0.75rem; max-height: 120px;"></div>
+                    <div class="affinity-list-label">Targets:</div>
+                    <div class="target-list" id="affinityTargetList"
+                        style="margin-top: 0; margin-bottom: 0; max-height: 120px;"></div>
+                </div>
+
+                <!-- Secondary Upload: Custom Compound Prices (Optional) -->
+                <div class="secondary-upload-card" id="priceUploadCard">
+                    <div class="secondary-upload-header">
+                        <span class="secondary-upload-title">
+                            <span>💰</span> Custom Compound Prices (Optional)
+                        </span>
+                        <a href="/static/example_prices.xlsx" download="example_prices.xlsx" class="btn btn-secondary"
+                            style="padding: 0.25rem 0.6rem; font-size: 0.78rem;">
+                            <span class="btn-icon">📥</span> Example Prices
+                        </a>
+                    </div>
+                    <div class="price-drop-zone" id="priceDropZone">
+                        <div class="price-drop-text">Drag & drop a custom price file, or click to browse</div>
+                        <div class="price-drop-hint">CSV or Excel (.xlsx) with "Compound" and "Price" (USD/mg) column
+                            · Accepts compound names,
+                            ChEMBL IDs, SMILES Strings, or InChIKeys for compound IDs</div>
+                        <input type="file" id="priceFileInput" accept=".csv,.xlsx,.xls">
+                    </div>
+                    <div id="priceFileInfo" style="display: none; margin-top: 0.5rem;">
+                        <div class="file-selected"
+                            style="margin: 0; display: flex; justify-content: space-between; align-items: center; background: rgba(157, 124, 255, 0.08); border-color: rgba(157, 124, 255, 0.3);">
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>🏷️</span>
+                                <span id="priceFileName" style="font-weight: 500;">prices.xlsx</span>
+                                <span id="priceFileBadge"
+                                    style="font-size: 0.75rem; background: rgba(18, 243, 185, 0.2); color: var(--accent-teal); padding: 2px 6px; border-radius: 4px;">0
+                                    prices</span>
+                            </div>
+                            <span id="removePriceBtn" style="cursor: pointer; color: #ff4a4a;"
+                                title="Remove custom price file">❌</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Selectivity Threshold -->
-                <div class="threshold-control" id="thresholdControl" style="display: none;">
+                <div class="threshold-control" id="thresholdControl" style="display: none; margin-top: 1.5rem;">
                     <div class="form-group">
                         <div class="label-row">
                             <label>Minimum Selectivity Threshold <span class="info-icon"
@@ -133,9 +206,9 @@
                 </div>
 
                 <!-- Error -->
-                <div class="error-box" id="uploadError" style="display: none;"></div>
+                <div class="error-box" id="uploadError" style="display: none; margin-top: 1rem;"></div>
 
-                <div class="btn-row">
+                <div class="btn-row" style="margin-top: 1.5rem;">
                     <button class="btn btn-primary" id="buildMatrixBtn" disabled>
                         <span>Build Selectivity Matrix</span>
                         <span class="btn-icon">→</span>
@@ -447,8 +520,9 @@
                             <table class="comparison-table" style="margin: 0; width: 100%;">
                                 <thead style="position: sticky; top: 0; background: #1a1a2e; z-index: 1;">
                                     <tr>
-                                        <th>InChIKey</th>
+                                        <th>Compound ID</th>
                                         <th>ChEMBL ID</th>
+                                        <th>InChIKey</th>
                                         <th>Price (USD/mg)</th>
                                     </tr>
                                 </thead>
@@ -620,7 +694,7 @@
             });
         }
     </script>
-    <script src="/static/app.js?v=3.9"></script>
+    <script src="/static/app.js?v=4.7"></script>
 
 </body>
 

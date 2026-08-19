@@ -4,9 +4,13 @@
 
 // ─── State ───
 let currentStep = 1;
+let uploadMode = sessionStorage.getItem('uploadMode') || 'target'; // 'target' | 'affinity'
 let uploadedChemblIds = [];
 let uploadedMatchedCount = 0;
 let uploadedFilesData = [];
+let uploadedAffinityData = null;
+let uploadedPriceData = null;
+
 try {
     const stored = sessionStorage.getItem('uploadedFilesData');
     if (stored) {
@@ -15,6 +19,25 @@ try {
 } catch (e) {
     console.error('Failed to restore uploaded files', e);
 }
+
+try {
+    const storedAff = sessionStorage.getItem('uploadedAffinityData');
+    if (storedAff) {
+        uploadedAffinityData = JSON.parse(storedAff);
+    }
+} catch (e) {
+    console.error('Failed to restore affinity data', e);
+}
+
+try {
+    const storedPrice = sessionStorage.getItem('uploadedPriceData');
+    if (storedPrice) {
+        uploadedPriceData = JSON.parse(storedPrice);
+    }
+} catch (e) {
+    console.error('Failed to restore price data', e);
+}
+
 let pipelinePollTimer = null;
 let optPollTimer = null;
 
@@ -24,9 +47,22 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 // Restore state on page load
 window.addEventListener('DOMContentLoaded', async () => {
+    setupModeSwitcher();
+    setupPriceUpload();
+
     // Restore UI if we have saved files
-    if (uploadedFilesData.length > 0) {
-        renderFiles();
+    if (uploadMode === 'target') {
+        if (uploadedFilesData.length > 0) {
+            renderFiles();
+        }
+    } else {
+        if (uploadedAffinityData) {
+            renderAffinitySummary(uploadedAffinityData);
+        }
+    }
+
+    if (uploadedPriceData) {
+        renderPriceBadge(uploadedPriceData);
     }
 
     try {
@@ -130,13 +166,14 @@ function goToStep(step) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  STEP 1: FILE UPLOAD
+//  STEP 1: FILE UPLOAD & MODE SWITCHING
 // ═══════════════════════════════════════════════════════════════
 
 const dropZone = $('#dropZone');
 const fileInput = $('#fileInput');
 const fileInfo = $('#fileInfo');
 const validationSummary = $('#validationSummary');
+const affinitySummary = $('#affinitySummary');
 const buildMatrixBtn = $('#buildMatrixBtn');
 const uploadError = $('#uploadError');
 const thresholdControl = $('#thresholdControl');
@@ -148,14 +185,207 @@ const removeAllConfirm = $('#removeAllConfirm');
 const removeAllYesBtn = $('#removeAllYesBtn');
 const removeAllNoBtn = $('#removeAllNoBtn');
 
+// Mode buttons
+const modeTargetBtn = $('#modeTargetBtn');
+const modeAffinityBtn = $('#modeAffinityBtn');
+const step1Title = $('#step1Title');
+const dropZoneText = $('#dropZoneText');
+const dropZoneHint = $('#dropZoneHint');
+const exampleDownloadBtn = $('#exampleDownloadBtn');
+const exampleDownloadText = $('#exampleDownloadText');
+
+function setupModeSwitcher() {
+    if (!modeTargetBtn || !modeAffinityBtn) return;
+
+    function applyMode(mode) {
+        uploadMode = mode;
+        sessionStorage.setItem('uploadMode', mode);
+
+        if (mode === 'target') {
+            modeTargetBtn.classList.add('active');
+            modeAffinityBtn.classList.remove('active');
+            if (step1Title) step1Title.innerHTML = '<span class="icon">📂</span> Upload Target List';
+            if (dropZoneText) dropZoneText.textContent = 'Drag & drop your target files here, or click to browse';
+            if (dropZoneHint) dropZoneHint.textContent = 'CSV or Excel (.xlsx) with a "Target" column · Accepts target names, ChEMBL IDs, Gene Symbols, or UniProt Accessions';
+            if (exampleDownloadBtn) exampleDownloadBtn.href = '/static/example_targets.xlsx';
+            if (exampleDownloadText) exampleDownloadText.textContent = 'Download Example Targets';
+            if (affinitySummary) affinitySummary.style.display = 'none';
+            renderFiles();
+        } else {
+            modeAffinityBtn.classList.add('active');
+            modeTargetBtn.classList.remove('active');
+            if (step1Title) step1Title.innerHTML = '<span class="icon">📂</span> Upload Predefined Affinity Data';
+            if (dropZoneText) dropZoneText.textContent = 'Drag & drop your affinity data here, or click to browse';
+            if (dropZoneHint) dropZoneHint.textContent = 'CSV or Excel (.xlsx) with "Compound", "Target", and "Affinity" (pKd) columns · Accepts compound names, ChEMBL IDs, SMILES Strings, and InChIKeys for compound IDs & target names, ChEMBL IDs, Gene Symbols and UniProt Accessions for target IDs';
+            if (exampleDownloadBtn) exampleDownloadBtn.href = '/static/example_affinity.xlsx';
+            if (exampleDownloadText) exampleDownloadText.textContent = 'Download Example Affinity Data';
+            if (validationSummary) validationSummary.style.display = 'none';
+            if (uploadedAffinityData) {
+                renderAffinitySummary(uploadedAffinityData);
+            } else {
+                if (fileInfo) fileInfo.style.display = 'none';
+                if (removeAllBtnContainer) removeAllBtnContainer.style.display = 'none';
+                if (thresholdControl) thresholdControl.style.display = 'none';
+                if (buildMatrixBtn) buildMatrixBtn.disabled = true;
+            }
+        }
+    }
+
+    modeTargetBtn.addEventListener('click', () => applyMode('target'));
+    modeAffinityBtn.addEventListener('click', () => applyMode('affinity'));
+
+    // Apply saved mode
+    applyMode(uploadMode);
+}
+
+// Custom Price Upload Handling
+function setupPriceUpload() {
+    const priceDropZone = $('#priceDropZone');
+    const priceFileInput = $('#priceFileInput');
+    const removePriceBtn = $('#removePriceBtn');
+
+    if (!priceDropZone || !priceFileInput) return;
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        priceDropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            priceDropZone.classList.add('drag-over');
+        });
+        priceFileInput.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            priceDropZone.classList.add('drag-over');
+        });
+    });
+
+    ['dragleave', 'dragend'].forEach(eventName => {
+        priceDropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            priceDropZone.classList.remove('drag-over');
+        });
+        priceFileInput.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            priceDropZone.classList.remove('drag-over');
+        });
+    });
+
+    priceDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        priceDropZone.classList.remove('drag-over');
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+            priceFileInput.files = e.dataTransfer.files;
+            handlePriceFileUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    priceFileInput.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        priceDropZone.classList.remove('drag-over');
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+            handlePriceFileUpload(e.dataTransfer.files[0]);
+        }
+    });
+
+    priceFileInput.addEventListener('click', (e) => {
+        e.target.value = '';
+    });
+
+    priceFileInput.addEventListener('change', () => {
+        if (priceFileInput.files && priceFileInput.files.length) {
+            handlePriceFileUpload(priceFileInput.files[0]);
+        }
+    });
+
+    if (removePriceBtn) {
+        removePriceBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                await fetch('/api/clear-prices', { method: 'POST' });
+            } catch (err) { }
+            uploadedPriceData = null;
+            sessionStorage.removeItem('uploadedPriceData');
+            $('#priceFileInfo').style.display = 'none';
+            priceFileInput.value = '';
+        });
+    }
+}
+
+async function parseJsonResponse(res) {
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+        return await res.json();
+    }
+    const text = await res.text();
+    if (!res.ok) {
+        if (res.status === 404) {
+            throw new Error('Endpoint not found (404). Please restart the Flask server (`python webapp/app.py`) so it registers newly added routes.');
+        }
+        throw new Error(`Server error (${res.status}): ${text.slice(0, 100)}`);
+    }
+    return {};
+}
+
+async function handlePriceFileUpload(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch('/api/upload-prices', { method: 'POST', body: formData });
+        const data = await parseJsonResponse(res);
+
+        if (res.ok) {
+            uploadedPriceData = { filename: file.name, num_prices: data.num_prices };
+            sessionStorage.setItem('uploadedPriceData', JSON.stringify(uploadedPriceData));
+            renderPriceBadge(uploadedPriceData);
+        } else {
+            showError(uploadError, data.error || `Failed to process price file: ${file.name}`);
+        }
+    } catch (err) {
+        showError(uploadError, `Price upload error: ${err.message}`);
+    }
+}
+
+function renderPriceBadge(data) {
+    if (!data) return;
+    const priceFileInfo = $('#priceFileInfo');
+    const priceFileName = $('#priceFileName');
+    const priceFileBadge = $('#priceFileBadge');
+    if (priceFileInfo && priceFileName && priceFileBadge) {
+        priceFileName.textContent = data.filename || 'prices.xlsx';
+        priceFileBadge.textContent = `${data.num_prices} prices loaded`;
+        priceFileInfo.style.display = 'block';
+    }
+}
+
+// Remove All buttons
 removeAllBtn.addEventListener('click', () => {
     removeAllBtn.style.display = 'none';
     removeAllConfirm.style.display = 'flex';
 });
 
-removeAllYesBtn.addEventListener('click', () => {
-    uploadedFilesData = [];
-    renderFiles();
+removeAllYesBtn.addEventListener('click', async () => {
+    if (uploadMode === 'target') {
+        uploadedFilesData = [];
+        renderFiles();
+    } else {
+        try {
+            await fetch('/api/clear-affinity', { method: 'POST' });
+        } catch (e) { }
+        uploadedAffinityData = null;
+        sessionStorage.removeItem('uploadedAffinityData');
+        if (affinitySummary) affinitySummary.style.display = 'none';
+        if (fileInfo) fileInfo.style.display = 'none';
+        if (removeAllBtnContainer) removeAllBtnContainer.style.display = 'none';
+        if (thresholdControl) thresholdControl.style.display = 'none';
+        if (buildMatrixBtn) buildMatrixBtn.disabled = true;
+    }
+    removeAllConfirm.style.display = 'none';
+    removeAllBtn.style.display = 'inline-block';
 });
 
 removeAllNoBtn.addEventListener('click', () => {
@@ -163,7 +393,7 @@ removeAllNoBtn.addEventListener('click', () => {
     removeAllBtn.style.display = 'inline-block';
 });
 
-// Drag & drop visual
+// Drag & drop visual for main drop zone
 dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
     dropZone.classList.add('drag-over');
@@ -180,6 +410,10 @@ dropZone.addEventListener('drop', (e) => {
         fileInput.files = e.dataTransfer.files;
         handleFileUpload(Array.from(e.dataTransfer.files));
     }
+});
+
+fileInput.addEventListener('click', function (e) {
+    e.target.value = '';
 });
 
 fileInput.addEventListener('change', () => {
@@ -210,14 +444,45 @@ thresholdValue.addEventListener('change', () => {
 });
 
 async function handleFileUpload(files) {
-    // Reset UI before uploading new files
-    validationSummary.style.display = 'none';
     uploadError.style.display = 'none';
+
+    if (uploadMode === 'affinity') {
+        // Handle affinity data upload
+        const formData = new FormData();
+        for (let f of files) {
+            formData.append('files[]', f);
+        }
+
+        try {
+            const res = await fetch('/api/upload-affinity', { method: 'POST', body: formData });
+            const data = await parseJsonResponse(res);
+
+            if (res.ok) {
+                uploadedAffinityData = {
+                    name: files.map(f => f.name).join(', '),
+                    num_compounds: data.num_compounds,
+                    num_targets: data.num_targets,
+                    num_datapoints: data.num_datapoints,
+                    compounds: data.compounds || [],
+                    targets: data.targets || []
+                };
+                sessionStorage.setItem('uploadedAffinityData', JSON.stringify(uploadedAffinityData));
+                renderAffinitySummary(uploadedAffinityData);
+            } else {
+                showError(uploadError, data.error || 'Failed to process affinity data file.');
+            }
+        } catch (err) {
+            showError(uploadError, `Upload error: ${err.message}`);
+        }
+        return;
+    }
+
+    // Target mode upload
+    validationSummary.style.display = 'none';
     buildMatrixBtn.disabled = true;
     thresholdControl.style.display = 'none';
 
     for (let f of files) {
-        // Skip if a file with this name is already uploaded
         if (uploadedFilesData.some(d => d.name === f.name)) continue;
 
         const formData = new FormData();
@@ -225,7 +490,7 @@ async function handleFileUpload(files) {
 
         try {
             const res = await fetch('/api/upload-targets', { method: 'POST', body: formData });
-            const data = await res.json();
+            const data = await parseJsonResponse(res);
 
             if (res.ok) {
                 uploadedFilesData.push({ name: f.name, data: data });
@@ -247,8 +512,8 @@ function renderFiles() {
     let allMatched = [];
     let allUnmatched = [];
 
-    uploadedFilesData.forEach(fileData => {
-        const d = fileData.data;
+    uploadedFilesData.forEach((fileData) => {
+        const d = fileData.data || {};
         allMatched.push(...(d.matched || []));
         allUnmatched.push(...(d.unmatched || []));
 
@@ -297,7 +562,7 @@ function renderFiles() {
             yesBtn.style.minWidth = '50px';
             yesBtn.textContent = 'Yes';
             yesBtn.onclick = () => {
-                uploadedFilesData = uploadedFilesData.filter(d => d.name !== fileData.name);
+                uploadedFilesData = uploadedFilesData.filter((d) => d.name !== fileData.name);
                 renderFiles();
             };
 
@@ -334,6 +599,7 @@ function renderFiles() {
         buildMatrixBtn.disabled = true;
         thresholdControl.style.display = 'none';
         uploadedChemblIds = [];
+        uploadedMatchedCount = 0;
         sessionStorage.removeItem('uploadedFilesData');
         return; // Nothing more to do
     }
@@ -345,97 +611,109 @@ function renderFiles() {
     const uniqueUnmatched = [...new Set(allUnmatched)];
 
     let currentChemblIds = [];
-    uniqueMatched.forEach(matchStr => {
-        const match = matchStr.match(/->\s*([^\s(]+)/);
-        if (match && match[1]) {
-            currentChemblIds.push(match[1]);
+    uploadedFilesData.forEach((fileData) => {
+        const d = fileData.data || {};
+        const map = d.chembl_map || {};
+        (d.matched || []).forEach((matchStr) => {
+            if (map[matchStr]) {
+                currentChemblIds.push(map[matchStr]);
+            } else {
+                const match = matchStr.match(/->\s*([^\s(]+)/);
+                if (match && match[1] && match[1].toUpperCase().startsWith('CHEMBL')) {
+                    currentChemblIds.push(match[1]);
+                }
+            }
+        });
+        if (currentChemblIds.length === 0 && Array.isArray(d.chembl_ids)) {
+            currentChemblIds.push(...d.chembl_ids);
         }
     });
     uploadedChemblIds = [...new Set(currentChemblIds)];
-
     uploadedMatchedCount = uniqueMatched.length;
 
     // Show validation summary
     validationSummary.style.display = 'block';
 
     // Matched
-    $('#matchedCount').textContent = `${uniqueMatched.length} targets matched in ChEMBL`;
+    const matchedCountEl = $('#matchedCount');
+    if (matchedCountEl) matchedCountEl.textContent = `${uniqueMatched.length} targets matched in ChEMBL`;
 
     const matchedListEl = $('#matchedList');
-    matchedListEl.innerHTML = '';
-    uniqueMatched.forEach((matchStr) => {
-        const item = document.createElement('div');
-        item.className = 'target-list-item';
+    if (matchedListEl) {
+        matchedListEl.innerHTML = '';
+        uniqueMatched.forEach((matchStr) => {
+            const item = document.createElement('div');
+            item.className = 'target-list-item';
 
-        const textSpan = document.createElement('span');
-        textSpan.textContent = matchStr;
+            const textSpan = document.createElement('span');
+            textSpan.textContent = matchStr;
 
-        const delBtn = document.createElement('span');
-        delBtn.textContent = '❌';
-        delBtn.className = 'target-list-delete';
-        delBtn.title = 'Remove target';
-        delBtn.onclick = () => {
-            item.innerHTML = '';
+            const delBtn = document.createElement('span');
+            delBtn.textContent = '❌';
+            delBtn.className = 'target-list-delete';
+            delBtn.title = 'Remove target';
+            delBtn.onclick = () => {
+                item.innerHTML = '';
 
-            const targetName = matchStr.split(' ->')[0];
-            const msg = document.createElement('span');
-            msg.textContent = `Are you sure you want to remove the target ${targetName}?`;
-            msg.style.color = '#ff4a4a';
+                const targetName = matchStr.split(' ->')[0];
+                const msg = document.createElement('span');
+                msg.textContent = `Are you sure you want to remove the target ${targetName}?`;
+                msg.style.color = '#ff4a4a';
 
-            const btnContainer = document.createElement('div');
-            btnContainer.style.display = 'flex';
-            btnContainer.style.gap = '8px';
+                const btnContainer = document.createElement('div');
+                btnContainer.style.display = 'flex';
+                btnContainer.style.gap = '8px';
 
-            const yesBtn = document.createElement('button');
-            yesBtn.className = 'btn btn-primary';
-            yesBtn.style.padding = '0.15rem 0.5rem';
-            yesBtn.style.fontSize = '0.75rem';
-            yesBtn.style.minWidth = '40px';
-            yesBtn.textContent = 'Yes';
-            yesBtn.onclick = () => {
-                uploadedFilesData.forEach(fileData => {
-                    if (fileData.data.matched) {
-                        fileData.data.matched = fileData.data.matched.filter(m => m !== matchStr);
-                    }
-                });
-                renderFiles();
+                const yesBtn = document.createElement('button');
+                yesBtn.className = 'btn btn-primary';
+                yesBtn.style.padding = '0.15rem 0.5rem';
+                yesBtn.style.fontSize = '0.75rem';
+                yesBtn.style.minWidth = '40px';
+                yesBtn.textContent = 'Yes';
+                yesBtn.onclick = () => {
+                    uploadedFilesData.forEach((fileData) => {
+                        if (fileData.data && fileData.data.matched) {
+                            fileData.data.matched = fileData.data.matched.filter((m) => m !== matchStr);
+                        }
+                    });
+                    renderFiles();
+                };
+
+                const noBtn = document.createElement('button');
+                noBtn.className = 'btn btn-secondary';
+                noBtn.style.padding = '0.15rem 0.5rem';
+                noBtn.style.fontSize = '0.75rem';
+                noBtn.style.minWidth = '40px';
+                noBtn.textContent = 'No';
+                noBtn.onclick = () => renderFiles();
+
+                btnContainer.appendChild(yesBtn);
+                btnContainer.appendChild(noBtn);
+
+                item.appendChild(msg);
+                item.appendChild(btnContainer);
             };
 
-            const noBtn = document.createElement('button');
-            noBtn.className = 'btn btn-secondary';
-            noBtn.style.padding = '0.15rem 0.5rem';
-            noBtn.style.fontSize = '0.75rem';
-            noBtn.style.minWidth = '40px';
-            noBtn.textContent = 'No';
-            noBtn.onclick = () => renderFiles();
-
-            btnContainer.appendChild(yesBtn);
-            btnContainer.appendChild(noBtn);
-
-            item.appendChild(msg);
-            item.appendChild(btnContainer);
-        };
-
-        item.appendChild(textSpan);
-        item.appendChild(delBtn);
-        matchedListEl.appendChild(item);
-    });
+            item.appendChild(textSpan);
+            item.appendChild(delBtn);
+            matchedListEl.appendChild(item);
+        });
+    }
 
     // Unmatched
+    const unmatchedRow = $('#unmatchedRow');
+    const unmatchedList = $('#unmatchedList');
+    const unmatchedCount = $('#unmatchedCount');
     if (uniqueUnmatched.length > 0) {
-        $('#unmatchedRow').style.display = 'flex';
-        $('#unmatchedList').style.display = 'block';
-        $('#unmatchedCount').textContent = `${uniqueUnmatched.length} targets not found`;
-        const unmatchedListEl = $('#unmatchedList');
-        unmatchedListEl.innerHTML = '';
-        uniqueUnmatched.forEach(name => {
-            const row = document.createElement('div');
-            row.textContent = name;
-            unmatchedListEl.appendChild(row);
-        });
+        if (unmatchedRow) unmatchedRow.style.display = 'flex';
+        if (unmatchedList) {
+            unmatchedList.style.display = 'block';
+            unmatchedList.textContent = uniqueUnmatched.join('\n');
+        }
+        if (unmatchedCount) unmatchedCount.textContent = `${uniqueUnmatched.length} targets not found`;
     } else {
-        $('#unmatchedRow').style.display = 'none';
-        $('#unmatchedList').style.display = 'none';
+        if (unmatchedRow) unmatchedRow.style.display = 'none';
+        if (unmatchedList) unmatchedList.style.display = 'none';
     }
 
     if (uniqueMatched.length > 0) {
@@ -447,15 +725,335 @@ function renderFiles() {
     }
 }
 
+function renderAffinitySummary(data) {
+    if (!data || ((!data.targets || data.targets.length === 0) && (!data.compounds || data.compounds.length === 0))) {
+        if (affinitySummary) affinitySummary.style.display = 'none';
+        if (fileInfo) fileInfo.style.display = 'none';
+        if (removeAllBtnContainer) removeAllBtnContainer.style.display = 'none';
+        if (thresholdControl) thresholdControl.style.display = 'none';
+        if (buildMatrixBtn) buildMatrixBtn.disabled = true;
+        return;
+    }
+
+    fileInfo.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'file-selected';
+    box.style.margin = '0';
+    box.style.display = 'flex';
+    box.style.justifyContent = 'space-between';
+    box.style.alignItems = 'center';
+
+    const left = document.createElement('div');
+    left.style.display = 'flex';
+    left.style.alignItems = 'center';
+    left.style.gap = '0.75rem';
+    left.innerHTML = `<span>🧪</span><span>${data.name}</span>`;
+
+    const right = document.createElement('div');
+    const delBtn = document.createElement('span');
+    delBtn.textContent = '❌';
+    delBtn.style.cursor = 'pointer';
+    delBtn.style.color = '#ff4a4a';
+    delBtn.onclick = () => {
+        box.innerHTML = '';
+
+        const msg = document.createElement('span');
+        msg.textContent = `Are you sure you want to delete ${data.name}?`;
+        msg.style.color = '#ff4a4a';
+        msg.style.fontSize = '0.9rem';
+
+        const btnContainer = document.createElement('div');
+        btnContainer.style.display = 'flex';
+        btnContainer.style.gap = '8px';
+
+        const yesBtn = document.createElement('button');
+        yesBtn.className = 'btn btn-primary';
+        yesBtn.style.padding = '0.25rem 0.75rem';
+        yesBtn.style.fontSize = '0.85rem';
+        yesBtn.style.minWidth = '50px';
+        yesBtn.textContent = 'Yes';
+        yesBtn.onclick = async () => {
+            try {
+                await fetch('/api/clear-affinity', { method: 'POST' });
+            } catch (e) { }
+            uploadedAffinityData = null;
+            sessionStorage.removeItem('uploadedAffinityData');
+            affinitySummary.style.display = 'none';
+            fileInfo.style.display = 'none';
+            removeAllBtnContainer.style.display = 'none';
+            thresholdControl.style.display = 'none';
+            buildMatrixBtn.disabled = true;
+        };
+
+        const noBtn = document.createElement('button');
+        noBtn.className = 'btn btn-secondary';
+        noBtn.style.padding = '0.25rem 0.75rem';
+        noBtn.style.fontSize = '0.85rem';
+        noBtn.style.minWidth = '50px';
+        noBtn.textContent = 'No';
+        noBtn.onclick = () => renderAffinitySummary(data);
+
+        btnContainer.appendChild(yesBtn);
+        btnContainer.appendChild(noBtn);
+
+        box.appendChild(msg);
+        box.appendChild(btnContainer);
+    };
+    right.appendChild(delBtn);
+
+    box.appendChild(left);
+    box.appendChild(right);
+    fileInfo.appendChild(box);
+    fileInfo.style.display = 'flex';
+    removeAllBtnContainer.style.display = 'block';
+    removeAllBtn.style.display = 'inline-block';
+    removeAllConfirm.style.display = 'none';
+
+    // Stats
+    const cmpdCountEl = $('#affinityCompoundCount');
+    const tgtCountEl = $('#affinityTargetCount');
+    const ptsCountEl = $('#affinityPointsCount');
+    const cmpdListEl = $('#affinityCompoundList');
+    const tgtListEl = $('#affinityTargetList');
+
+    if (cmpdCountEl) cmpdCountEl.textContent = data.num_compounds;
+    if (tgtCountEl) tgtCountEl.textContent = data.num_targets;
+    if (ptsCountEl) ptsCountEl.textContent = data.num_datapoints;
+
+    // Compound List
+    if (cmpdListEl && data.compounds) {
+        cmpdListEl.innerHTML = '';
+        data.compounds.forEach(c => {
+            const item = document.createElement('div');
+            item.className = 'target-list-item';
+
+            const textSpan = document.createElement('span');
+            textSpan.textContent = c;
+
+            const delBtn = document.createElement('span');
+            delBtn.textContent = '❌';
+            delBtn.className = 'target-list-delete';
+            delBtn.title = 'Remove compound';
+            delBtn.onclick = () => {
+                item.innerHTML = '';
+
+                const compoundName = c.split(' ->')[0];
+                const msg = document.createElement('span');
+                msg.textContent = `Are you sure you want to remove the compound ${compoundName}?`;
+                msg.style.color = '#ff4a4a';
+
+                const btnContainer = document.createElement('div');
+                btnContainer.style.display = 'flex';
+                btnContainer.style.gap = '8px';
+
+                const yesBtn = document.createElement('button');
+                yesBtn.className = 'btn btn-primary';
+                yesBtn.style.padding = '0.15rem 0.5rem';
+                yesBtn.style.fontSize = '0.75rem';
+                yesBtn.style.minWidth = '40px';
+                yesBtn.textContent = 'Yes';
+                yesBtn.onclick = async () => {
+                    try {
+                        const res = await fetch('/api/remove-affinity-compound', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ compound: c }),
+                        });
+                        const resData = await parseJsonResponse(res);
+                        if (res.ok) {
+                            uploadedAffinityData.num_compounds = resData.num_compounds;
+                            uploadedAffinityData.num_targets = resData.num_targets;
+                            uploadedAffinityData.num_datapoints = resData.num_datapoints;
+                            uploadedAffinityData.compounds = resData.compounds || [];
+                            uploadedAffinityData.targets = resData.targets || [];
+                        } else {
+                            uploadedAffinityData.compounds = (uploadedAffinityData.compounds || []).filter(item => item !== c);
+                            uploadedAffinityData.num_compounds = uploadedAffinityData.compounds.length;
+                        }
+                    } catch (e) {
+                        uploadedAffinityData.compounds = (uploadedAffinityData.compounds || []).filter(item => item !== c);
+                        uploadedAffinityData.num_compounds = uploadedAffinityData.compounds.length;
+                    }
+
+                    if (!uploadedAffinityData.compounds || uploadedAffinityData.compounds.length === 0 || !uploadedAffinityData.targets || uploadedAffinityData.targets.length === 0) {
+                        try {
+                            await fetch('/api/clear-affinity', { method: 'POST' });
+                        } catch (e) { }
+                        uploadedAffinityData = null;
+                        sessionStorage.removeItem('uploadedAffinityData');
+                        affinitySummary.style.display = 'none';
+                        fileInfo.style.display = 'none';
+                        removeAllBtnContainer.style.display = 'none';
+                        thresholdControl.style.display = 'none';
+                        buildMatrixBtn.disabled = true;
+                    } else {
+                        sessionStorage.setItem('uploadedAffinityData', JSON.stringify(uploadedAffinityData));
+                        renderAffinitySummary(uploadedAffinityData);
+                    }
+                };
+
+                const noBtn = document.createElement('button');
+                noBtn.className = 'btn btn-secondary';
+                noBtn.style.padding = '0.15rem 0.5rem';
+                noBtn.style.fontSize = '0.75rem';
+                noBtn.style.minWidth = '40px';
+                noBtn.textContent = 'No';
+                noBtn.onclick = () => renderAffinitySummary(data);
+
+                btnContainer.appendChild(yesBtn);
+                btnContainer.appendChild(noBtn);
+
+                item.appendChild(msg);
+                item.appendChild(btnContainer);
+            };
+
+            item.appendChild(textSpan);
+            item.appendChild(delBtn);
+            cmpdListEl.appendChild(item);
+        });
+    }
+
+    // Target List
+    if (tgtListEl && data.targets) {
+        tgtListEl.innerHTML = '';
+        data.targets.forEach(t => {
+            const item = document.createElement('div');
+            item.className = 'target-list-item';
+
+            const textSpan = document.createElement('span');
+            textSpan.textContent = t;
+
+            const delBtn = document.createElement('span');
+            delBtn.textContent = '❌';
+            delBtn.className = 'target-list-delete';
+            delBtn.title = 'Remove target';
+            delBtn.onclick = () => {
+                item.innerHTML = '';
+
+                const targetName = t.split(' ->')[0];
+                const msg = document.createElement('span');
+                msg.textContent = `Are you sure you want to remove the target ${targetName}?`;
+                msg.style.color = '#ff4a4a';
+
+                const btnContainer = document.createElement('div');
+                btnContainer.style.display = 'flex';
+                btnContainer.style.gap = '8px';
+
+                const yesBtn = document.createElement('button');
+                yesBtn.className = 'btn btn-primary';
+                yesBtn.style.padding = '0.15rem 0.5rem';
+                yesBtn.style.fontSize = '0.75rem';
+                yesBtn.style.minWidth = '40px';
+                yesBtn.textContent = 'Yes';
+                yesBtn.onclick = async () => {
+                    try {
+                        const res = await fetch('/api/remove-affinity-target', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ target: t }),
+                        });
+                        const resData = await parseJsonResponse(res);
+                        if (res.ok) {
+                            uploadedAffinityData.num_compounds = resData.num_compounds;
+                            uploadedAffinityData.num_targets = resData.num_targets;
+                            uploadedAffinityData.num_datapoints = resData.num_datapoints;
+                            uploadedAffinityData.compounds = resData.compounds || [];
+                            uploadedAffinityData.targets = resData.targets || [];
+                        } else {
+                            uploadedAffinityData.targets = (uploadedAffinityData.targets || []).filter(item => item !== t);
+                            uploadedAffinityData.num_targets = uploadedAffinityData.targets.length;
+                        }
+                    } catch (e) {
+                        uploadedAffinityData.targets = (uploadedAffinityData.targets || []).filter(item => item !== t);
+                        uploadedAffinityData.num_targets = uploadedAffinityData.targets.length;
+                    }
+
+                    if (!uploadedAffinityData.targets || uploadedAffinityData.targets.length === 0 || !uploadedAffinityData.compounds || uploadedAffinityData.compounds.length === 0) {
+                        try {
+                            await fetch('/api/clear-affinity', { method: 'POST' });
+                        } catch (e) { }
+                        uploadedAffinityData = null;
+                        sessionStorage.removeItem('uploadedAffinityData');
+                        affinitySummary.style.display = 'none';
+                        fileInfo.style.display = 'none';
+                        removeAllBtnContainer.style.display = 'none';
+                        thresholdControl.style.display = 'none';
+                        buildMatrixBtn.disabled = true;
+                    } else {
+                        sessionStorage.setItem('uploadedAffinityData', JSON.stringify(uploadedAffinityData));
+                        renderAffinitySummary(uploadedAffinityData);
+                    }
+                };
+
+                const noBtn = document.createElement('button');
+                noBtn.className = 'btn btn-secondary';
+                noBtn.style.padding = '0.15rem 0.5rem';
+                noBtn.style.fontSize = '0.75rem';
+                noBtn.style.minWidth = '40px';
+                noBtn.textContent = 'No';
+                noBtn.onclick = () => renderAffinitySummary(data);
+
+                btnContainer.appendChild(yesBtn);
+                btnContainer.appendChild(noBtn);
+
+                item.appendChild(msg);
+                item.appendChild(btnContainer);
+            };
+
+            item.appendChild(textSpan);
+            item.appendChild(delBtn);
+            tgtListEl.appendChild(item);
+        });
+    }
+
+    affinitySummary.style.display = 'block';
+
+    if (data.targets && data.targets.length >= 2) {
+        thresholdControl.style.display = 'block';
+        buildMatrixBtn.disabled = false;
+    } else {
+        thresholdControl.style.display = 'none';
+        buildMatrixBtn.disabled = true;
+    }
+}
+
 // Build Matrix button
 buildMatrixBtn.addEventListener('click', async () => {
     buildMatrixBtn.disabled = true;
+    const removeTargets = document.getElementById('removeTargets')?.checked ?? true;
 
-    const removeTargets = document.getElementById('removeTargets').checked;
+    if (uploadMode === 'affinity') {
+        const body = {
+            selectivity_threshold: parseFloat(selectivityThreshold.value) || 0.0,
+            remove_targets: removeTargets,
+        };
+
+        try {
+            const res = await fetch('/api/build-matrix-from-affinity', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await parseJsonResponse(res);
+
+            if (!res.ok) {
+                showError(uploadError, data.error || 'Failed to start affinity pipeline');
+                buildMatrixBtn.disabled = false;
+                return;
+            }
+
+            goToStep(2);
+            startPipelinePolling();
+        } catch (err) {
+            showError(uploadError, `Network error: ${err.message}`);
+            buildMatrixBtn.disabled = false;
+        }
+        return;
+    }
 
     const body = {
         chembl_ids: uploadedChemblIds,
-        selectivity_threshold: parseFloat(selectivityThreshold.value),
+        selectivity_threshold: parseFloat(selectivityThreshold.value) || 0.5,
         remove_targets: removeTargets,
         matched_count: uploadedMatchedCount
     };
@@ -466,7 +1064,7 @@ buildMatrixBtn.addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
 
         if (!res.ok) {
             showError(uploadError, data.error || 'Failed to start pipeline');
@@ -474,7 +1072,6 @@ buildMatrixBtn.addEventListener('click', async () => {
             return;
         }
 
-        // Move to step 2 and start polling
         goToStep(2);
         startPipelinePolling();
 
@@ -520,6 +1117,14 @@ function resetPipelineUI() {
 
     // Reset title
     $('#matrixTitle').innerHTML = '<span class="icon">⚙️</span> Building Selectivity Matrix';
+
+    // Set step 1 label dynamically based on mode
+    const step1NameEl = document.querySelector('.pipeline-step[data-pipeline="1"] .step-name');
+    if (step1NameEl) {
+        step1NameEl.textContent = uploadMode === 'affinity'
+            ? 'Calculating selectivity matrix'
+            : 'Searching for selective compounds';
+    }
 
     // Clear detail texts
     $$('[data-detail]').forEach((d) => d.textContent = '');
@@ -941,25 +1546,58 @@ $('#runAgainBtn').addEventListener('click', async () => {
     runOptBtn.click();
 });
 
-// Back button
-$('#backToStep1Btn').addEventListener('click', async () => {
+async function resetAllState() {
     try {
         await fetch('/api/reset', { method: 'POST' });
     } catch (err) {
         console.error('Failed to reset backend state', err);
     }
 
-    // Clear frontend data
-    fileInput.value = '';
-    uploadError.style.display = 'none';
-    uploadedFilesData = [];
-    renderFiles();
-
     if (optPollTimer) {
         clearInterval(optPollTimer);
         optPollTimer = null;
     }
+    if (pipelinePollTimer) {
+        clearInterval(pipelinePollTimer);
+        pipelinePollTimer = null;
+    }
 
+    // Clear session storage
+    sessionStorage.removeItem('uploadedFilesData');
+    sessionStorage.removeItem('uploadedAffinityData');
+    sessionStorage.removeItem('uploadedPriceData');
+    sessionStorage.removeItem('currentStep');
+
+    // Clear state variables
+    uploadedFilesData = [];
+    uploadedAffinityData = null;
+    uploadedPriceData = null;
+    uploadedChemblIds = [];
+    uploadedMatchedCount = 0;
+
+    // Reset file inputs and UI badges
+    if (fileInput) fileInput.value = '';
+    const priceFileInput = $('#priceFileInput');
+    if (priceFileInput) priceFileInput.value = '';
+    const priceFileInfo = $('#priceFileInfo');
+    if (priceFileInfo) priceFileInfo.style.display = 'none';
+
+    if (uploadError) uploadError.style.display = 'none';
+    const pipelineError = $('#pipelineError');
+    if (pipelineError) pipelineError.style.display = 'none';
+    if (optError) optError.style.display = 'none';
+
+    if (affinitySummary) affinitySummary.style.display = 'none';
+    if (validationSummary) validationSummary.style.display = 'none';
+    if (fileInfo) fileInfo.style.display = 'none';
+    if (removeAllBtnContainer) removeAllBtnContainer.style.display = 'none';
+    if (thresholdControl) thresholdControl.style.display = 'none';
+    if (buildMatrixBtn) buildMatrixBtn.disabled = true;
+
+    // Reset pipeline UI
+    resetPipelineUI();
+
+    // Reset Step 3 elements
     $('#historyCard').style.display = 'none';
     optStatusIndicator.style.visibility = 'hidden';
     runOptBtn.style.display = 'inline-flex';
@@ -970,7 +1608,17 @@ $('#backToStep1Btn').addEventListener('click', async () => {
     $('#optCompleteBanner').style.display = 'none';
     $('#optCompleteBanner').classList.remove('visible');
 
+    // Re-render based on current mode
+    if (uploadMode === 'target') {
+        renderFiles();
+    }
+
     goToStep(1);
+}
+
+// Back button
+$('#backToStep1Btn').addEventListener('click', async () => {
+    await resetAllState();
 });
 
 
@@ -1072,9 +1720,13 @@ async function loadComparison() {
             compoundsBody.innerHTML = '';
             lib.compounds.forEach((c) => {
                 const tr = document.createElement('tr');
+                const displayName = (c.name && c.name !== 'Unknown') ? c.name : (c.chembl_id || c.inchikey || 'Unknown');
+                const chemblVal = (c.chembl_id && c.chembl_id !== 'Unknown') ? c.chembl_id : '—';
+                const inchikeyVal = (c.inchikey && c.inchikey !== 'Unknown') ? c.inchikey : '—';
                 tr.innerHTML = `
-                    <td class="metric-name">${c.inchikey}</td>
-                    <td class="metric-name" style="color: #a8a8b3; font-size: 0.9em;">${c.chembl_id}</td>
+                    <td class="metric-name" style="font-weight: 600; color: #fff;">${displayName}</td>
+                    <td class="metric-name" style="color: #a8a8b3; font-size: 0.9em;">${chemblVal}</td>
+                    <td class="metric-name" style="color: #a8a8b3; font-size: 0.85em; font-family: monospace;">${inchikeyVal}</td>
                     <td class="value">$${c.price.toFixed(2)}</td>
                 `;
                 compoundsBody.appendChild(tr);
@@ -1783,32 +2435,7 @@ $('#backToStep3Btn').addEventListener('click', async () => {
 
 // New run button
 $('#newRunBtn').addEventListener('click', async () => {
-    try {
-        await fetch('/api/reset', { method: 'POST' });
-    } catch (err) {
-        console.error('Failed to reset backend state', err);
-    }
-
-    // Clear frontend data
-    fileInput.value = '';
-    uploadError.style.display = 'none';
-    uploadedFilesData = [];
-    renderFiles();
-
-    if (optPollTimer) {
-        clearInterval(optPollTimer);
-        optPollTimer = null;
-    }
-
-    $('#historyCard').style.display = 'none';
-    $('#optCompleteBanner').style.display = 'none';
-    $('#optCompleteBanner').classList.remove('visible');
-    optStatusIndicator.style.visibility = 'hidden';
-    runOptBtn.style.display = 'inline-flex';
-    runOptBtn.disabled = false;
-    $('#stopOptBtn').style.display = 'none';
-
-    goToStep(1);
+    await resetAllState();
 });
 
 

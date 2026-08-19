@@ -26,6 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATABASE_DIR = PROJECT_ROOT / "database"
 MOLPRICE_DIR = PROJECT_ROOT / "MolPrice"
 
+sys.path.insert(0, str(PROJECT_ROOT / "webapp"))
 sys.path.insert(0, str(MOLPRICE_DIR))
 
 from bin.numpy_predict import NumpyFingerprints
@@ -158,8 +159,264 @@ opt_results = {
     "weight_min": None,
 }
 
+# Custom uploaded data state
+affinity_upload_state = {
+    "df": None,                 # Parsed DataFrame with columns [Compound_Raw, Target_Raw, Affinity]
+    "resolved_compounds": {},   # raw_id -> dict(chembl_id, pref_name, inchi_key, smiles)
+    "resolved_targets": {},     # raw_id -> dict(chembl_id, pref_name, gene_symbol, canonical_name)
+    "num_compounds": 0,
+    "num_targets": 0,
+    "num_datapoints": 0,
+    "unique_targets": [],
+    "formatted_targets": [],
+    "formatted_compounds": [],
+}
+
+price_upload_state = {
+    "price_map": {},            # key (normalized identifier) -> price (float)
+    "filename": "",
+    "count": 0,
+}
+
 # Thread lock for state access
 _lock = threading.Lock()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  HELPERS — Identifier Resolution & Price Matching
+# ═══════════════════════════════════════════════════════════════
+
+def _resolve_compounds(compound_ids):
+    """Resolve a list/set of compound identifiers against ChEMBL database.
+    
+    Accepts ChEMBL IDs, SMILES, InChIKeys, or compound names.
+    Returns a dict mapping raw_id -> dict(chembl_id, pref_name, inchi_key, smiles).
+    """
+    if not compound_ids:
+        return {}
+        
+    cleaned_ids = [str(cid).strip() for cid in compound_ids if str(cid).strip()]
+    unique_ids = list(dict.fromkeys(cleaned_ids))
+    if not unique_ids:
+        return {}
+        
+    # Generate search variations
+    search_set = set()
+    for cid in unique_ids:
+        search_set.add(cid)
+        search_set.add(cid.upper())
+        search_set.add(cid.title())
+        search_set.add(cid.lower())
+    search_list = list(search_set)
+    
+    db_path = str(DATABASE_DIR / "chembl_36.db")
+    raw_matches = []
+    try:
+        with sqlite3.connect(db_path) as conn:
+            chunk_size = 500
+            for i in range(0, len(search_list), chunk_size):
+                chunk = search_list[i:i + chunk_size]
+                ph = ",".join(["?"] * len(chunk))
+                
+                # 1. By chembl_id
+                q1 = f"SELECT md.chembl_id, md.pref_name, cs.standard_inchi_key, cs.canonical_smiles FROM molecule_dictionary md LEFT JOIN compound_structures cs ON md.molregno = cs.molregno WHERE md.chembl_id IN ({ph})"
+                raw_matches.extend(conn.execute(q1, chunk).fetchall())
+                
+                # 2. By pref_name
+                q2 = f"SELECT md.chembl_id, md.pref_name, cs.standard_inchi_key, cs.canonical_smiles FROM molecule_dictionary md LEFT JOIN compound_structures cs ON md.molregno = cs.molregno WHERE md.pref_name IN ({ph})"
+                raw_matches.extend(conn.execute(q2, chunk).fetchall())
+                
+                # 3. By inchi_key
+                q3 = f"SELECT md.chembl_id, md.pref_name, cs.standard_inchi_key, cs.canonical_smiles FROM compound_structures cs JOIN molecule_dictionary md ON cs.molregno = md.molregno WHERE cs.standard_inchi_key IN ({ph})"
+                raw_matches.extend(conn.execute(q3, chunk).fetchall())
+                
+                # 4. By smiles
+                q4 = f"SELECT md.chembl_id, md.pref_name, cs.standard_inchi_key, cs.canonical_smiles FROM compound_structures cs JOIN molecule_dictionary md ON cs.molregno = md.molregno WHERE cs.canonical_smiles IN ({ph})"
+                raw_matches.extend(conn.execute(q4, chunk).fetchall())
+    except Exception as e:
+        print("Warning during compound resolution:", e)
+        
+    # Build fast lookup indexes
+    by_chembl_id = {}
+    by_pref_name = {}
+    by_inchikey = {}
+    by_smiles = {}
+    
+    for row in raw_matches:
+        cid, name, ik, smi = row
+        item = {
+            "chembl_id": cid or "",
+            "pref_name": name or "",
+            "inchi_key": ik or "",
+            "smiles": smi or "",
+        }
+        if cid:
+            by_chembl_id[str(cid).strip().upper()] = item
+        if name:
+            by_pref_name[str(name).strip().lower()] = item
+        if ik:
+            by_inchikey[str(ik).strip().upper()] = item
+        if smi:
+            by_smiles[str(smi).strip()] = item
+            
+    resolved = {}
+    for raw_id in unique_ids:
+        raw_str = str(raw_id).strip()
+        raw_upper = raw_str.upper()
+        raw_lower = raw_str.lower()
+        
+        match = None
+        if raw_upper in by_chembl_id:
+            match = by_chembl_id[raw_upper]
+        elif raw_lower in by_pref_name:
+            match = by_pref_name[raw_lower]
+        elif raw_upper in by_inchikey:
+            match = by_inchikey[raw_upper]
+        elif raw_str in by_smiles:
+            match = by_smiles[raw_str]
+            
+        if match:
+            resolved[raw_id] = {
+                "raw_id": raw_id,
+                "chembl_id": match["chembl_id"],
+                "pref_name": match["pref_name"] or raw_str,
+                "inchi_key": match["inchi_key"],
+                "smiles": match["smiles"],
+                "is_chembl": True,
+            }
+        else:
+            # Guess if raw string is InChIKey or SMILES
+            ik_guess = raw_str if (len(raw_str) == 27 and raw_str[14] == '-' and raw_str[25] == '-') else ""
+            smi_guess = raw_str if ('=' in raw_str or '#' in raw_str or '(' in raw_str or 'c1' in raw_str) else ""
+            resolved[raw_id] = {
+                "raw_id": raw_id,
+                "chembl_id": "",
+                "pref_name": raw_str,
+                "inchi_key": ik_guess,
+                "smiles": smi_guess,
+                "is_chembl": False,
+            }
+            
+    return resolved
+
+
+def _resolve_targets(target_ids):
+    """Resolve target identifiers (ChEMBL IDs, names, gene symbols, accessions) against ChEMBL database."""
+    if not target_ids:
+        return {}
+        
+    cleaned_targets = [str(tid).strip() for tid in target_ids if str(tid).strip()]
+    unique_targets = list(dict.fromkeys(cleaned_targets))
+    if not unique_targets:
+        return {}
+        
+    search_set = set()
+    for tid in unique_targets:
+        search_set.add(tid)
+        search_set.add(tid.upper())
+        search_set.add(tid.lower())
+    search_list = list(search_set)
+    
+    db_path = str(DATABASE_DIR / "chembl_36.db")
+    rows = []
+    try:
+        with sqlite3.connect(db_path) as conn:
+            chunk_size = 500
+            for i in range(0, len(search_list), chunk_size):
+                chunk = search_list[i:i + chunk_size]
+                ph = ",".join(["?"] * len(chunk))
+                query = f"""
+                    SELECT DISTINCT td.chembl_id, td.pref_name, 
+                           (SELECT csy2.component_synonym 
+                            FROM target_components tc2 
+                            JOIN component_synonyms csy2 ON tc2.component_id = csy2.component_id 
+                            WHERE tc2.tid = td.tid AND csy2.syn_type = 'GENE_SYMBOL' 
+                            LIMIT 1) AS gene_symbol,
+                           cs.accession, csy.component_synonym, csy.syn_type
+                    FROM target_dictionary td
+                    LEFT JOIN target_components tc ON td.tid = tc.tid
+                    LEFT JOIN component_sequences cs ON tc.component_id = cs.component_id
+                    LEFT JOIN component_synonyms csy ON cs.component_id = csy.component_id
+                    WHERE (
+                        td.chembl_id COLLATE NOCASE IN ({ph}) OR
+                        td.pref_name COLLATE NOCASE IN ({ph}) OR
+                        cs.accession COLLATE NOCASE IN ({ph}) OR
+                        (csy.component_synonym COLLATE NOCASE IN ({ph}) 
+                         AND csy.syn_type IN ('GENE_SYMBOL', 'UNIPROT', 'EC_NUMBER'))
+                    )
+                    AND td.target_type = 'SINGLE PROTEIN'
+                    AND td.organism = 'Homo sapiens'
+                """
+                rows.extend(conn.execute(query, chunk * 4).fetchall())
+    except Exception as e:
+        print("Warning during target resolution:", e)
+        
+    resolved = {}
+    for target_in in unique_targets:
+        target_in_lower = str(target_in).lower()
+        found = False
+        for r in rows:
+            cid, name, gene_sym, acc, syn, syn_type = r
+            if (target_in_lower == str(cid).lower() or 
+                (name and target_in_lower == str(name).lower()) or
+                (gene_sym and target_in_lower == str(gene_sym).lower()) or
+                (acc and target_in_lower == str(acc).lower()) or
+                (syn and target_in_lower == str(syn).lower())):
+                # Preferred canonical display name: Gene Symbol -> Preferred Name -> ChEMBL ID
+                canonical = gene_sym if gene_sym else (name if name else cid)
+                resolved[target_in] = {
+                    "raw_id": target_in,
+                    "chembl_id": cid or "",
+                    "pref_name": name or "",
+                    "gene_symbol": gene_sym or "",
+                    "accession": acc or "",
+                    "canonical_name": canonical,
+                    "is_chembl": True,
+                }
+                found = True
+                break
+        if not found:
+            resolved[target_in] = {
+                "raw_id": target_in,
+                "chembl_id": "",
+                "pref_name": str(target_in),
+                "gene_symbol": "",
+                "accession": "",
+                "canonical_name": str(target_in),
+                "is_chembl": False,
+            }
+            
+    return resolved
+
+
+def _lookup_custom_price(compound_raw, resolved_info=None):
+    """Smart lookup in custom price map across raw ID, ChEMBL ID, InChIKey, SMILES, and pref_name."""
+    with _lock:
+        price_map = price_upload_state.get("price_map", {})
+    if not price_map:
+        return None
+        
+    c_raw = str(compound_raw).strip()
+    if c_raw.lower() in price_map:
+        return price_map[c_raw.lower()]
+    if c_raw.upper() in price_map:
+        return price_map[c_raw.upper()]
+        
+    if resolved_info:
+        cid = resolved_info.get("chembl_id")
+        if cid and str(cid).strip().upper() in price_map:
+            return price_map[str(cid).strip().upper()]
+        ik = resolved_info.get("inchi_key")
+        if ik and str(ik).strip().upper() in price_map:
+            return price_map[str(ik).strip().upper()]
+        smi = resolved_info.get("smiles")
+        if smi and str(smi).strip() in price_map:
+            return price_map[str(smi).strip()]
+        name = resolved_info.get("pref_name")
+        if name and str(name).strip().lower() in price_map:
+            return price_map[str(name).strip().lower()]
+            
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -232,12 +489,18 @@ def upload_targets():
     matched_chembl_ids = set()
     matched = []
     unmatched = []
+    chembl_map = {}
 
     try:
         with sqlite3.connect(db_path) as conn:
             placeholders = ",".join(["?"] * len(input_targets))
             query = f"""
                 SELECT DISTINCT td.chembl_id, td.pref_name, 
+                       (SELECT csy2.component_synonym 
+                        FROM target_components tc2 
+                        JOIN component_synonyms csy2 ON tc2.component_id = csy2.component_id 
+                        WHERE tc2.tid = td.tid AND csy2.syn_type = 'GENE_SYMBOL' 
+                        LIMIT 1) AS gene_symbol,
                        cs.accession, csy.component_synonym
                 FROM target_dictionary td
                 LEFT JOIN target_components tc ON td.tid = tc.tid
@@ -256,20 +519,28 @@ def upload_targets():
             params = input_targets * 4
             rows = conn.execute(query, params).fetchall()
             
-            # Map input to canonical ChEMBL IDs and Names
+            # Map input to canonical ChEMBL IDs and Names with Gene Symbol in brackets
             for target_in in input_targets:
                 target_in_lower = str(target_in).lower()
                 found = False
                 for r in rows:
-                    cid, name, acc, syn = r
+                    cid, name, gene_sym, acc, syn = r
                     if (target_in_lower == str(cid).lower() or 
-                        target_in_lower == str(name).lower() or
+                        (name and target_in_lower == str(name).lower()) or
+                        (gene_sym and target_in_lower == str(gene_sym).lower()) or
                         (acc and target_in_lower == str(acc).lower()) or
                         (syn and target_in_lower == str(syn).lower())):
                         found = True
                         if cid not in matched_chembl_ids:
                             matched_chembl_ids.add(cid)
-                            matched.append(f"{target_in} -> {cid} ({name})")
+                            display_name = name or gene_sym or cid
+                            bracket_symbol = gene_sym or cid
+                            if bracket_symbol:
+                                match_str = f"{target_in} -> {display_name} ({bracket_symbol})"
+                            else:
+                                match_str = f"{target_in} -> {display_name}"
+                            matched.append(match_str)
+                            chembl_map[match_str] = cid
                         break
                 if not found:
                     unmatched.append(target_in)
@@ -288,7 +559,433 @@ def upload_targets():
         "matched": matched,
         "unmatched": unmatched,
         "chembl_ids": chembl_ids,
+        "chembl_map": chembl_map,
     })
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ROUTES — Predefined Affinity Data & Custom Price Upload
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/upload-affinity", methods=["POST"])
+def upload_affinity():
+    """Accept CSV/Excel with compound, target, and affinity value."""
+    files = request.files.getlist("files[]") or request.files.getlist("file")
+    if not files and "file" in request.files:
+        files = [request.files["file"]]
+    if not files:
+        return jsonify({"error": "No files uploaded"}), 400
+        
+    all_dfs = []
+    for file in files:
+        if file.filename == "":
+            continue
+        try:
+            filename = file.filename.lower()
+            if filename.endswith(".csv"):
+                df = pd.read_csv(file)
+            elif filename.endswith((".xlsx", ".xls")):
+                df = pd.read_excel(file)
+            else:
+                return jsonify({"error": f"Unsupported file type for {file.filename}. Use CSV or Excel (.xlsx)."}), 400
+        except Exception as e:
+            return jsonify({"error": f"Failed to read {file.filename}: {str(e)}"}), 400
+            
+        cmpd_col = None
+        tgt_col = None
+        aff_col = None
+        
+        for col in df.columns:
+            clean_col = col.strip().lower().replace(" ", "_").replace("-", "_")
+            if clean_col in ("compound", "compound_id", "compound_name", "drug", "drug_id", "molecule", "molecule_id", "ligand", "id"):
+                if cmpd_col is None:
+                    cmpd_col = col
+            elif clean_col in ("target", "target_id", "target_name", "protein", "protein_id", "gene", "gene_symbol", "targets", "uniprot", "uniprot_id", "uniprot_accession", "accession", "uniprot_acc", "protein_accession", "target_accession"):
+                if tgt_col is None:
+                    tgt_col = col
+            elif clean_col in ("affinity", "affinity_pkd", "affinity_value", "pkd", "pic50", "pki", "value", "score", "activity", "potency"):
+                if aff_col is None:
+                    aff_col = col
+                    
+        # Fallback by column index if 3 columns
+        if len(df.columns) >= 3 and (cmpd_col is None or tgt_col is None or aff_col is None):
+            cols = list(df.columns)
+            if cmpd_col is None: cmpd_col = cols[0]
+            if tgt_col is None: tgt_col = cols[1]
+            if aff_col is None: aff_col = cols[2]
+            
+        if cmpd_col is None or tgt_col is None or aff_col is None:
+            return jsonify({
+                "error": f"Could not identify Compound, Target, and Affinity columns in {file.filename}. "
+                         f"Please ensure columns are named 'Compound', 'Target', and 'Affinity'."
+            }), 400
+            
+        # Clean and extract
+        sub_df = pd.DataFrame({
+            "Compound_Raw": df[cmpd_col].dropna().astype(str).str.strip(),
+            "Target_Raw": df[tgt_col].dropna().astype(str).str.strip(),
+            "Affinity": pd.to_numeric(df[aff_col], errors="coerce")
+        }).dropna()
+        
+        all_dfs.append(sub_df)
+        
+    if not all_dfs:
+        return jsonify({"error": "No valid affinity data found."}), 400
+        
+    combined_df = pd.concat(all_dfs, ignore_index=True).drop_duplicates()
+    if combined_df.empty:
+        return jsonify({"error": "No valid data rows found in uploaded files."}), 400
+        
+    unique_compounds = combined_df["Compound_Raw"].unique().tolist()
+    unique_targets = combined_df["Target_Raw"].unique().tolist()
+    
+    if len(unique_targets) < 2:
+        return jsonify({"error": f"Dataset must contain at least 2 distinct targets (found {len(unique_targets)})."}), 400
+        
+    # Resolve entities
+    resolved_compounds = _resolve_compounds(unique_compounds)
+    resolved_targets = _resolve_targets(unique_targets)
+    
+    formatted_compounds = []
+    for c in unique_compounds:
+        info = resolved_compounds.get(c, {})
+        ik = info.get("inchi_key") or ""
+        cid = info.get("chembl_id") or ""
+        if ik and cid:
+            display_str = f"{c} -> {ik} ({cid})"
+        elif ik:
+            display_str = f"{c} -> {ik}"
+        elif cid:
+            display_str = f"{c} -> ({cid})"
+        else:
+            display_str = f"{c}"
+        formatted_compounds.append(display_str)
+
+    formatted_targets = []
+    for t in unique_targets:
+        info = resolved_targets.get(t, {})
+        if info.get("is_chembl"):
+            name = info.get("pref_name") or info.get("gene_symbol") or info.get("chembl_id")
+            gene_sym = info.get("gene_symbol") or info.get("chembl_id")
+            if gene_sym:
+                display_str = f"{t} -> {name} ({gene_sym})"
+            else:
+                display_str = f"{t} -> {name}"
+        else:
+            display_str = f"{t}"
+        formatted_targets.append(display_str)
+
+    with _lock:
+        affinity_upload_state["df"] = combined_df
+        affinity_upload_state["resolved_compounds"] = resolved_compounds
+        affinity_upload_state["resolved_targets"] = resolved_targets
+        affinity_upload_state["num_compounds"] = len(unique_compounds)
+        affinity_upload_state["num_targets"] = len(unique_targets)
+        affinity_upload_state["num_datapoints"] = len(combined_df)
+        affinity_upload_state["unique_targets"] = [resolved_targets[t]["canonical_name"] for t in unique_targets]
+        affinity_upload_state["formatted_compounds"] = formatted_compounds
+        affinity_upload_state["formatted_targets"] = formatted_targets
+        
+    return jsonify({
+        "num_compounds": len(unique_compounds),
+        "num_targets": len(unique_targets),
+        "num_datapoints": len(combined_df),
+        "compounds": formatted_compounds,
+        "targets": formatted_targets,
+    })
+
+
+@app.route("/api/upload-prices", methods=["POST"])
+def upload_prices():
+    """Accept CSV/Excel with compound and price."""
+    files = request.files.getlist("files[]") or request.files.getlist("file")
+    if not files and "file" in request.files:
+        files = [request.files["file"]]
+    if not files:
+        return jsonify({"error": "No price file uploaded"}), 400
+        
+    file = files[0]
+    if file.filename == "":
+        return jsonify({"error": "No file selected"}), 400
+        
+    try:
+        filename = file.filename.lower()
+        if filename.endswith(".csv"):
+            df = pd.read_csv(file)
+        elif filename.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(file)
+        else:
+            return jsonify({"error": "Unsupported file type for price file. Use CSV or Excel (.xlsx)."}), 400
+    except Exception as e:
+        return jsonify({"error": f"Failed to read price file: {str(e)}"}), 400
+        
+    cmpd_col = None
+    price_col = None
+    
+    for col in df.columns:
+        clean_col = col.strip().lower().replace(" ", "_").replace("-", "_")
+        if clean_col in ("compound", "compound_id", "compound_name", "drug", "drug_id", "molecule", "molecule_id", "ligand", "id", "inchikey", "smiles", "name"):
+            if cmpd_col is None: cmpd_col = col
+        elif clean_col in ("price", "price_usd_per_mg", "price_usd", "price_per_mg", "cost", "cost_usd", "usd_per_mg"):
+            if price_col is None: price_col = col
+            
+    if len(df.columns) >= 2 and (cmpd_col is None or price_col is None):
+        cols = list(df.columns)
+        if cmpd_col is None: cmpd_col = cols[0]
+        if price_col is None: price_col = cols[1]
+        
+    if cmpd_col is None or price_col is None:
+        return jsonify({
+            "error": "Could not identify Compound and Price columns. Please use 'Compound' and 'Price'."
+        }), 400
+        
+    clean_df = pd.DataFrame({
+        "Compound": df[cmpd_col].dropna().astype(str).str.strip(),
+        "Price": pd.to_numeric(df[price_col], errors="coerce")
+    }).dropna()
+    clean_df = clean_df[clean_df["Price"] > 0]
+    
+    if clean_df.empty:
+        return jsonify({"error": "No valid positive price rows found."}), 400
+        
+    unique_cmpds = clean_df["Compound"].unique().tolist()
+    resolved_cmpds = _resolve_compounds(unique_cmpds)
+    
+    price_map = {}
+    for _, row in clean_df.iterrows():
+        raw_c = str(row["Compound"]).strip()
+        price_val = float(row["Price"])
+        price_map[raw_c.lower()] = price_val
+        price_map[raw_c.upper()] = price_val
+        
+        res = resolved_cmpds.get(raw_c)
+        if res:
+            if res["chembl_id"]:
+                price_map[res["chembl_id"].upper()] = price_val
+            if res["inchi_key"]:
+                price_map[res["inchi_key"].upper()] = price_val
+            if res["smiles"]:
+                price_map[res["smiles"].strip()] = price_val
+            if res["pref_name"]:
+                price_map[res["pref_name"].lower()] = price_val
+                
+    with _lock:
+        price_upload_state["price_map"] = price_map
+        price_upload_state["filename"] = file.filename
+        price_upload_state["count"] = len(clean_df)
+        
+    return jsonify({
+        "num_prices": len(clean_df),
+        "filename": file.filename
+    })
+
+
+@app.route("/api/remove-affinity-target", methods=["POST"])
+def remove_affinity_target():
+    """Remove a single target from the uploaded affinity dataset."""
+    data = request.get_json(force=True) or {}
+    target_str = data.get("target", "").strip()
+    if not target_str:
+        return jsonify({"error": "No target specified"}), 400
+
+    target_raw = target_str.split(" ->")[0].strip().lower()
+
+    with _lock:
+        raw_df = affinity_upload_state.get("df")
+        if raw_df is None or raw_df.empty:
+            return jsonify({"error": "No affinity data found"}), 400
+
+        mask = (
+            (raw_df["Target_Raw"].astype(str).str.strip().str.lower() != target_raw) &
+            (raw_df["Target_Raw"].astype(str).str.strip() != target_str)
+        )
+        new_df = raw_df[mask].copy()
+
+        formatted_targets = [
+            ft for ft in affinity_upload_state.get("formatted_targets", [])
+            if ft != target_str and ft.split(" ->")[0].strip().lower() != target_raw
+        ]
+
+        if new_df.empty or not formatted_targets:
+            affinity_upload_state["df"] = None
+            affinity_upload_state["resolved_compounds"] = {}
+            affinity_upload_state["resolved_targets"] = {}
+            affinity_upload_state["num_compounds"] = 0
+            affinity_upload_state["num_targets"] = 0
+            affinity_upload_state["num_datapoints"] = 0
+            affinity_upload_state["unique_targets"] = []
+            affinity_upload_state["formatted_targets"] = []
+            affinity_upload_state["formatted_compounds"] = []
+            return jsonify({
+                "num_compounds": 0,
+                "num_targets": 0,
+                "num_datapoints": 0,
+                "compounds": [],
+                "targets": []
+            })
+
+        unique_compounds = new_df["Compound_Raw"].unique().tolist()
+        unique_targets = new_df["Target_Raw"].unique().tolist()
+        unique_compounds_set = set(c.lower() for c in unique_compounds)
+
+        formatted_compounds = [
+            fc for fc in affinity_upload_state.get("formatted_compounds", [])
+            if fc.split(" ->")[0].strip().lower() in unique_compounds_set
+        ]
+
+        resolved_targets = affinity_upload_state.get("resolved_targets", {})
+
+        if not formatted_compounds:
+            affinity_upload_state["df"] = None
+            affinity_upload_state["resolved_compounds"] = {}
+            affinity_upload_state["resolved_targets"] = {}
+            affinity_upload_state["num_compounds"] = 0
+            affinity_upload_state["num_targets"] = 0
+            affinity_upload_state["num_datapoints"] = 0
+            affinity_upload_state["unique_targets"] = []
+            affinity_upload_state["formatted_targets"] = []
+            affinity_upload_state["formatted_compounds"] = []
+            return jsonify({
+                "num_compounds": 0,
+                "num_targets": 0,
+                "num_datapoints": 0,
+                "compounds": [],
+                "targets": []
+            })
+
+        affinity_upload_state["df"] = new_df
+        affinity_upload_state["num_compounds"] = len(unique_compounds)
+        affinity_upload_state["num_targets"] = len(unique_targets)
+        affinity_upload_state["num_datapoints"] = len(new_df)
+        affinity_upload_state["unique_targets"] = [
+            resolved_targets[t]["canonical_name"] for t in unique_targets if t in resolved_targets
+        ]
+        affinity_upload_state["formatted_compounds"] = formatted_compounds
+        affinity_upload_state["formatted_targets"] = formatted_targets
+
+        return jsonify({
+            "num_compounds": len(unique_compounds),
+            "num_targets": len(unique_targets),
+            "num_datapoints": len(new_df),
+            "compounds": formatted_compounds,
+            "targets": formatted_targets
+        })
+
+
+@app.route("/api/remove-affinity-compound", methods=["POST"])
+def remove_affinity_compound():
+    """Remove a single compound from the uploaded affinity dataset."""
+    data = request.get_json(force=True) or {}
+    compound_str = data.get("compound", "").strip()
+    if not compound_str:
+        return jsonify({"error": "No compound specified"}), 400
+
+    compound_raw = compound_str.split(" ->")[0].strip().lower()
+
+    with _lock:
+        raw_df = affinity_upload_state.get("df")
+        if raw_df is None or raw_df.empty:
+            return jsonify({"error": "No affinity data found"}), 400
+
+        mask = (
+            (raw_df["Compound_Raw"].astype(str).str.strip().str.lower() != compound_raw) &
+            (raw_df["Compound_Raw"].astype(str).str.strip() != compound_str)
+        )
+        new_df = raw_df[mask].copy()
+
+        formatted_compounds = [
+            fc for fc in affinity_upload_state.get("formatted_compounds", [])
+            if fc != compound_str and fc.split(" ->")[0].strip().lower() != compound_raw
+        ]
+
+        if new_df.empty or not formatted_compounds:
+            affinity_upload_state["df"] = None
+            affinity_upload_state["resolved_compounds"] = {}
+            affinity_upload_state["resolved_targets"] = {}
+            affinity_upload_state["num_compounds"] = 0
+            affinity_upload_state["num_targets"] = 0
+            affinity_upload_state["num_datapoints"] = 0
+            affinity_upload_state["unique_targets"] = []
+            affinity_upload_state["formatted_targets"] = []
+            affinity_upload_state["formatted_compounds"] = []
+            return jsonify({
+                "num_compounds": 0,
+                "num_targets": 0,
+                "num_datapoints": 0,
+                "compounds": [],
+                "targets": []
+            })
+
+        unique_compounds = new_df["Compound_Raw"].unique().tolist()
+        unique_targets = new_df["Target_Raw"].unique().tolist()
+        unique_targets_set = set(t.lower() for t in unique_targets)
+
+        formatted_targets = [
+            ft for ft in affinity_upload_state.get("formatted_targets", [])
+            if ft.split(" ->")[0].strip().lower() in unique_targets_set
+        ]
+
+        resolved_targets = affinity_upload_state.get("resolved_targets", {})
+
+        if not formatted_targets:
+            affinity_upload_state["df"] = None
+            affinity_upload_state["resolved_compounds"] = {}
+            affinity_upload_state["resolved_targets"] = {}
+            affinity_upload_state["num_compounds"] = 0
+            affinity_upload_state["num_targets"] = 0
+            affinity_upload_state["num_datapoints"] = 0
+            affinity_upload_state["unique_targets"] = []
+            affinity_upload_state["formatted_targets"] = []
+            affinity_upload_state["formatted_compounds"] = []
+            return jsonify({
+                "num_compounds": 0,
+                "num_targets": 0,
+                "num_datapoints": 0,
+                "compounds": [],
+                "targets": []
+            })
+
+        affinity_upload_state["df"] = new_df
+        affinity_upload_state["num_compounds"] = len(unique_compounds)
+        affinity_upload_state["num_targets"] = len(unique_targets)
+        affinity_upload_state["num_datapoints"] = len(new_df)
+        affinity_upload_state["unique_targets"] = [
+            resolved_targets[t]["canonical_name"] for t in unique_targets if t in resolved_targets
+        ]
+        affinity_upload_state["formatted_compounds"] = formatted_compounds
+        affinity_upload_state["formatted_targets"] = formatted_targets
+
+        return jsonify({
+            "num_compounds": len(unique_compounds),
+            "num_targets": len(unique_targets),
+            "num_datapoints": len(new_df),
+            "compounds": formatted_compounds,
+            "targets": formatted_targets
+        })
+
+
+@app.route("/api/clear-affinity", methods=["POST"])
+def clear_affinity():
+    with _lock:
+        affinity_upload_state["df"] = None
+        affinity_upload_state["resolved_compounds"] = {}
+        affinity_upload_state["resolved_targets"] = {}
+        affinity_upload_state["num_compounds"] = 0
+        affinity_upload_state["num_targets"] = 0
+        affinity_upload_state["num_datapoints"] = 0
+        affinity_upload_state["unique_targets"] = []
+        affinity_upload_state["formatted_targets"] = []
+        affinity_upload_state["formatted_compounds"] = []
+    return jsonify({"status": "cleared"})
+
+
+@app.route("/api/clear-prices", methods=["POST"])
+def clear_prices():
+    with _lock:
+        price_upload_state["price_map"] = {}
+        price_upload_state["filename"] = ""
+        price_upload_state["count"] = 0
+    return jsonify({"status": "cleared"})
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -326,6 +1023,41 @@ def build_matrix():
     thread = threading.Thread(
         target=_run_pipeline,
         args=(chembl_ids, selectivity_threshold, remove_targets, matched_count),
+        daemon=True,
+    )
+    thread.start()
+
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/build-matrix-from-affinity", methods=["POST"])
+def build_matrix_from_affinity():
+    """Launch the affinity-based pipeline in a background thread."""
+    with _lock:
+        if pipeline_state["status"] == "running":
+            return jsonify({"error": "Pipeline is already running"}), 409
+        if affinity_upload_state["df"] is None or affinity_upload_state["df"].empty:
+            return jsonify({"error": "No affinity data uploaded. Please upload an affinity file first."}), 400
+
+    data = request.get_json(force=True) or {}
+    selectivity_threshold = float(data.get("selectivity_threshold", 0.5))
+    remove_targets = bool(data.get("remove_targets", True))
+
+    # Reset states
+    with _lock:
+        pipeline_state.update({
+            "status": "running",
+            "current_step": 0,
+            "step_label": "Starting...",
+            "detail": "",
+            "error": "",
+            "step_summaries": {},
+        })
+        opt_state.update({"status": "idle", "generation": 0, "error": ""})
+
+    thread = threading.Thread(
+        target=_run_affinity_pipeline,
+        args=(selectivity_threshold, remove_targets),
         daemon=True,
     )
     thread.start()
@@ -576,15 +1308,35 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
             except Exception as e:
                 _update_pipeline(2, "Getting price data...", f"MolPort query warning: {e}")
 
-        final_export_df["Molport_Price"] = final_export_df["InChIKey"].map(molport_dict)
-        final_export_df["Molport_Source"] = final_export_df["InChIKey"].map(molport_source_dict)
+        # Check custom uploaded prices first
+        custom_price_dict = {}
+        custom_source_dict = {}
+        for idx, row in final_export_df.iterrows():
+            cmpd_name = row.get("Compound_Name", "")
+            res_info = {
+                "chembl_id": row.get("Molecule_ChEMBL_ID", ""),
+                "inchi_key": row.get("InChIKey", ""),
+                "smiles": row.get("SMILES", ""),
+                "pref_name": row.get("Compound_Name", "")
+            }
+            p = _lookup_custom_price(cmpd_name, res_info)
+            if p is not None:
+                ik = row.get("InChIKey", "")
+                if ik:
+                    custom_price_dict[ik] = float(p)
+                    custom_source_dict[ik] = "Custom Price File"
+
+        custom_price_series = final_export_df["InChIKey"].map(custom_price_dict)
+        final_export_df["Molport_Price"] = custom_price_series.combine_first(final_export_df["InChIKey"].map(molport_dict))
+        final_export_df["Molport_Source"] = final_export_df["InChIKey"].map(custom_source_dict).combine_first(final_export_df["InChIKey"].map(molport_source_dict))
         
         found_count = final_export_df["Molport_Price"].notna().sum()
+        custom_matched_count = custom_price_series.notna().sum()
         molprice_approx_count = (final_export_df["Molport_Source"] == "MolPrice").sum()
-        molport_direct_count = found_count - molprice_approx_count
+        molport_direct_count = found_count - molprice_approx_count - custom_matched_count
         
         _update_pipeline(2, "Getting price data...",
-                         f"Found prices for {found_count}/{len(final_export_df)} compounds in database (MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})")
+                         f"Found prices for {found_count}/{len(final_export_df)} compounds (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})")
 
         # ─────────────────────────────────────────────
         # Handle missing prices
@@ -612,12 +1364,12 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                 final_prices = final_prices.values
 
                 _update_pipeline(2, "Getting price data...",
-                                 f"MolPrice predicted prices for {missing_count} compounds. DB had {molport_direct_count} MolPort, {molprice_approx_count} MolPrice approx.",
-                                 summary=f"Predicted {missing_count} prices. DB: {molport_direct_count} MolPort, {molprice_approx_count} MolPrice approx.")
+                                 f"MolPrice predicted prices for {missing_count} compounds. (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice: {molprice_approx_count})",
+                                 summary=f"Predicted {missing_count} prices. (Custom: {custom_matched_count}, MolPort: {molport_direct_count})")
             except Exception as e:
                 _update_pipeline(2, "Getting price data...",
-                                 f"MolPrice prediction failed ({e}), using median fallback. DB had {molport_direct_count} MolPort, {molprice_approx_count} MolPrice approx.",
-                                 summary=f"Prediction failed, used fallback. DB: {molport_direct_count} MolPort, {molprice_approx_count} MolPrice approx.")
+                                 f"MolPrice prediction failed ({e}), using median fallback.",
+                                 summary=f"Prediction failed, used fallback.")
                 fallback = final_export_df["Molport_Price"].median()
                 if pd.isna(fallback):
                     fallback = 100.0
@@ -628,8 +1380,8 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                 )
         else:
             _update_pipeline(2, "Getting price data...", 
-                             f"All prices found in database (MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})", 
-                             summary=f"All prices found. {molport_direct_count} prices were found directly from MolPort, {molprice_approx_count} prices were approximated using MolPrice.")
+                             f"All prices assigned (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})", 
+                             summary=f"All prices assigned: {custom_matched_count} from custom file, {molport_direct_count} direct MolPort, {molprice_approx_count} MolPrice.")
             final_prices = final_export_df["Molport_Price"].values
         final_export_df["Price_USD_per_mg"] = final_prices
         final_export_df.drop(columns=["MW", "Molport_Price", "Molport_Source"], inplace=True, errors="ignore")
@@ -668,6 +1420,227 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         del final_export_df  # Free DataFrame — numpy arrays and CSV are sufficient
 
     except Exception as e:
+        with _lock:
+            pipeline_state["status"] = "error"
+            pipeline_state["error"] = str(e)
+            pipeline_state["detail"] = ""
+
+
+def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
+    """Pipeline for user-uploaded affinity data: calculates selectivity directly and resolves prices."""
+    import hashlib
+    try:
+        output_dir = PROJECT_ROOT / "webapp" / "output"
+        output_dir.mkdir(exist_ok=True)
+
+        with _lock:
+            raw_df = affinity_upload_state["df"]
+            compounds_map = dict(affinity_upload_state["resolved_compounds"])
+            targets_map = dict(affinity_upload_state["resolved_targets"])
+
+        if raw_df is None or raw_df.empty:
+            raise ValueError("No affinity data uploaded.")
+
+        # ─────────────────────────────────────────────
+        # Step 1: Calculating selectivity matrix
+        # ─────────────────────────────────────────────
+        _update_pipeline(1, "Calculating selectivity matrix...", "Computing blended selectivity scores from uploaded affinity data...")
+
+        work_df = raw_df.copy()
+        work_df["Target_Canonical"] = work_df["Target_Raw"].map(lambda t: targets_map.get(t, {}).get("canonical_name", str(t)))
+
+        # Average duplicate measurements
+        pivoted_affinities = work_df.pivot_table(
+            index="Compound_Raw",
+            columns="Target_Canonical",
+            values="Affinity",
+            aggfunc="mean"
+        )
+
+        compounds_list = list(pivoted_affinities.index)
+        targets_list = list(pivoted_affinities.columns)
+
+        if len(targets_list) < 2:
+            raise ValueError(f"Need at least 2 distinct targets to compute selectivity, but found {len(targets_list)}.")
+
+        # Compute blended selectivity matrix using core/selectivity.py
+        affinities_matrix = pivoted_affinities.to_numpy(dtype=float)
+        selectivity_matrix = generate_selectivity_matrix(affinities_matrix)
+
+        selectivity_df = pd.DataFrame(selectivity_matrix, index=compounds_list, columns=targets_list)
+
+        init_drugs, init_targets = selectivity_df.shape
+
+        if remove_targets:
+            clean_df = selectivity_df.loc[
+                (selectivity_df.max(axis=1) >= selectivity_threshold),
+                (selectivity_df.max(axis=0) >= selectivity_threshold),
+            ]
+        else:
+            clean_df = selectivity_df.loc[
+                (selectivity_df.max(axis=1) >= selectivity_threshold),
+                :
+            ]
+
+        final_drugs, final_targets = clean_df.shape
+        if final_drugs == 0 or final_targets == 0:
+            raise ValueError(f"No compounds or targets survived selectivity pruning at threshold {selectivity_threshold}. Try lowering the threshold.")
+
+        dropped_targets = init_targets - final_targets
+        if dropped_targets > 0:
+            summary_text = (
+                f"Calculated selectivity for {final_drugs} compounds across {final_targets} targets. "
+                f"{dropped_targets} targets were dropped due to low selectivity."
+            )
+        else:
+            summary_text = f"Calculated selectivity for {final_drugs} compounds across {final_targets} targets."
+
+        _update_pipeline(1, "Calculating selectivity matrix...",
+                         f"Selectivity matrix computed: {final_drugs} compounds × {final_targets} targets",
+                         summary=summary_text)
+
+        # ─────────────────────────────────────────────
+        # Step 2: Getting price data
+        # ─────────────────────────────────────────────
+        _update_pipeline(2, "Getting price data...", "Resolving compound prices...")
+
+        final_compounds = list(clean_df.index)
+
+        meta_records = []
+        for cmpd in final_compounds:
+            res_info = compounds_map.get(cmpd, {})
+            chembl_id = res_info.get("chembl_id", "")
+            pref_name = res_info.get("pref_name", str(cmpd))
+            inchi_key = res_info.get("inchi_key", "")
+            smiles = res_info.get("smiles", "")
+
+            # If compound string itself is InChIKey or SMILES
+            if not inchi_key and len(str(cmpd)) == 27 and str(cmpd)[14] == '-' and str(cmpd)[25] == '-':
+                inchi_key = str(cmpd)
+            if not smiles and ('=' in str(cmpd) or '#' in str(cmpd) or '(' in str(cmpd) or 'c1' in str(cmpd)):
+                smiles = str(cmpd)
+
+            meta_records.append({
+                "Compound_Name": str(cmpd),
+                "Molecule_ChEMBL_ID": chembl_id or str(cmpd),
+                "InChIKey": inchi_key,
+                "SMILES": smiles,
+            })
+
+        final_export_df = clean_df.copy().reset_index()
+        final_export_df.rename(columns={"index": "Compound_Name"}, inplace=True)
+        meta_df = pd.DataFrame(meta_records)
+        final_export_df = final_export_df.merge(meta_df, on="Compound_Name", how="left")
+
+        # MolPort lookup cache
+        inchikeys = [r["InChIKey"] for r in meta_records if r["InChIKey"]]
+        molport_dict = {}
+        if inchikeys:
+            molport_db = str(DATABASE_DIR / "molport.db")
+            try:
+                with sqlite3.connect(molport_db) as conn:
+                    mp_chunk_size = 30000
+                    for i in range(0, len(inchikeys), mp_chunk_size):
+                        chunk = inchikeys[i:i + mp_chunk_size]
+                        ph = ",".join(["?"] * len(chunk))
+                        query = f"SELECT INCHIKEY, PRICE_1MG FROM compounds WHERE INCHIKEY IN ({ph})"
+                        for row in conn.execute(query, chunk).fetchall():
+                            molport_dict[row[0]] = float(row[1])
+            except Exception as e:
+                print("MolPort DB lookup warning:", e)
+
+        molprice_model = None
+        prices = []
+        custom_price_count = 0
+        molport_count = 0
+        molprice_count = 0
+        fallback_count = 0
+
+        for idx, row_meta in enumerate(meta_records):
+            cmpd_raw = row_meta["Compound_Name"]
+            res_info = compounds_map.get(cmpd_raw, {})
+
+            # Tier 1: Custom Price File
+            custom_p = _lookup_custom_price(cmpd_raw, res_info)
+            if custom_p is not None:
+                prices.append(float(custom_p))
+                custom_price_count += 1
+                continue
+
+            # Tier 2: MolPort Database
+            ik = row_meta["InChIKey"]
+            if ik and ik in molport_dict:
+                prices.append(float(molport_dict[ik]))
+                molport_count += 1
+                continue
+
+            # Tier 3: MolPrice ML Model
+            smi = row_meta["SMILES"]
+            if smi and smi != "Missing_SMILES":
+                try:
+                    if molprice_model is None:
+                        molprice_weights = str(MOLPRICE_DIR / "models" / "Numpy" / "MP_Morgan_hybrid.pkl")
+                        molprice_model = NumpyFingerprints(weights_path=molprice_weights)
+                    pred = molprice_model.predict_batch_from_smiles([smi])
+                    p_val = pred[0][0] if hasattr(pred[0], '__len__') else float(pred[0])
+                    prices.append(float(p_val))
+                    molprice_count += 1
+                    continue
+                except Exception:
+                    pass
+
+            # Tier 4: Fallback placeholder
+            prices.append(np.nan)
+            fallback_count += 1
+
+        prices = np.array(prices, dtype=float)
+        valid_prices = prices[~np.isnan(prices)]
+        fallback_val = float(np.median(valid_prices)) if len(valid_prices) > 0 else 100.0
+        prices = np.where(np.isnan(prices), fallback_val, prices)
+
+        final_export_df["Price_USD_per_mg"] = prices
+
+        price_summary_parts = []
+        if custom_price_count > 0:
+            price_summary_parts.append(f"{custom_price_count} custom file")
+        if molport_count > 0:
+            price_summary_parts.append(f"{molport_count} MolPort DB")
+        if molprice_count > 0:
+            price_summary_parts.append(f"{molprice_count} MolPrice predicted")
+        if fallback_count > 0:
+            price_summary_parts.append(f"{fallback_count} median fallback (${fallback_val:.2f}/mg)")
+
+        price_summary_str = ", ".join(price_summary_parts) or "All prices assigned."
+        _update_pipeline(2, "Getting price data...", f"Resolved prices: {price_summary_str}", summary=f"Prices resolved: {price_summary_str}")
+
+        # ─────────────────────────────────────────────
+        # Step 3: Saving matrix
+        # ─────────────────────────────────────────────
+        _update_pipeline(3, "Saving matrix...", "Saving selectivity matrix...")
+
+        target_cols = [c for c in clean_df.columns]
+        meta_cols = ["Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"]
+        final_export_df = final_export_df[meta_cols + target_cols]
+
+        cache_key = hashlib.md5(f"affinity_{len(final_export_df)}_{selectivity_threshold}_{remove_targets}".encode('utf-8')).hexdigest()
+        matrix_file = str(output_dir / f"selectivity_matrix_affinity_{cache_key}.csv")
+        final_export_df.to_csv(matrix_file, index=False)
+
+        with _lock:
+            dataset["selectivities"] = final_export_df[target_cols].to_numpy(dtype=float)
+            dataset["prices"] = final_export_df["Price_USD_per_mg"].to_numpy(dtype=float)
+            dataset["smiles"] = final_export_df["SMILES"].to_numpy()
+            dataset["num_drugs"] = len(final_export_df)
+            dataset["num_targets"] = len(target_cols)
+            dataset["total_cost"] = float(np.sum(dataset["prices"]))
+            dataset["matrix_file"] = matrix_file
+            dataset["ready"] = True
+
+            pipeline_state["status"] = "complete"
+            pipeline_state["detail"] = f"Matrix ready: {dataset['num_drugs']} compounds × {dataset['num_targets']} targets"
+
+    except Exception as e:
+        traceback.print_exc()
         with _lock:
             pipeline_state["status"] = "error"
             pipeline_state["error"] = str(e)
@@ -789,6 +1762,22 @@ def reset_state():
             "heatmap_cache": None,
             "weight_mean": None,
             "weight_min": None,
+        })
+        affinity_upload_state.update({
+            "df": None,
+            "resolved_compounds": {},
+            "resolved_targets": {},
+            "num_compounds": 0,
+            "num_targets": 0,
+            "num_datapoints": 0,
+            "unique_targets": [],
+            "formatted_targets": [],
+            "formatted_compounds": [],
+        })
+        price_upload_state.update({
+            "price_map": {},
+            "filename": "",
+            "count": 0,
         })
     # We no longer clear the global cache files on reset, as they are cached by parameters.
     return jsonify({"status": "reset"})
@@ -1191,26 +2180,33 @@ def _get_target_info(target_list):
         with sqlite3.connect(db_path) as conn:
             placeholders = ",".join(["?"] * len(target_list))
             query = f"""
-                SELECT td.chembl_id, td.pref_name, csy.component_synonym
+                SELECT td.chembl_id, td.pref_name, 
+                       (SELECT csy2.component_synonym 
+                        FROM target_components tc2 
+                        JOIN component_synonyms csy2 ON tc2.component_id = csy2.component_id 
+                        WHERE tc2.tid = td.tid AND csy2.syn_type = 'GENE_SYMBOL' 
+                        LIMIT 1) AS gene_symbol,
+                       cs.accession, csy.component_synonym
                 FROM target_dictionary td
-                JOIN target_components tc ON td.tid = tc.tid
-                JOIN component_synonyms csy ON tc.component_id = csy.component_id
+                LEFT JOIN target_components tc ON td.tid = tc.tid
+                LEFT JOIN component_sequences cs ON tc.component_id = cs.component_id
+                LEFT JOIN component_synonyms csy ON cs.component_id = csy.component_id
                 WHERE (
                     td.pref_name COLLATE NOCASE IN ({placeholders}) OR
                     td.chembl_id COLLATE NOCASE IN ({placeholders}) OR
+                    cs.accession COLLATE NOCASE IN ({placeholders}) OR
                     csy.component_synonym COLLATE NOCASE IN ({placeholders})
                 )
-                AND csy.syn_type = 'GENE_SYMBOL'
                 AND td.target_type = 'SINGLE PROTEIN'
                 AND td.organism = 'Homo sapiens'
             """
-            rows = conn.execute(query, target_list * 3).fetchall()
+            rows = conn.execute(query, target_list * 4).fetchall()
             
             sym_map = {}
             name_map = {}
-            for cid, pref_name, sym in rows:
-                p_name = pref_name or sym or cid
-                s_name = sym or pref_name or cid
+            for cid, pref_name, sym, acc, csy_syn in rows:
+                p_name = pref_name or sym or cid or acc
+                s_name = sym or pref_name or cid or acc
                 if cid:
                     sym_map[str(cid).lower()] = s_name
                     name_map[str(cid).lower()] = p_name
@@ -1220,6 +2216,12 @@ def _get_target_info(target_list):
                 if sym:
                     sym_map[str(sym).lower()] = s_name
                     name_map[str(sym).lower()] = p_name
+                if acc:
+                    sym_map[str(acc).lower()] = s_name
+                    name_map[str(acc).lower()] = p_name
+                if csy_syn:
+                    sym_map[str(csy_syn).lower()] = s_name
+                    name_map[str(csy_syn).lower()] = p_name
             
             symbols = [sym_map.get(str(t).lower(), t) for t in target_list]
             names = [name_map.get(str(t).lower(), t) for t in target_list]
