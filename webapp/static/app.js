@@ -242,7 +242,6 @@ function setupModeSwitcher() {
 function setupPriceUpload() {
     const priceDropZone = $('#priceDropZone');
     const priceFileInput = $('#priceFileInput');
-    const removePriceBtn = $('#removePriceBtn');
 
     if (!priceDropZone || !priceFileInput) return;
 
@@ -300,19 +299,6 @@ function setupPriceUpload() {
             handlePriceFileUpload(priceFileInput.files[0]);
         }
     });
-
-    if (removePriceBtn) {
-        removePriceBtn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            try {
-                await fetch('/api/clear-prices', { method: 'POST' });
-            } catch (err) { }
-            uploadedPriceData = null;
-            sessionStorage.removeItem('uploadedPriceData');
-            $('#priceFileInfo').style.display = 'none';
-            priceFileInput.value = '';
-        });
-    }
 }
 
 async function parseJsonResponse(res) {
@@ -351,15 +337,112 @@ async function handlePriceFileUpload(file) {
 }
 
 function renderPriceBadge(data) {
-    if (!data) return;
     const priceFileInfo = $('#priceFileInfo');
-    const priceFileName = $('#priceFileName');
-    const priceFileBadge = $('#priceFileBadge');
-    if (priceFileInfo && priceFileName && priceFileBadge) {
-        priceFileName.textContent = data.filename || 'prices.xlsx';
-        priceFileBadge.textContent = `${data.num_prices} prices loaded`;
-        priceFileInfo.style.display = 'block';
+    if (!priceFileInfo) return;
+
+    if (!data) {
+        priceFileInfo.style.display = 'none';
+        priceFileInfo.innerHTML = '';
+        return;
     }
+
+    priceFileInfo.innerHTML = '';
+
+    const box = document.createElement('div');
+    box.className = 'file-selected';
+    box.style.margin = '0';
+    box.style.display = 'flex';
+    box.style.justifyContent = 'space-between';
+    box.style.alignItems = 'center';
+    box.style.background = 'rgba(157, 124, 255, 0.08)';
+    box.style.borderColor = 'rgba(157, 124, 255, 0.3)';
+
+    const leftSide = document.createElement('div');
+    leftSide.style.display = 'flex';
+    leftSide.style.alignItems = 'center';
+    leftSide.style.gap = '0.5rem';
+
+    const iconSpan = document.createElement('span');
+    iconSpan.textContent = '🏷️';
+
+    const textSpan = document.createElement('span');
+    textSpan.id = 'priceFileName';
+    textSpan.style.fontWeight = '500';
+    textSpan.textContent = data.filename || 'prices.xlsx';
+
+    const badgeSpan = document.createElement('span');
+    badgeSpan.id = 'priceFileBadge';
+    badgeSpan.style.fontSize = '0.75rem';
+    badgeSpan.style.background = 'rgba(18, 243, 185, 0.2)';
+    badgeSpan.style.color = 'var(--accent-teal)';
+    badgeSpan.style.padding = '2px 6px';
+    badgeSpan.style.borderRadius = '4px';
+    badgeSpan.textContent = `${data.num_prices} prices loaded`;
+
+    leftSide.appendChild(iconSpan);
+    leftSide.appendChild(textSpan);
+    leftSide.appendChild(badgeSpan);
+
+    const rightSide = document.createElement('div');
+    const deleteBtn = document.createElement('span');
+    deleteBtn.id = 'removePriceBtn';
+    deleteBtn.textContent = '❌';
+    deleteBtn.style.cursor = 'pointer';
+    deleteBtn.style.color = '#ff4a4a';
+    deleteBtn.title = 'Remove custom price file';
+
+    deleteBtn.onclick = (e) => {
+        if (e) e.stopPropagation();
+        box.innerHTML = '';
+
+        const msg = document.createElement('span');
+        msg.textContent = `Are you sure you want to delete ${data.filename || 'prices.xlsx'}?`;
+        msg.style.color = '#ff4a4a';
+        msg.style.fontSize = '0.9rem';
+
+        const btnContainer = document.createElement('div');
+        btnContainer.style.display = 'flex';
+        btnContainer.style.gap = '8px';
+
+        const yesBtn = document.createElement('button');
+        yesBtn.className = 'btn btn-primary';
+        yesBtn.style.padding = '0.25rem 0.75rem';
+        yesBtn.style.fontSize = '0.85rem';
+        yesBtn.style.minWidth = '50px';
+        yesBtn.textContent = 'Yes';
+        yesBtn.onclick = async () => {
+            try {
+                await fetch('/api/clear-prices', { method: 'POST' });
+            } catch (err) { }
+            uploadedPriceData = null;
+            sessionStorage.removeItem('uploadedPriceData');
+            priceFileInfo.style.display = 'none';
+            priceFileInfo.innerHTML = '';
+            const priceFileInput = $('#priceFileInput');
+            if (priceFileInput) priceFileInput.value = '';
+        };
+
+        const noBtn = document.createElement('button');
+        noBtn.className = 'btn btn-secondary';
+        noBtn.style.padding = '0.25rem 0.75rem';
+        noBtn.style.fontSize = '0.85rem';
+        noBtn.style.minWidth = '50px';
+        noBtn.textContent = 'No';
+        noBtn.onclick = () => renderPriceBadge(data);
+
+        btnContainer.appendChild(yesBtn);
+        btnContainer.appendChild(noBtn);
+
+        box.appendChild(msg);
+        box.appendChild(btnContainer);
+    };
+
+    rightSide.appendChild(deleteBtn);
+
+    box.appendChild(leftSide);
+    box.appendChild(rightSide);
+    priceFileInfo.appendChild(box);
+    priceFileInfo.style.display = 'block';
 }
 
 // Remove All buttons
@@ -1580,7 +1663,10 @@ async function resetAllState() {
     const priceFileInput = $('#priceFileInput');
     if (priceFileInput) priceFileInput.value = '';
     const priceFileInfo = $('#priceFileInfo');
-    if (priceFileInfo) priceFileInfo.style.display = 'none';
+    if (priceFileInfo) {
+        priceFileInfo.style.display = 'none';
+        priceFileInfo.innerHTML = '';
+    }
 
     if (uploadError) uploadError.style.display = 'none';
     const pipelineError = $('#pipelineError');
