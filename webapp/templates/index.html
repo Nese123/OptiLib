@@ -286,7 +286,7 @@
         <!-- ═══════════════════════════════════════════════════════ -->
         <section class="step-section" id="step-3">
             <div class="card">
-                <h2 class="card-title"><span class="icon">🧬</span> Configure NSGA-II Optimization</h2>
+                <h2 class="card-title"><span class="icon">⚙️</span> Configure NSGA-II Optimization</h2>
 
                 <!-- Dataset Summary -->
                 <div class="stats-row" id="datasetStats">
@@ -513,7 +513,9 @@
 
                 <!-- Quality Score + Comparison -->
                 <div class="card">
-                    <h2 class="card-title"><span class="icon">📊</span> Library Comparison</h2>
+                    <h2 class="card-title"><span class="icon">📊</span> Library Comparison <span class="info-icon"
+                            data-tooltip="Compares the selected optimized library with the original compound pool across key metrics, including total cost, selectivity, target coverage, and compound count, and lists the compounds included in the selected solution.">?</span>
+                    </h2>
 
                     <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
 
@@ -542,7 +544,7 @@
                             <table class="comparison-table" style="margin: 0; width: 100%;">
                                 <thead style="position: sticky; top: 0; background: #1a1a2e; z-index: 1;">
                                     <tr>
-                                        <th>Compound ID</th>
+                                        <th id="thCompoundId" style="display: none;">Compound ID</th>
                                         <th>ChEMBL ID</th>
                                         <th>InChIKey</th>
                                         <th>Price (USD/mg)</th>
@@ -672,7 +674,7 @@
                         </button>
                         <button class="btn btn-secondary" id="newRunBtn">
                             <span class="btn-icon">🔄</span>
-                            <span>New Targets</span>
+                            <span>New Data</span>
                         </button>
                     </div>
                 </div>
@@ -716,7 +718,7 @@
             });
         }
     </script>
-    <script src="/static/app.js?v=4.9"></script>
+    <script src="/static/app.js?v=5.0"></script>
 
 </body>
 

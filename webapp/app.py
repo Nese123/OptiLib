@@ -131,6 +131,7 @@ dataset = {
     "total_cost": 0.0,
     "matrix_file": None,        # Path to saved CSV
     "ready": False,             # True once matrix is built
+    "has_custom_affinity": False, # True if built from custom affinity data
 }
 
 # Optimization state
@@ -1375,6 +1376,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                 dataset["total_cost"] = float(np.sum(dataset["prices"]))
                 dataset["matrix_file"] = matrix_file
                 dataset["ready"] = True
+                dataset["has_custom_affinity"] = False
     
                 pipeline_state["status"] = "complete"
                 pipeline_state["current_step"] = 3
@@ -1681,6 +1683,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
             dataset["total_cost"] = float(np.sum(dataset["prices"]))
             dataset["matrix_file"] = matrix_file
             dataset["ready"] = True
+            dataset["has_custom_affinity"] = False
 
             pipeline_state["status"] = "complete"
             pipeline_state["detail"] = f"Matrix ready: {dataset['num_drugs']} compounds × {dataset['num_targets']} targets"
@@ -1789,7 +1792,7 @@ def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
 
             meta_records.append({
                 "Compound_Name": str(cmpd),
-                "Molecule_ChEMBL_ID": chembl_id or str(cmpd),
+                "Molecule_ChEMBL_ID": chembl_id or "",
                 "InChIKey": inchi_key,
                 "SMILES": smiles,
             })
@@ -1902,6 +1905,7 @@ def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
             dataset["total_cost"] = float(np.sum(dataset["prices"]))
             dataset["matrix_file"] = matrix_file
             dataset["ready"] = True
+            dataset["has_custom_affinity"] = True
 
             pipeline_state["status"] = "complete"
             pipeline_state["detail"] = f"Matrix ready: {dataset['num_drugs']} compounds × {dataset['num_targets']} targets"
@@ -1926,6 +1930,7 @@ def dataset_info():
             "num_targets": dataset["num_targets"],
             "total_cost": round(dataset["total_cost"], 2),
             "ready": dataset["ready"],
+            "has_custom_affinity": dataset.get("has_custom_affinity", False),
         })
 
 
@@ -2302,21 +2307,35 @@ def _build_comparison(winning_matrix_df, problem):
 
 
 
+    has_custom_affinity = dataset.get("has_custom_affinity", False)
     compounds_list = []
     for idx, row in winning_matrix_df.iterrows():
-        name = row.get("Compound_Name", "Unknown")
-        inchikey = row.get("InChIKey", "Unknown")
-        chembl_id = row.get("Molecule_ChEMBL_ID", "Unknown")
+        name = row.get("Compound_Name", "")
+        inchikey = row.get("InChIKey", "")
+        chembl_id = row.get("Molecule_ChEMBL_ID", "")
         price = row.get("Price_USD_per_mg", 0.0)
-        
+
+        name_str = str(name).strip() if pd.notna(name) else ""
+        if name_str in ("nan", "None", "Unknown"):
+            name_str = ""
+
+        inchikey_str = str(inchikey).strip() if pd.notna(inchikey) else ""
+        if inchikey_str in ("nan", "None", "Unknown"):
+            inchikey_str = ""
+
+        chembl_str = str(chembl_id).strip() if pd.notna(chembl_id) else ""
+        if chembl_str in ("nan", "None", "Unknown"):
+            chembl_str = ""
+
         compounds_list.append({
-            "name": str(name) if not pd.isna(name) else "Unknown",
-            "inchikey": str(inchikey) if not pd.isna(inchikey) else "Unknown",
-            "chembl_id": str(chembl_id) if not pd.isna(chembl_id) else "Unknown",
-            "price": float(price) if not pd.isna(price) else 0.0
+            "name": name_str,
+            "inchikey": inchikey_str,
+            "chembl_id": chembl_str,
+            "price": float(price) if pd.notna(price) else 0.0
         })
 
     return {
+        "has_custom_affinity": has_custom_affinity,
         "pool": {
             "total_cost": int(round(pool_total_cost)),
             "mean_selectivity": round(pool_mean_sel, 2),

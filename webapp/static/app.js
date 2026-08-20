@@ -267,8 +267,18 @@ function setupModeSwitcher() {
         }
     }
 
-    modeTargetBtn.addEventListener('click', () => applyMode('target'));
-    modeAffinityBtn.addEventListener('click', () => applyMode('affinity'));
+    modeTargetBtn.addEventListener('click', () => {
+        if (uploadMode !== 'target') {
+            resetOptSettingsToDefault();
+        }
+        applyMode('target');
+    });
+    modeAffinityBtn.addEventListener('click', () => {
+        if (uploadMode !== 'affinity') {
+            resetOptSettingsToDefault();
+        }
+        applyMode('affinity');
+    });
 
     // Apply saved mode
     applyMode(uploadMode);
@@ -351,6 +361,7 @@ function setupPriceUpload() {
             } catch (err) { }
             uploadedPriceFilesData = [];
             sessionStorage.removeItem('uploadedPriceFilesData');
+            resetOptSettingsToDefault();
             renderPriceFiles();
         });
 
@@ -423,6 +434,7 @@ async function handlePriceFileUpload(files) {
         }
     }
 
+    resetOptSettingsToDefault();
     renderPriceFiles();
 }
 
@@ -660,6 +672,7 @@ removeAllBtn.addEventListener('click', () => {
 removeAllYesBtn.addEventListener('click', async () => {
     if (uploadMode === 'target') {
         uploadedFilesData = [];
+        resetOptSettingsToDefault();
         renderFiles();
     } else {
         try {
@@ -668,6 +681,7 @@ removeAllYesBtn.addEventListener('click', async () => {
         uploadedAffinityFilesData = [];
         sessionStorage.removeItem('uploadedAffinityFilesData');
         sessionStorage.removeItem('uploadedAffinityData');
+        resetOptSettingsToDefault();
         renderAffinityFiles();
     }
     removeAllConfirm.style.display = 'none';
@@ -788,6 +802,7 @@ async function handleFileUpload(files) {
             }
         }
 
+        resetOptSettingsToDefault();
         renderAffinityFiles();
         return;
     }
@@ -817,6 +832,7 @@ async function handleFileUpload(files) {
         }
     }
 
+    resetOptSettingsToDefault();
     renderFiles();
 }
 
@@ -878,6 +894,7 @@ function renderFiles() {
             yesBtn.textContent = 'Yes';
             yesBtn.onclick = () => {
                 uploadedFilesData = uploadedFilesData.filter((d) => d.name !== fileData.name);
+                resetOptSettingsToDefault();
                 renderFiles();
             };
 
@@ -991,6 +1008,7 @@ function renderFiles() {
                             fileData.data.matched = fileData.data.matched.filter((m) => m !== matchStr);
                         }
                     });
+                    resetOptSettingsToDefault();
                     renderFiles();
                 };
 
@@ -1136,6 +1154,7 @@ function renderAffinityFiles() {
                 } catch (e) {
                     uploadedAffinityFilesData = uploadedAffinityFilesData.filter(d => d.name !== fileData.name);
                 }
+                resetOptSettingsToDefault();
                 renderAffinityFiles();
             };
 
@@ -1263,6 +1282,7 @@ function renderAffinityFiles() {
                                 }
                             }
                         } catch (e) { }
+                        resetOptSettingsToDefault();
                         renderAffinityFiles();
                     };
 
@@ -1343,6 +1363,7 @@ function renderAffinityFiles() {
                                 }
                             }
                         } catch (e) { }
+                        resetOptSettingsToDefault();
                         renderAffinityFiles();
                     };
 
@@ -1380,6 +1401,7 @@ function renderAffinityFiles() {
 // Build Matrix button
 buildMatrixBtn.addEventListener('click', async () => {
     buildMatrixBtn.disabled = true;
+    resetOptSettingsToDefault();
     const removeTargets = document.getElementById('removeTargets')?.checked ?? true;
 
     if (uploadMode === 'affinity') {
@@ -1649,7 +1671,51 @@ function updateHistoryChart(history) {
     }
 }
 
-// ─── Optimization Settings Persistence ───
+// ─── Optimization Settings Persistence & Reset ───
+function resetOptSettingsToDefault() {
+    try {
+        localStorage.removeItem('optilib_opt_settings');
+    } catch (e) {
+        console.error('Failed to remove stored opt settings', e);
+    }
+
+    if (weightMean) weightMean.value = '0.5';
+    if (weightMeanValue) weightMeanValue.value = '0.5';
+    if (weightMin) weightMin.value = '0.5';
+    if (weightMinValue) weightMinValue.value = '0.5';
+    updateFormula();
+
+    if (allowedMiss) allowedMiss.value = 10;
+    if (allowedMissValue) allowedMissValue.value = 10;
+
+    const ftolEl = $('#ftol');
+    if (ftolEl) ftolEl.value = '0.0025';
+
+    const maxPriceToggleEl = $('#maxPriceToggle');
+    const maxPriceContainer = $('#maxPriceInputContainer');
+    const maxPriceValEl = $('#maxPriceValue');
+    if (maxPriceToggleEl) maxPriceToggleEl.checked = false;
+    if (maxPriceContainer) maxPriceContainer.style.display = 'none';
+    if (maxPriceValEl) maxPriceValEl.value = '1000';
+
+    const advToggleEl = $('#advancedSettingsToggle');
+    const advContainer = $('#advancedSettingsContainer');
+    if (advToggleEl) advToggleEl.checked = false;
+    if (advContainer) advContainer.style.display = 'none';
+
+    const popSizeEl = $('#popSize');
+    if (popSizeEl) popSizeEl.value = '100';
+
+    const mutEl = $('#mutationMultiplier');
+    if (mutEl) mutEl.value = '1.0';
+
+    const maxGenEl = $('#maxGen');
+    if (maxGenEl) maxGenEl.value = '1000';
+
+    const termEl = $('#termPeriod');
+    if (termEl) termEl.value = '30';
+}
+
 function saveOptSettings() {
     try {
         const ftolEl = $('#ftol');
@@ -2162,8 +2228,8 @@ async function resetAllState() {
     $('#optCompleteBanner').style.display = 'none';
     $('#optCompleteBanner').classList.remove('visible');
 
-    // Ensure configured optimization settings stay preserved
-    restoreOptSettings();
+    // Reset optimization settings to default
+    resetOptSettingsToDefault();
 
     // Re-render based on current mode
     if (uploadMode === 'target') {
@@ -2273,19 +2339,38 @@ async function loadComparison() {
 
         // Render compounds list
         const compoundsBody = $('#compoundsListBody');
+        const thCompoundId = $('#thCompoundId');
+        const hasCustomAffinity = !!(comparison && comparison.has_custom_affinity !== undefined
+            ? comparison.has_custom_affinity
+            : (uploadMode === 'affinity'));
+
+        if (thCompoundId) {
+            thCompoundId.style.display = hasCustomAffinity ? '' : 'none';
+        }
+
         if (compoundsBody && lib.compounds) {
             compoundsBody.innerHTML = '';
             lib.compounds.forEach((c) => {
                 const tr = document.createElement('tr');
-                const displayName = (c.name && c.name !== 'Unknown') ? c.name : (c.chembl_id || c.inchikey || 'Unknown');
+                const compoundIdVal = (c.name && c.name !== 'Unknown') ? c.name : '—';
                 const chemblVal = (c.chembl_id && c.chembl_id !== 'Unknown') ? c.chembl_id : '—';
                 const inchikeyVal = (c.inchikey && c.inchikey !== 'Unknown') ? c.inchikey : '—';
-                tr.innerHTML = `
-                    <td class="metric-name" style="font-weight: 600; color: #fff;">${displayName}</td>
-                    <td class="metric-name" style="color: #a8a8b3; font-size: 0.9em;">${chemblVal}</td>
-                    <td class="metric-name" style="color: #a8a8b3; font-size: 0.85em; font-family: monospace;">${inchikeyVal}</td>
-                    <td class="value">$${c.price.toFixed(2)}</td>
-                `;
+                const priceVal = `$${Number(c.price || 0).toFixed(2)}`;
+
+                if (hasCustomAffinity) {
+                    tr.innerHTML = `
+                        <td class="metric-name" style="font-weight: 600; color: #fff;">${compoundIdVal}</td>
+                        <td class="metric-name" style="color: #a8a8b3; font-size: 0.9em;">${chemblVal}</td>
+                        <td class="metric-name" style="color: #a8a8b3; font-size: 0.85em; font-family: 'JetBrains Mono', monospace;">${inchikeyVal}</td>
+                        <td class="value">${priceVal}</td>
+                    `;
+                } else {
+                    tr.innerHTML = `
+                        <td class="metric-name" style="font-weight: 600; color: #fff;">${chemblVal}</td>
+                        <td class="metric-name" style="color: #a8a8b3; font-size: 0.95em; font-family: 'JetBrains Mono', monospace;">${inchikeyVal}</td>
+                        <td class="value">${priceVal}</td>
+                    `;
+                }
                 compoundsBody.appendChild(tr);
             });
         }
