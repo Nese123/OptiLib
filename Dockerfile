@@ -30,5 +30,8 @@ RUN mkdir -p /app/database /app/webapp/output
 # Expose the Flask port
 EXPOSE 5000
 
-# Start the Flask web application
-CMD ["python", "webapp/app.py"]
+# Start with Gunicorn production WSGI server
+# --workers 1    : single process so in-memory session state is shared
+# --threads 4    : handle concurrent requests (polling, uploads, etc.)
+# --timeout 300  : 5-min timeout for long pipeline/optimization requests
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "300", "--preload", "webapp.app:app"]

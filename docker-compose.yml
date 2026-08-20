@@ -17,3 +17,4 @@ services:
         required: false
     environment:
       - PYTHONUNBUFFERED=1
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}

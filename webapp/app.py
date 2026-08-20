@@ -7,6 +7,7 @@ Full pipeline: Upload targets → ChEMBL query → selectivity matrix → NSGA-I
 import os
 import sys
 import json
+import uuid
 import sqlite3
 import threading
 import warnings
@@ -16,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, session
 from pymoo.core.callback import Callback
 
 # ═══════════════════════════════════════════════════════════════
@@ -49,31 +50,123 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB upload limit
+app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32).hex())
 
 # ═══════════════════════════════════════════════════════════════
-#  GLOBAL STATE
+#  SESSION-SCOPED STATE
 # ═══════════════════════════════════════════════════════════════
 
-# Pipeline state
-pipeline_state = {
-    "status": "idle",           # idle | running | complete | error
-    "current_step": 0,
-    "total_steps": 5,
-    "step_label": "",
-    "detail": "",
-    "error": "",
-    "step_summaries": {},
-    "matched_targets": [],
-    "unmatched_targets": [],
-}
+# Thread lock for state access
+_lock = threading.Lock()
+
+# In-memory session store: sid -> dict of per-user state dicts
+_sessions = {}
+
+
+def _make_fresh_state():
+    """Create a fresh set of state dicts for a new user session."""
+    return {
+        "pipeline_state": {
+            "status": "idle",           # idle | running | complete | error
+            "current_step": 0,
+            "total_steps": 5,
+            "step_label": "",
+            "detail": "",
+            "error": "",
+            "step_summaries": {},
+            "matched_targets": [],
+            "unmatched_targets": [],
+        },
+        "dataset": {
+            "selectivities": None,      # NumPy array (compounds × targets)
+            "prices": None,             # NumPy array (prices)
+            "smiles": None,             # NumPy array (SMILES)
+            "num_drugs": 0,
+            "num_targets": 0,
+            "total_cost": 0.0,
+            "matrix_file": None,        # Path to saved CSV
+            "ready": False,             # True once matrix is built
+            "has_custom_affinity": False, # True if built from custom affinity data
+        },
+        "opt_state": {
+            "status": "idle",           # idle | running | complete | error
+            "generation": 0,
+            "max_gen": 0,
+            "error": "",
+            "stop_requested": False,
+            "history": [],
+        },
+        "opt_results": {
+            "pareto_front": None,       # 2D array [[selectivity, cost], ...]
+            "best_idx": None,
+            "selected_idx": None,       # Currently selected solution index
+            "comparison": None,         # dict with all comparison metrics
+            "winning_matrix_df": None,
+            "winning_file": None,       # Path to saved Excel
+            "res_X": None,              # Solution matrix (pop × drugs) — no pymoo history
+            "res_F": None,              # Objective values (pop × 2)
+            "problem": None,            # DrugLibraryProblem instance
+            "heatmap_cache": None,      # Cached JSON-ready heatmap dict
+            "weight_mean": None,
+            "weight_min": None,
+        },
+        "affinity_upload_state": {
+            "files": {},                # filename -> { "df": df, "resolved_compounds": dict, "resolved_targets": dict, "formatted_compounds": list, "formatted_targets": list }
+            "df": None,                 # Parsed DataFrame with columns [Compound_Raw, Target_Raw, Affinity]
+            "resolved_compounds": {},   # raw_id -> dict(chembl_id, pref_name, inchi_key, smiles)
+            "resolved_targets": {},     # raw_id -> dict(chembl_id, pref_name, gene_symbol, canonical_name)
+            "num_compounds": 0,
+            "num_targets": 0,
+            "num_datapoints": 0,
+            "unique_targets": [],
+            "formatted_targets": [],
+            "formatted_compounds": [],
+        },
+        "price_upload_state": {
+            "files": {},                # filename -> { "df": df, "resolved_compounds": dict, "formatted_compounds": list }
+            "df": None,
+            "resolved_compounds": {},
+            "formatted_compounds": [],
+            "price_map": {},            # key (normalized identifier) -> price (float)
+            "filename": "",
+            "count": 0,
+        },
+    }
+
+
+def _get_session():
+    """Get or create session-scoped state for the current request.
+
+    Uses Flask's signed cookie session to identify the user.
+    Must be called from within a Flask request context (i.e. route handlers).
+    """
+    sid = session.get("sid")
+    if sid is None:
+        sid = str(uuid.uuid4())
+        session["sid"] = sid
+    with _lock:
+        if sid not in _sessions:
+            _sessions[sid] = _make_fresh_state()
+        return sid, _sessions[sid]
+
+
+def _get_session_by_sid(sid):
+    """Get session state by ID (for use in background threads where Flask context is unavailable)."""
+    with _lock:
+        if sid not in _sessions:
+            _sessions[sid] = _make_fresh_state()
+        return _sessions[sid]
+
 
 class StopOptimization(Exception):
     pass
 
+
 class WebappCallback(Callback):
-    def __init__(self, problem):
+    def __init__(self, problem, session_opt_state):
         super().__init__()
         self.problem = problem
+        self._opt_state = session_opt_state
         # Snapshot of the latest algorithm state for early-stop result extraction
         self.last_pop_X = None
         self.last_pop_F = None
@@ -89,8 +182,8 @@ class WebappCallback(Callback):
         self.last_pop_G = algorithm.pop.get("G").copy()
 
         with _lock:
-            opt_state["generation"] = algorithm.n_gen
-            if opt_state.get("stop_requested"):
+            self._opt_state["generation"] = algorithm.n_gen
+            if self._opt_state.get("stop_requested"):
                 raise StopOptimization("Optimization stopped by user")
 
             G = self.last_pop_G
@@ -108,7 +201,7 @@ class WebappCallback(Callback):
             best_sel = -min_obj1 * self.problem.pool_baseline_score
             best_cost = min_obj2 * self.problem.pool_total_cost
 
-            opt_state["history"].append({
+            self._opt_state["history"].append({
                 "generation": algorithm.n_gen,
                 "best_selectivity": float(best_sel),
                 "best_cost": float(best_cost)
@@ -121,72 +214,20 @@ class _LightResult:
         self.X = X
         self.F = F
 
-# Dataset built by pipeline
-dataset = {
-    "selectivities": None,      # NumPy array (compounds × targets)
-    "prices": None,             # NumPy array (prices)
-    "smiles": None,             # NumPy array (SMILES)
-    "num_drugs": 0,
-    "num_targets": 0,
-    "total_cost": 0.0,
-    "matrix_file": None,        # Path to saved CSV
-    "ready": False,             # True once matrix is built
-    "has_custom_affinity": False, # True if built from custom affinity data
-}
 
-# Optimization state
-opt_state = {
-    "status": "idle",           # idle | running | complete | error
-    "generation": 0,
-    "max_gen": 0,
-    "error": "",
-    "stop_requested": False,
-    "history": [],
-}
-
-# Optimization results
-opt_results = {
-    "pareto_front": None,       # 2D array [[selectivity, cost], ...]
-    "best_idx": None,
-    "selected_idx": None,       # Currently selected solution index
-    "comparison": None,         # dict with all comparison metrics
-    "winning_matrix_df": None,
-    "winning_file": None,       # Path to saved Excel
-    "res_X": None,              # Solution matrix (pop × drugs) — no pymoo history
-    "res_F": None,              # Objective values (pop × 2)
-    "problem": None,            # DrugLibraryProblem instance
-    "heatmap_cache": None,      # Cached JSON-ready heatmap dict
-    "weight_mean": None,
-    "weight_min": None,
-}
-
-# Custom uploaded data state
-affinity_upload_state = {
-    "files": {},                # filename -> { "df": df, "resolved_compounds": dict, "resolved_targets": dict, "formatted_compounds": list, "formatted_targets": list }
-    "df": None,                 # Parsed DataFrame with columns [Compound_Raw, Target_Raw, Affinity]
-    "resolved_compounds": {},   # raw_id -> dict(chembl_id, pref_name, inchi_key, smiles)
-    "resolved_targets": {},     # raw_id -> dict(chembl_id, pref_name, gene_symbol, canonical_name)
-    "num_compounds": 0,
-    "num_targets": 0,
-    "num_datapoints": 0,
-    "unique_targets": [],
-    "formatted_targets": [],
-    "formatted_compounds": [],
-}
-
-def _recompute_affinity_state():
+def _recompute_affinity_state(aff_state):
     """Recompute combined dataframe, resolved entities, and stats across all uploaded affinity files."""
-    files_dict = affinity_upload_state.get("files", {})
+    files_dict = aff_state.get("files", {})
     if not files_dict:
-        affinity_upload_state["df"] = None
-        affinity_upload_state["resolved_compounds"] = {}
-        affinity_upload_state["resolved_targets"] = {}
-        affinity_upload_state["num_compounds"] = 0
-        affinity_upload_state["num_targets"] = 0
-        affinity_upload_state["num_datapoints"] = 0
-        affinity_upload_state["unique_targets"] = []
-        affinity_upload_state["formatted_targets"] = []
-        affinity_upload_state["formatted_compounds"] = []
+        aff_state["df"] = None
+        aff_state["resolved_compounds"] = {}
+        aff_state["resolved_targets"] = {}
+        aff_state["num_compounds"] = 0
+        aff_state["num_targets"] = 0
+        aff_state["num_datapoints"] = 0
+        aff_state["unique_targets"] = []
+        aff_state["formatted_targets"] = []
+        aff_state["formatted_compounds"] = []
         return
 
     all_dfs = []
@@ -201,15 +242,15 @@ def _recompute_affinity_state():
             all_resolved_targets.update(fdata.get("resolved_targets", {}))
 
     if not all_dfs:
-        affinity_upload_state["df"] = None
-        affinity_upload_state["resolved_compounds"] = {}
-        affinity_upload_state["resolved_targets"] = {}
-        affinity_upload_state["num_compounds"] = 0
-        affinity_upload_state["num_targets"] = 0
-        affinity_upload_state["num_datapoints"] = 0
-        affinity_upload_state["unique_targets"] = []
-        affinity_upload_state["formatted_targets"] = []
-        affinity_upload_state["formatted_compounds"] = []
+        aff_state["df"] = None
+        aff_state["resolved_compounds"] = {}
+        aff_state["resolved_targets"] = {}
+        aff_state["num_compounds"] = 0
+        aff_state["num_targets"] = 0
+        aff_state["num_datapoints"] = 0
+        aff_state["unique_targets"] = []
+        aff_state["formatted_targets"] = []
+        aff_state["formatted_compounds"] = []
         return
 
     combined_df = pd.concat(all_dfs, ignore_index=True).drop_duplicates()
@@ -253,38 +294,29 @@ def _recompute_affinity_state():
             display_str = f"{t}"
         formatted_targets.append(display_str)
 
-    affinity_upload_state["df"] = combined_df
-    affinity_upload_state["resolved_compounds"] = all_resolved_compounds
-    affinity_upload_state["resolved_targets"] = all_resolved_targets
-    affinity_upload_state["num_compounds"] = len(unique_compounds)
-    affinity_upload_state["num_targets"] = len(unique_targets)
-    affinity_upload_state["num_datapoints"] = len(combined_df)
-    affinity_upload_state["unique_targets"] = [
+    aff_state["df"] = combined_df
+    aff_state["resolved_compounds"] = all_resolved_compounds
+    aff_state["resolved_targets"] = all_resolved_targets
+    aff_state["num_compounds"] = len(unique_compounds)
+    aff_state["num_targets"] = len(unique_targets)
+    aff_state["num_datapoints"] = len(combined_df)
+    aff_state["unique_targets"] = [
         all_resolved_targets[t]["canonical_name"] for t in unique_targets if t in all_resolved_targets
     ]
-    affinity_upload_state["formatted_compounds"] = formatted_compounds
-    affinity_upload_state["formatted_targets"] = formatted_targets
+    aff_state["formatted_compounds"] = formatted_compounds
+    aff_state["formatted_targets"] = formatted_targets
 
-price_upload_state = {
-    "files": {},                # filename -> { "df": df, "resolved_compounds": dict, "formatted_compounds": list }
-    "df": None,
-    "resolved_compounds": {},
-    "formatted_compounds": [],
-    "price_map": {},            # key (normalized identifier) -> price (float)
-    "filename": "",
-    "count": 0,
-}
 
-def _recompute_price_state():
-    """Recompute combined dataframe, price_map, and formatted_compounds across all uploaded files in price_upload_state['files']."""
-    files_dict = price_upload_state.get("files", {})
+def _recompute_price_state(price_state):
+    """Recompute combined dataframe, price_map, and formatted_compounds across all uploaded files."""
+    files_dict = price_state.get("files", {})
     if not files_dict:
-        price_upload_state["df"] = None
-        price_upload_state["resolved_compounds"] = {}
-        price_upload_state["formatted_compounds"] = []
-        price_upload_state["price_map"] = {}
-        price_upload_state["filename"] = ""
-        price_upload_state["count"] = 0
+        price_state["df"] = None
+        price_state["resolved_compounds"] = {}
+        price_state["formatted_compounds"] = []
+        price_state["price_map"] = {}
+        price_state["filename"] = ""
+        price_state["count"] = 0
         return
 
     all_dfs = []
@@ -299,12 +331,12 @@ def _recompute_price_state():
             all_resolved.update(fdata.get("resolved_compounds", {}))
 
     if not all_dfs:
-        price_upload_state["df"] = None
-        price_upload_state["resolved_compounds"] = {}
-        price_upload_state["formatted_compounds"] = []
-        price_upload_state["price_map"] = {}
-        price_upload_state["filename"] = ""
-        price_upload_state["count"] = 0
+        price_state["df"] = None
+        price_state["resolved_compounds"] = {}
+        price_state["formatted_compounds"] = []
+        price_state["price_map"] = {}
+        price_state["filename"] = ""
+        price_state["count"] = 0
         return
 
     combined_df = pd.concat(all_dfs, ignore_index=True)
@@ -345,15 +377,12 @@ def _recompute_price_state():
             display_str = f"{c}"
         formatted_compounds.append(display_str)
 
-    price_upload_state["df"] = combined_df
-    price_upload_state["resolved_compounds"] = all_resolved
-    price_upload_state["formatted_compounds"] = formatted_compounds
-    price_upload_state["price_map"] = price_map
-    price_upload_state["filename"] = ", ".join(filenames)
-    price_upload_state["count"] = len(combined_df)
-
-# Thread lock for state access
-_lock = threading.Lock()
+    price_state["df"] = combined_df
+    price_state["resolved_compounds"] = all_resolved
+    price_state["formatted_compounds"] = formatted_compounds
+    price_state["price_map"] = price_map
+    price_state["filename"] = ", ".join(filenames)
+    price_state["count"] = len(combined_df)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -563,10 +592,12 @@ def _resolve_targets(target_ids):
     return resolved
 
 
-def _lookup_custom_price(compound_raw, resolved_info=None):
+def _lookup_custom_price(compound_raw, resolved_info=None, price_state=None):
     """Smart lookup in custom price map across raw ID, ChEMBL ID, InChIKey, SMILES, and pref_name."""
+    if price_state is None:
+        return None
     with _lock:
-        price_map = price_upload_state.get("price_map", {})
+        price_map = price_state.get("price_map", {})
     if not price_map:
         return None
         
@@ -615,6 +646,9 @@ def tool():
 def upload_targets():
     """Accept CSV/Excel with target names/IDs, validate against ChEMBL."""
     import sqlite3
+
+    sid, s = _get_session()
+    pipeline_st = s["pipeline_state"]
 
     files = request.files.getlist("files[]")
     if not files:
@@ -725,8 +759,8 @@ def upload_targets():
     chembl_ids = list(matched_chembl_ids)
 
     with _lock:
-        pipeline_state["matched_targets"] = matched
-        pipeline_state["unmatched_targets"] = unmatched
+        pipeline_st["matched_targets"] = matched
+        pipeline_st["unmatched_targets"] = unmatched
 
     return jsonify({
         "total": len(input_targets),
@@ -744,6 +778,9 @@ def upload_targets():
 @app.route("/api/upload-affinity", methods=["POST"])
 def upload_affinity():
     """Accept CSV/Excel with compound, target, and affinity value (supports incremental multi-file upload)."""
+    sid, s = _get_session()
+    aff_state = s["affinity_upload_state"]
+
     files = request.files.getlist("files[]") or request.files.getlist("file")
     if not files and "file" in request.files:
         files = [request.files["file"]]
@@ -839,9 +876,9 @@ def upload_affinity():
                 formatted_t.append(f"{t}")
 
         with _lock:
-            if "files" not in affinity_upload_state:
-                affinity_upload_state["files"] = {}
-            affinity_upload_state["files"][file.filename] = {
+            if "files" not in aff_state:
+                aff_state["files"] = {}
+            aff_state["files"][file.filename] = {
                 "df": sub_df,
                 "resolved_compounds": res_compounds,
                 "resolved_targets": res_targets,
@@ -862,7 +899,7 @@ def upload_affinity():
         return jsonify({"error": "No valid affinity files processed."}), 400
 
     with _lock:
-        _recompute_affinity_state()
+        _recompute_affinity_state(aff_state)
         all_files_list = [
             {
                 "name": fname,
@@ -872,23 +909,26 @@ def upload_affinity():
                 "compounds": fdata["formatted_compounds"],
                 "targets": fdata["formatted_targets"],
             }
-            for fname, fdata in affinity_upload_state["files"].items()
+            for fname, fdata in aff_state["files"].items()
         ]
 
     return jsonify({
         "uploaded_files": uploaded_files_summary,
         "all_files": all_files_list,
-        "num_compounds": affinity_upload_state["num_compounds"],
-        "num_targets": affinity_upload_state["num_targets"],
-        "num_datapoints": affinity_upload_state["num_datapoints"],
-        "compounds": affinity_upload_state["formatted_compounds"],
-        "targets": affinity_upload_state["formatted_targets"],
+        "num_compounds": aff_state["num_compounds"],
+        "num_targets": aff_state["num_targets"],
+        "num_datapoints": aff_state["num_datapoints"],
+        "compounds": aff_state["formatted_compounds"],
+        "targets": aff_state["formatted_targets"],
     })
 
 
 @app.route("/api/upload-prices", methods=["POST"])
 def upload_prices():
     """Accept CSV/Excel with compound and price (supports incremental multi-file upload)."""
+    sid, s = _get_session()
+    price_state = s["price_upload_state"]
+
     files = request.files.getlist("files[]") or request.files.getlist("file")
     if not files and "file" in request.files:
         files = [request.files["file"]]
@@ -961,9 +1001,9 @@ def upload_prices():
             file_formatted.append(display_str)
 
         with _lock:
-            if "files" not in price_upload_state:
-                price_upload_state["files"] = {}
-            price_upload_state["files"][file.filename] = {
+            if "files" not in price_state:
+                price_state["files"] = {}
+            price_state["files"][file.filename] = {
                 "df": clean_df,
                 "resolved_compounds": resolved_cmpds,
                 "formatted_compounds": file_formatted,
@@ -979,9 +1019,9 @@ def upload_prices():
         return jsonify({"error": "No valid price files uploaded."}), 400
 
     with _lock:
-        _recompute_price_state()
-        combined_df = price_upload_state.get("df")
-        formatted_compounds = price_upload_state.get("formatted_compounds", [])
+        _recompute_price_state(price_state)
+        combined_df = price_state.get("df")
+        formatted_compounds = price_state.get("formatted_compounds", [])
         total_unique = len(combined_df) if combined_df is not None else 0
         all_files_list = [
             {
@@ -989,14 +1029,14 @@ def upload_prices():
                 "num_prices": len(fdata["df"]),
                 "compounds": fdata["formatted_compounds"]
             }
-            for fname, fdata in price_upload_state["files"].items()
+            for fname, fdata in price_state["files"].items()
         ]
 
     return jsonify({
         "uploaded_files": uploaded_files_summary,
         "all_files": all_files_list,
         "num_prices": total_unique,
-        "filename": price_upload_state.get("filename", ""),
+        "filename": price_state.get("filename", ""),
         "compounds": formatted_compounds,
     })
 
@@ -1004,16 +1044,19 @@ def upload_prices():
 @app.route("/api/remove-affinity-file", methods=["POST"])
 def remove_affinity_file():
     """Remove a specific uploaded affinity file by name."""
+    sid, s = _get_session()
+    aff_state = s["affinity_upload_state"]
+
     data = request.get_json(force=True) or {}
     filename = data.get("filename", "").strip()
     if not filename:
         return jsonify({"error": "No filename specified"}), 400
 
     with _lock:
-        files_dict = affinity_upload_state.get("files", {})
+        files_dict = aff_state.get("files", {})
         if filename in files_dict:
             del files_dict[filename]
-        _recompute_affinity_state()
+        _recompute_affinity_state(aff_state)
 
         all_files_list = [
             {
@@ -1029,17 +1072,20 @@ def remove_affinity_file():
 
     return jsonify({
         "all_files": all_files_list,
-        "num_compounds": affinity_upload_state["num_compounds"],
-        "num_targets": affinity_upload_state["num_targets"],
-        "num_datapoints": affinity_upload_state["num_datapoints"],
-        "compounds": affinity_upload_state["formatted_compounds"],
-        "targets": affinity_upload_state["formatted_targets"],
+        "num_compounds": aff_state["num_compounds"],
+        "num_targets": aff_state["num_targets"],
+        "num_datapoints": aff_state["num_datapoints"],
+        "compounds": aff_state["formatted_compounds"],
+        "targets": aff_state["formatted_targets"],
     })
 
 
 @app.route("/api/remove-affinity-target", methods=["POST"])
 def remove_affinity_target():
     """Remove a single target from the uploaded affinity dataset across all files."""
+    sid, s = _get_session()
+    aff_state = s["affinity_upload_state"]
+
     data = request.get_json(force=True) or {}
     target_str = data.get("target", "").strip()
     if not target_str:
@@ -1048,7 +1094,7 @@ def remove_affinity_target():
     target_raw = target_str.split(" ->")[0].strip().lower()
 
     with _lock:
-        files_dict = affinity_upload_state.get("files", {})
+        files_dict = aff_state.get("files", {})
         for fname, fdata in list(files_dict.items()):
             fdf = fdata.get("df")
             if fdf is not None and not fdf.empty:
@@ -1071,7 +1117,7 @@ def remove_affinity_target():
                         if fc.split(" ->")[0].strip() in file_cmpds_set
                     ]
 
-        _recompute_affinity_state()
+        _recompute_affinity_state(aff_state)
 
         all_files_list = [
             {
@@ -1087,17 +1133,20 @@ def remove_affinity_target():
 
     return jsonify({
         "all_files": all_files_list,
-        "num_compounds": affinity_upload_state["num_compounds"],
-        "num_targets": affinity_upload_state["num_targets"],
-        "num_datapoints": affinity_upload_state["num_datapoints"],
-        "compounds": affinity_upload_state["formatted_compounds"],
-        "targets": affinity_upload_state["formatted_targets"],
+        "num_compounds": aff_state["num_compounds"],
+        "num_targets": aff_state["num_targets"],
+        "num_datapoints": aff_state["num_datapoints"],
+        "compounds": aff_state["formatted_compounds"],
+        "targets": aff_state["formatted_targets"],
     })
 
 
 @app.route("/api/remove-affinity-compound", methods=["POST"])
 def remove_affinity_compound():
     """Remove a single compound from the uploaded affinity dataset across all files."""
+    sid, s = _get_session()
+    aff_state = s["affinity_upload_state"]
+
     data = request.get_json(force=True) or {}
     compound_str = data.get("compound", "").strip()
     if not compound_str:
@@ -1106,7 +1155,7 @@ def remove_affinity_compound():
     compound_raw = compound_str.split(" ->")[0].strip().lower()
 
     with _lock:
-        files_dict = affinity_upload_state.get("files", {})
+        files_dict = aff_state.get("files", {})
         for fname, fdata in list(files_dict.items()):
             fdf = fdata.get("df")
             if fdf is not None and not fdf.empty:
@@ -1129,7 +1178,7 @@ def remove_affinity_compound():
                         if ft.split(" ->")[0].strip() in file_tgts_set
                     ]
 
-        _recompute_affinity_state()
+        _recompute_affinity_state(aff_state)
 
         all_files_list = [
             {
@@ -1145,38 +1194,43 @@ def remove_affinity_compound():
 
     return jsonify({
         "all_files": all_files_list,
-        "num_compounds": affinity_upload_state["num_compounds"],
-        "num_targets": affinity_upload_state["num_targets"],
-        "num_datapoints": affinity_upload_state["num_datapoints"],
-        "compounds": affinity_upload_state["formatted_compounds"],
-        "targets": affinity_upload_state["formatted_targets"],
+        "num_compounds": aff_state["num_compounds"],
+        "num_targets": aff_state["num_targets"],
+        "num_datapoints": aff_state["num_datapoints"],
+        "compounds": aff_state["formatted_compounds"],
+        "targets": aff_state["formatted_targets"],
     })
 
 
 @app.route("/api/clear-affinity", methods=["POST"])
 def clear_affinity():
+    sid, s = _get_session()
+    aff_state = s["affinity_upload_state"]
     with _lock:
-        affinity_upload_state["files"] = {}
-        _recompute_affinity_state()
+        aff_state["files"] = {}
+        _recompute_affinity_state(aff_state)
     return jsonify({"status": "cleared"})
 
 
 @app.route("/api/remove-price-file", methods=["POST"])
 def remove_price_file():
     """Remove a specific uploaded price file by name."""
+    sid, s = _get_session()
+    price_state = s["price_upload_state"]
+
     data = request.get_json(force=True) or {}
     filename = data.get("filename", "").strip()
     if not filename:
         return jsonify({"error": "No filename specified"}), 400
 
     with _lock:
-        files_dict = price_upload_state.get("files", {})
+        files_dict = price_state.get("files", {})
         if filename in files_dict:
             del files_dict[filename]
-        _recompute_price_state()
+        _recompute_price_state(price_state)
 
-        combined_df = price_upload_state.get("df")
-        formatted_compounds = price_upload_state.get("formatted_compounds", [])
+        combined_df = price_state.get("df")
+        formatted_compounds = price_state.get("formatted_compounds", [])
         total_unique = len(combined_df) if combined_df is not None else 0
         all_files_list = [
             {
@@ -1190,7 +1244,7 @@ def remove_price_file():
     return jsonify({
         "all_files": all_files_list,
         "num_prices": total_unique,
-        "filename": price_upload_state.get("filename", ""),
+        "filename": price_state.get("filename", ""),
         "compounds": formatted_compounds,
     })
 
@@ -1198,6 +1252,9 @@ def remove_price_file():
 @app.route("/api/remove-price-compound", methods=["POST"])
 def remove_price_compound():
     """Remove a single compound from the uploaded price dataset."""
+    sid, s = _get_session()
+    price_state = s["price_upload_state"]
+
     data = request.get_json(force=True) or {}
     compound_str = data.get("compound", "").strip()
     if not compound_str:
@@ -1206,7 +1263,7 @@ def remove_price_compound():
     compound_raw = compound_str.split(" ->")[0].strip().lower()
 
     with _lock:
-        files_dict = price_upload_state.get("files", {})
+        files_dict = price_state.get("files", {})
         for fname, fdata in list(files_dict.items()):
             fdf = fdata.get("df")
             if fdf is not None and not fdf.empty:
@@ -1221,10 +1278,10 @@ def remove_price_compound():
                     if fc != compound_str and fc.split(" ->")[0].strip().lower() != compound_raw
                 ]
 
-        _recompute_price_state()
+        _recompute_price_state(price_state)
 
-        combined_df = price_upload_state.get("df")
-        formatted_compounds = price_upload_state.get("formatted_compounds", [])
+        combined_df = price_state.get("df")
+        formatted_compounds = price_state.get("formatted_compounds", [])
         total_unique = len(combined_df) if combined_df is not None else 0
         all_files_list = [
             {
@@ -1238,21 +1295,23 @@ def remove_price_compound():
     return jsonify({
         "all_files": all_files_list,
         "num_prices": total_unique,
-        "filename": price_upload_state.get("filename", ""),
+        "filename": price_state.get("filename", ""),
         "compounds": formatted_compounds,
     })
 
 
 @app.route("/api/clear-prices", methods=["POST"])
 def clear_prices():
+    sid, s = _get_session()
+    price_state = s["price_upload_state"]
     with _lock:
-        price_upload_state["files"] = {}
-        price_upload_state["df"] = None
-        price_upload_state["resolved_compounds"] = {}
-        price_upload_state["formatted_compounds"] = []
-        price_upload_state["price_map"] = {}
-        price_upload_state["filename"] = ""
-        price_upload_state["count"] = 0
+        price_state["files"] = {}
+        price_state["df"] = None
+        price_state["resolved_compounds"] = {}
+        price_state["formatted_compounds"] = []
+        price_state["price_map"] = {}
+        price_state["filename"] = ""
+        price_state["count"] = 0
     return jsonify({"status": "cleared"})
 
 
@@ -1263,8 +1322,12 @@ def clear_prices():
 @app.route("/api/build-matrix", methods=["POST"])
 def build_matrix():
     """Launch the full pipeline in a background thread."""
+    sid, s = _get_session()
+    pipeline_st = s["pipeline_state"]
+    opt_st = s["opt_state"]
+
     with _lock:
-        if pipeline_state["status"] == "running":
+        if pipeline_st["status"] == "running":
             return jsonify({"error": "Pipeline is already running"}), 409
 
     data = request.get_json(force=True)
@@ -1278,7 +1341,7 @@ def build_matrix():
 
     # Reset states
     with _lock:
-        pipeline_state.update({
+        pipeline_st.update({
             "status": "running",
             "current_step": 0,
             "step_label": "Starting...",
@@ -1286,11 +1349,11 @@ def build_matrix():
             "error": "",
             "step_summaries": {},
         })
-        opt_state.update({"status": "idle", "generation": 0, "error": ""})
+        opt_st.update({"status": "idle", "generation": 0, "error": ""})
 
     thread = threading.Thread(
         target=_run_pipeline,
-        args=(chembl_ids, selectivity_threshold, remove_targets, matched_count),
+        args=(sid, chembl_ids, selectivity_threshold, remove_targets, matched_count),
         daemon=True,
     )
     thread.start()
@@ -1301,10 +1364,15 @@ def build_matrix():
 @app.route("/api/build-matrix-from-affinity", methods=["POST"])
 def build_matrix_from_affinity():
     """Launch the affinity-based pipeline in a background thread."""
+    sid, s = _get_session()
+    pipeline_st = s["pipeline_state"]
+    opt_st = s["opt_state"]
+    aff_state = s["affinity_upload_state"]
+
     with _lock:
-        if pipeline_state["status"] == "running":
+        if pipeline_st["status"] == "running":
             return jsonify({"error": "Pipeline is already running"}), 409
-        if affinity_upload_state["df"] is None or affinity_upload_state["df"].empty:
+        if aff_state["df"] is None or aff_state["df"].empty:
             return jsonify({"error": "No affinity data uploaded. Please upload an affinity file first."}), 400
 
     data = request.get_json(force=True) or {}
@@ -1313,7 +1381,7 @@ def build_matrix_from_affinity():
 
     # Reset states
     with _lock:
-        pipeline_state.update({
+        pipeline_st.update({
             "status": "running",
             "current_step": 0,
             "step_label": "Starting...",
@@ -1321,11 +1389,11 @@ def build_matrix_from_affinity():
             "error": "",
             "step_summaries": {},
         })
-        opt_state.update({"status": "idle", "generation": 0, "error": ""})
+        opt_st.update({"status": "idle", "generation": 0, "error": ""})
 
     thread = threading.Thread(
         target=_run_affinity_pipeline,
-        args=(selectivity_threshold, remove_targets),
+        args=(sid, selectivity_threshold, remove_targets),
         daemon=True,
     )
     thread.start()
@@ -1335,23 +1403,32 @@ def build_matrix_from_affinity():
 
 @app.route("/api/pipeline-status")
 def pipeline_status():
+    sid, s = _get_session()
+    pipeline_st = s["pipeline_state"]
     with _lock:
-        return jsonify({**pipeline_state})
+        return jsonify({**pipeline_st})
 
 
-def _update_pipeline(step, label, detail="", summary=None):
+def _update_pipeline(sid, step, label, detail="", summary=None):
+    s = _get_session_by_sid(sid)
+    pipeline_st = s["pipeline_state"]
     with _lock:
-        pipeline_state["current_step"] = step
-        pipeline_state["step_label"] = label
-        pipeline_state["detail"] = detail
+        pipeline_st["current_step"] = step
+        pipeline_st["step_label"] = label
+        pipeline_st["detail"] = detail
         if summary is not None:
-            pipeline_state["step_summaries"][step] = summary
+            pipeline_st["step_summaries"][step] = summary
 
 
-def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matched_count=0):
+def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, matched_count=0):
     """Full pipeline: ChEMBL → pChEMBL rescue → selectivity → prices → save."""
     import sqlite3
     import hashlib
+
+    s = _get_session_by_sid(sid)
+    pipeline_st = s["pipeline_state"]
+    ds = s["dataset"]
+    price_state = s["price_upload_state"]
 
     try:
         output_dir = PROJECT_ROOT / "webapp" / "output"
@@ -1363,31 +1440,31 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         matrix_file = str(output_dir / f"selectivity_matrix_{cache_key}.csv")
         
         if os.path.exists(matrix_file):
-            _update_pipeline(1, "Loading cached matrix...", "Found a previously computed selectivity matrix for these parameters.")
+            _update_pipeline(sid, 1, "Loading cached matrix...", "Found a previously computed selectivity matrix for these parameters.")
             final_export_df = pd.read_csv(matrix_file)
             
             target_cols = [c for c in final_export_df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"}]
             with _lock:
-                dataset["selectivities"] = final_export_df[target_cols].to_numpy(dtype=float)
-                dataset["prices"] = final_export_df["Price_USD_per_mg"].to_numpy(dtype=float)
-                dataset["smiles"] = final_export_df["SMILES"].to_numpy()
-                dataset["num_drugs"] = len(final_export_df)
-                dataset["num_targets"] = len(target_cols)
-                dataset["total_cost"] = float(np.sum(dataset["prices"]))
-                dataset["matrix_file"] = matrix_file
-                dataset["ready"] = True
-                dataset["has_custom_affinity"] = False
+                ds["selectivities"] = final_export_df[target_cols].to_numpy(dtype=float)
+                ds["prices"] = final_export_df["Price_USD_per_mg"].to_numpy(dtype=float)
+                ds["smiles"] = final_export_df["SMILES"].to_numpy()
+                ds["num_drugs"] = len(final_export_df)
+                ds["num_targets"] = len(target_cols)
+                ds["total_cost"] = float(np.sum(ds["prices"]))
+                ds["matrix_file"] = matrix_file
+                ds["ready"] = True
+                ds["has_custom_affinity"] = False
     
-                pipeline_state["status"] = "complete"
-                pipeline_state["current_step"] = 3
-                pipeline_state["step_label"] = "Done"
-                pipeline_state["detail"] = f"Loaded cached matrix: {dataset['num_drugs']} compounds × {dataset['num_targets']} targets"
+                pipeline_st["status"] = "complete"
+                pipeline_st["current_step"] = 3
+                pipeline_st["step_label"] = "Done"
+                pipeline_st["detail"] = f"Loaded cached matrix: {ds['num_drugs']} compounds × {ds['num_targets']} targets"
             return
 
         # ─────────────────────────────────────────────
         # Step 1: Searching for selective compounds
         # ─────────────────────────────────────────────
-        _update_pipeline(1, "Searching for selective compounds...", f"Querying database for compounds active against {matched_count} targets... (this may take a few minutes)")
+        _update_pipeline(sid, 1, "Searching for selective compounds...", f"Querying database for compounds active against {matched_count} targets... (this may take a few minutes)")
 
         db_path = str(DATABASE_DIR / "chembl_36.db")
 
@@ -1467,7 +1544,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
             for chunk in pd.read_sql_query(query1, conn, params=params + params, chunksize=1000):
                 chunks.append(chunk)
                 compounds_so_far.update(chunk['Clean_Molregno'])
-                _update_pipeline(1, "Searching for selective compounds...",
+                _update_pipeline(sid, 1, "Searching for selective compounds...",
                                  f"Found {len(compounds_so_far)} compounds so far...")
             
             if chunks:
@@ -1479,7 +1556,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         if compounds_found_initial == 0:
             raise ValueError("No highly active and selective compounds found for the provided targets.")
         df_raw["Target_Name"] = df_raw["Target_Name"].fillna(df_raw["Target_ChEMBL_ID"])
-        _update_pipeline(1, "Searching for selective compounds...",
+        _update_pipeline(sid, 1, "Searching for selective compounds...",
                          f"Fetched selectivity scores for {len(df_raw)} records covering {compounds_found_initial} compounds")
 
         df_raw["SMILES"] = df_raw["SMILES"].astype(str).replace("nan", "Missing_SMILES")
@@ -1526,7 +1603,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         else:
             summary_text = f"Found {final_drugs} compounds active against {final_targets} targets"
 
-        _update_pipeline(1, "Searching for selective compounds...",
+        _update_pipeline(sid, 1, "Searching for selective compounds...",
                          f"Pruned {pruned_low_sel} compounds with low selectivity: {final_drugs} compounds remaining",
                          summary=summary_text)
 
@@ -1549,7 +1626,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         # ─────────────────────────────────────────────
         # Step 2: Getting price data
         # ─────────────────────────────────────────────
-        _update_pipeline(2, "Getting price data...", "Querying database for prices")
+        _update_pipeline(sid, 2, "Getting price data...", "Querying database for prices")
 
         inchikeys = final_export_df["InChIKey"].dropna().unique().tolist()
         molport_dict = {}
@@ -1575,7 +1652,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                         molport_df = molport_df.groupby("INCHIKEY")["PRICE_1MG"].median().reset_index()
                         molport_dict = dict(zip(molport_df["INCHIKEY"], molport_df["PRICE_1MG"]))
             except Exception as e:
-                _update_pipeline(2, "Getting price data...", f"MolPort query warning: {e}")
+                _update_pipeline(sid, 2, "Getting price data...", f"MolPort query warning: {e}")
 
         # Check custom uploaded prices first
         custom_price_dict = {}
@@ -1588,7 +1665,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                 "smiles": row.get("SMILES", ""),
                 "pref_name": row.get("Compound_Name", "")
             }
-            p = _lookup_custom_price(cmpd_name, res_info)
+            p = _lookup_custom_price(cmpd_name, res_info, price_state)
             if p is not None:
                 ik = row.get("InChIKey", "")
                 if ik:
@@ -1604,7 +1681,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         molprice_approx_count = (final_export_df["Molport_Source"] == "MolPrice").sum()
         molport_direct_count = found_count - molprice_approx_count - custom_matched_count
         
-        _update_pipeline(2, "Getting price data...",
+        _update_pipeline(sid, 2, "Getting price data...",
                          f"Found prices for {found_count}/{len(final_export_df)} compounds (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})")
 
         # ─────────────────────────────────────────────
@@ -1614,7 +1691,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         missing_count = int(missing_price_mask.sum())
 
         if missing_count > 0:
-            _update_pipeline(2, "Getting price data...",
+            _update_pipeline(sid, 2, "Getting price data...",
                              f"Predicting prices for {missing_count} compounds not found in database using MolPrice",
                              summary=f"Found prices. Predicting {missing_count} with MolPrice.")
 
@@ -1632,11 +1709,11 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                 final_prices.loc[missing_price_mask] = predicted_prices
                 final_prices = final_prices.values
 
-                _update_pipeline(2, "Getting price data...",
+                _update_pipeline(sid, 2, "Getting price data...",
                                  f"MolPrice predicted prices for {missing_count} compounds. (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice: {molprice_approx_count})",
                                  summary=f"Predicted {missing_count} prices. (Custom: {custom_matched_count}, MolPort: {molport_direct_count})")
             except Exception as e:
-                _update_pipeline(2, "Getting price data...",
+                _update_pipeline(sid, 2, "Getting price data...",
                                  f"MolPrice prediction failed ({e}), using median fallback.",
                                  summary=f"Prediction failed, used fallback.")
                 fallback = final_export_df["Molport_Price"].median()
@@ -1648,7 +1725,7 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
                     final_export_df["Molport_Price"]
                 )
         else:
-            _update_pipeline(2, "Getting price data...", 
+            _update_pipeline(sid, 2, "Getting price data...", 
                              f"All prices assigned (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})", 
                              summary=f"All prices assigned: {custom_matched_count} from custom file, {molport_direct_count} direct MolPort, {molprice_approx_count} MolPrice.")
             final_prices = final_export_df["Molport_Price"].values
@@ -1668,45 +1745,52 @@ def _run_pipeline(chembl_ids, selectivity_threshold, remove_targets=True, matche
         final_export_df = final_export_df[meta_cols + cols]
 
         # Save matrix as CSV (fast) — Excel generated lazily on download
-        _update_pipeline(3, "Saving matrix...", "Saving matrix...")
+        _update_pipeline(sid, 3, "Saving matrix...", "Saving matrix...")
         
         final_export_df.to_csv(matrix_file, index=False)
 
-        # Store in global dataset
+        # Store in session dataset
         target_cols = [c for c in final_export_df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"}]
         with _lock:
-            dataset["selectivities"] = final_export_df[target_cols].to_numpy(dtype=float)
-            dataset["prices"] = final_export_df["Price_USD_per_mg"].to_numpy(dtype=float)
-            dataset["smiles"] = final_export_df["SMILES"].to_numpy()
-            dataset["num_drugs"] = len(final_export_df)
-            dataset["num_targets"] = len(target_cols)
-            dataset["total_cost"] = float(np.sum(dataset["prices"]))
-            dataset["matrix_file"] = matrix_file
-            dataset["ready"] = True
-            dataset["has_custom_affinity"] = False
+            ds["selectivities"] = final_export_df[target_cols].to_numpy(dtype=float)
+            ds["prices"] = final_export_df["Price_USD_per_mg"].to_numpy(dtype=float)
+            ds["smiles"] = final_export_df["SMILES"].to_numpy()
+            ds["num_drugs"] = len(final_export_df)
+            ds["num_targets"] = len(target_cols)
+            ds["total_cost"] = float(np.sum(ds["prices"]))
+            ds["matrix_file"] = matrix_file
+            ds["ready"] = True
+            ds["has_custom_affinity"] = False
 
-            pipeline_state["status"] = "complete"
-            pipeline_state["detail"] = f"Matrix ready: {dataset['num_drugs']} compounds × {dataset['num_targets']} targets"
+            pipeline_st["status"] = "complete"
+            pipeline_st["detail"] = f"Matrix ready: {ds['num_drugs']} compounds × {ds['num_targets']} targets"
         del final_export_df  # Free DataFrame — numpy arrays and CSV are sufficient
 
     except Exception as e:
         with _lock:
-            pipeline_state["status"] = "error"
-            pipeline_state["error"] = str(e)
-            pipeline_state["detail"] = ""
+            pipeline_st["status"] = "error"
+            pipeline_st["error"] = str(e)
+            pipeline_st["detail"] = ""
 
 
-def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
+def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
     """Pipeline for user-uploaded affinity data: calculates selectivity directly and resolves prices."""
     import hashlib
+
+    s = _get_session_by_sid(sid)
+    pipeline_st = s["pipeline_state"]
+    ds = s["dataset"]
+    aff_state = s["affinity_upload_state"]
+    price_state = s["price_upload_state"]
+
     try:
         output_dir = PROJECT_ROOT / "webapp" / "output"
         output_dir.mkdir(exist_ok=True)
 
         with _lock:
-            raw_df = affinity_upload_state["df"]
-            compounds_map = dict(affinity_upload_state["resolved_compounds"])
-            targets_map = dict(affinity_upload_state["resolved_targets"])
+            raw_df = aff_state["df"]
+            compounds_map = dict(aff_state["resolved_compounds"])
+            targets_map = dict(aff_state["resolved_targets"])
 
         if raw_df is None or raw_df.empty:
             raise ValueError("No affinity data uploaded.")
@@ -1714,7 +1798,7 @@ def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
         # ─────────────────────────────────────────────
         # Step 1: Calculating selectivity matrix
         # ─────────────────────────────────────────────
-        _update_pipeline(1, "Calculating selectivity matrix...", "Computing blended selectivity scores from uploaded affinity data...")
+        _update_pipeline(sid, 1, "Calculating selectivity matrix...", "Computing blended selectivity scores from uploaded affinity data...")
 
         work_df = raw_df.copy()
         work_df["Target_Canonical"] = work_df["Target_Raw"].map(lambda t: targets_map.get(t, {}).get("canonical_name", str(t)))
@@ -1765,14 +1849,14 @@ def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
         else:
             summary_text = f"Calculated selectivity for {final_drugs} compounds across {final_targets} targets."
 
-        _update_pipeline(1, "Calculating selectivity matrix...",
+        _update_pipeline(sid, 1, "Calculating selectivity matrix...",
                          f"Selectivity matrix computed: {final_drugs} compounds × {final_targets} targets",
                          summary=summary_text)
 
         # ─────────────────────────────────────────────
         # Step 2: Getting price data
         # ─────────────────────────────────────────────
-        _update_pipeline(2, "Getting price data...", "Resolving compound prices...")
+        _update_pipeline(sid, 2, "Getting price data...", "Resolving compound prices...")
 
         final_compounds = list(clean_df.index)
 
@@ -1831,7 +1915,7 @@ def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
             res_info = compounds_map.get(cmpd_raw, {})
 
             # Tier 1: Custom Price File
-            custom_p = _lookup_custom_price(cmpd_raw, res_info)
+            custom_p = _lookup_custom_price(cmpd_raw, res_info, price_state)
             if custom_p is not None:
                 prices.append(float(custom_p))
                 custom_price_count += 1
@@ -1881,12 +1965,12 @@ def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
             price_summary_parts.append(f"{fallback_count} median fallback (${fallback_val:.2f}/mg)")
 
         price_summary_str = ", ".join(price_summary_parts) or "All prices assigned."
-        _update_pipeline(2, "Getting price data...", f"Resolved prices: {price_summary_str}", summary=f"Prices resolved: {price_summary_str}")
+        _update_pipeline(sid, 2, "Getting price data...", f"Resolved prices: {price_summary_str}", summary=f"Prices resolved: {price_summary_str}")
 
         # ─────────────────────────────────────────────
         # Step 3: Saving matrix
         # ─────────────────────────────────────────────
-        _update_pipeline(3, "Saving matrix...", "Saving selectivity matrix...")
+        _update_pipeline(sid, 3, "Saving matrix...", "Saving selectivity matrix...")
 
         target_cols = [c for c in clean_df.columns]
         meta_cols = ["Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"]
@@ -1897,25 +1981,25 @@ def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
         final_export_df.to_csv(matrix_file, index=False)
 
         with _lock:
-            dataset["selectivities"] = final_export_df[target_cols].to_numpy(dtype=float)
-            dataset["prices"] = final_export_df["Price_USD_per_mg"].to_numpy(dtype=float)
-            dataset["smiles"] = final_export_df["SMILES"].to_numpy()
-            dataset["num_drugs"] = len(final_export_df)
-            dataset["num_targets"] = len(target_cols)
-            dataset["total_cost"] = float(np.sum(dataset["prices"]))
-            dataset["matrix_file"] = matrix_file
-            dataset["ready"] = True
-            dataset["has_custom_affinity"] = True
+            ds["selectivities"] = final_export_df[target_cols].to_numpy(dtype=float)
+            ds["prices"] = final_export_df["Price_USD_per_mg"].to_numpy(dtype=float)
+            ds["smiles"] = final_export_df["SMILES"].to_numpy()
+            ds["num_drugs"] = len(final_export_df)
+            ds["num_targets"] = len(target_cols)
+            ds["total_cost"] = float(np.sum(ds["prices"]))
+            ds["matrix_file"] = matrix_file
+            ds["ready"] = True
+            ds["has_custom_affinity"] = True
 
-            pipeline_state["status"] = "complete"
-            pipeline_state["detail"] = f"Matrix ready: {dataset['num_drugs']} compounds × {dataset['num_targets']} targets"
+            pipeline_st["status"] = "complete"
+            pipeline_st["detail"] = f"Matrix ready: {ds['num_drugs']} compounds × {ds['num_targets']} targets"
 
     except Exception as e:
         traceback.print_exc()
         with _lock:
-            pipeline_state["status"] = "error"
-            pipeline_state["error"] = str(e)
-            pipeline_state["detail"] = ""
+            pipeline_st["status"] = "error"
+            pipeline_st["error"] = str(e)
+            pipeline_st["detail"] = ""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1924,13 +2008,15 @@ def _run_affinity_pipeline(selectivity_threshold=0.5, remove_targets=True):
 
 @app.route("/api/dataset-info")
 def dataset_info():
+    sid, s = _get_session()
+    ds = s["dataset"]
     with _lock:
         return jsonify({
-            "num_drugs": dataset["num_drugs"],
-            "num_targets": dataset["num_targets"],
-            "total_cost": round(dataset["total_cost"], 2),
-            "ready": dataset["ready"],
-            "has_custom_affinity": dataset.get("has_custom_affinity", False),
+            "num_drugs": ds["num_drugs"],
+            "num_targets": ds["num_targets"],
+            "total_cost": round(ds["total_cost"], 2),
+            "ready": ds["ready"],
+            "has_custom_affinity": ds.get("has_custom_affinity", False),
         })
 
 
@@ -1941,10 +2027,14 @@ def dataset_info():
 @app.route("/api/run", methods=["POST"])
 def run_optimization_route():
     """Launch NSGA-II optimization in a background thread."""
+    sid, s = _get_session()
+    opt_st = s["opt_state"]
+    ds = s["dataset"]
+
     with _lock:
-        if opt_state["status"] == "running":
+        if opt_st["status"] == "running":
             return jsonify({"error": "Optimization is already running"}), 409
-        if not dataset["ready"]:
+        if not ds["ready"]:
             return jsonify({"error": "No dataset loaded. Build the matrix first."}), 400
 
     data = request.get_json(force=True)
@@ -1965,7 +2055,7 @@ def run_optimization_route():
     term_period = max(term_period, 5)
 
     with _lock:
-        opt_state.update({
+        opt_st.update({
             "status": "running",
             "generation": 0,
             "max_gen": max_gen,
@@ -1976,7 +2066,7 @@ def run_optimization_route():
 
     thread = threading.Thread(
         target=_run_nsga2,
-        args=(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol, term_period, max_price),
+        args=(sid, weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol, term_period, max_price),
         daemon=True,
     )
     thread.start()
@@ -1986,14 +2076,17 @@ def run_optimization_route():
 
 @app.route("/api/status")
 def optimization_status():
+    sid, s = _get_session()
+    opt_st = s["opt_state"]
     with _lock:
-        return jsonify({**opt_state})
+        return jsonify({**opt_st})
 
 
 @app.route("/api/reset", methods=["POST"])
 def reset_state():
+    sid, s = _get_session()
     with _lock:
-        pipeline_state.update({
+        s["pipeline_state"].update({
             "status": "idle",
             "current_step": 0,
             "step_label": "",
@@ -2003,7 +2096,7 @@ def reset_state():
             "matched_targets": [],
             "unmatched_targets": [],
         })
-        dataset.update({
+        s["dataset"].update({
             "selectivities": None,
             "prices": None,
             "smiles": None,
@@ -2013,7 +2106,7 @@ def reset_state():
             "matrix_file": None,
             "ready": False,
         })
-        opt_state.update({
+        s["opt_state"].update({
             "status": "idle",
             "generation": 0,
             "max_gen": 0,
@@ -2021,7 +2114,7 @@ def reset_state():
             "stop_requested": False,
             "history": [],
         })
-        opt_results.update({
+        s["opt_results"].update({
             "pareto_front": None,
             "best_idx": None,
             "selected_idx": None,
@@ -2035,7 +2128,7 @@ def reset_state():
             "weight_mean": None,
             "weight_min": None,
         })
-        affinity_upload_state.update({
+        s["affinity_upload_state"].update({
             "files": {},
             "df": None,
             "resolved_compounds": {},
@@ -2047,7 +2140,7 @@ def reset_state():
             "formatted_targets": [],
             "formatted_compounds": [],
         })
-        price_upload_state.update({
+        s["price_upload_state"].update({
             "files": {},
             "df": None,
             "resolved_compounds": {},
@@ -2062,8 +2155,10 @@ def reset_state():
 
 @app.route("/api/reset-opt", methods=["POST"])
 def reset_opt_state():
+    sid, s = _get_session()
+    opt_st = s["opt_state"]
     with _lock:
-        opt_state.update({
+        opt_st.update({
             "status": "idle",
             "generation": 0,
             "error": "",
@@ -2074,21 +2169,27 @@ def reset_opt_state():
 
 @app.route("/api/stop-opt", methods=["POST"])
 def stop_opt_state():
+    sid, s = _get_session()
+    opt_st = s["opt_state"]
     with _lock:
-        if opt_state["status"] == "running":
-            opt_state["stop_requested"] = True
+        if opt_st["status"] == "running":
+            opt_st["stop_requested"] = True
     return jsonify({"status": "stop_requested"})
 
 
-def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol=0.0025, term_period=30, max_price=None):
+def _run_nsga2(sid, weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max_gen, ftol=0.0025, term_period=30, max_price=None):
     """Run NSGA-II optimization using the loaded dataset."""
+    s = _get_session_by_sid(sid)
+    opt_st = s["opt_state"]
+    ds = s["dataset"]
+
     cb = None  # Keep callback accessible for early-stop result extraction
     problem = None
     try:
         with _lock:
             # Use direct references — these arrays are read-only during optimization
-            selectivities = dataset["selectivities"]
-            prices = dataset["prices"]
+            selectivities = ds["selectivities"]
+            prices = ds["prices"]
 
         # Create problem (stores its own reference to selectivities/prices)
         problem = DrugLibraryProblem(
@@ -2104,7 +2205,7 @@ def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max
         del selectivities, prices
 
         # Run optimization
-        cb = WebappCallback(problem)
+        cb = WebappCallback(problem, opt_st)
         res, elapsed_time = run_optimization(
             problem, X_init,
             pop_size=pop_size, seed=1,
@@ -2125,34 +2226,37 @@ def _run_nsga2(weight_mean, allowed_miss_pct, mutation_multiplier, pop_size, max
         res_F = res.F.copy()
         del res
 
-        _process_and_store_results(res_X, res_F, best_idx, front, problem, max_price=max_price)
+        _process_and_store_results(sid, res_X, res_F, best_idx, front, problem, max_price=max_price)
 
         with _lock:
-            opt_state["status"] = "complete"
+            opt_st["status"] = "complete"
 
     except StopOptimization:
         # Early stop: extract results from the callback's saved population snapshot
         if cb is not None and cb.last_pop_X is not None and problem is not None:
             try:
-                _process_stopped_results(cb, problem, max_price=max_price)
+                _process_stopped_results(sid, cb, problem, max_price=max_price)
             except Exception as inner_e:
                 with _lock:
-                    opt_state["status"] = "error"
-                    opt_state["error"] = f"Stopped, but failed to process partial results: {inner_e}"
+                    opt_st["status"] = "error"
+                    opt_st["error"] = f"Stopped, but failed to process partial results: {inner_e}"
                 traceback.print_exc()
         else:
             with _lock:
-                opt_state["status"] = "error"
-                opt_state["error"] = "Optimization stopped before any generation completed."
+                opt_st["status"] = "error"
+                opt_st["error"] = "Optimization stopped before any generation completed."
     except Exception as e:
         with _lock:
-            opt_state["status"] = "error"
-            opt_state["error"] = str(e)
+            opt_st["status"] = "error"
+            opt_st["error"] = str(e)
         traceback.print_exc()
 
 
-def _process_stopped_results(cb, problem, max_price=None):
+def _process_stopped_results(sid, cb, problem, max_price=None):
     """Build and store results from the callback's population snapshot after early stop."""
+    s = _get_session_by_sid(sid)
+    opt_st = s["opt_state"]
+
     # Filter to feasible solutions (constraint G <= 0)
     G = cb.last_pop_G
     F = cb.last_pop_F
@@ -2171,10 +2275,10 @@ def _process_stopped_results(cb, problem, max_price=None):
     res_light = _LightResult(res_X, res_F)
     best_idx, front = select_best_solution(res_light, problem)
 
-    _process_and_store_results(res_X, res_F, best_idx, front, problem, max_price=max_price)
+    _process_and_store_results(sid, res_X, res_F, best_idx, front, problem, max_price=max_price)
 
     with _lock:
-        opt_state["status"] = "complete"
+        opt_st["status"] = "complete"
 
 
 def _find_knee_point(front):
@@ -2215,8 +2319,11 @@ def _find_knee_point(front):
     return 0
 
 
-def _process_and_store_results(res_X, res_F, best_idx, front, problem, max_price=None):
+def _process_and_store_results(sid, res_X, res_F, best_idx, front, problem, max_price=None):
     """Common result processing shared by normal completion and early stop."""
+    s = _get_session_by_sid(sid)
+    ds = s["dataset"]
+    opt_res = s["opt_results"]
 
     # ── Post-optimization price filter ──
     # Instead of constraining the optimizer (which impoverishes its gene pool),
@@ -2238,15 +2345,15 @@ def _process_and_store_results(res_X, res_F, best_idx, front, problem, max_price
 
     # Load matrix from CSV on demand (avoids keeping large DataFrame resident)
     with _lock:
-        matrix_file = dataset["matrix_file"]
+        matrix_file = ds["matrix_file"]
     matrix_df_indexed = pd.read_csv(matrix_file).set_index("SMILES")
 
     # Wrap in lightweight result for save_results compatibility
     res_light = _LightResult(res_X, res_F)
 
-    # Save results
-    output_dir = PROJECT_ROOT / "webapp" / "output"
-    output_dir.mkdir(exist_ok=True)
+    # Save results to per-session output directory
+    output_dir = PROJECT_ROOT / "webapp" / "output" / sid
+    output_dir.mkdir(parents=True, exist_ok=True)
     winning_file = str(output_dir / "winning_library.xlsx")
 
     winning_smiles, selected_drug_indices, winning_matrix_df = save_results(
@@ -2256,25 +2363,26 @@ def _process_and_store_results(res_X, res_F, best_idx, front, problem, max_price
     del matrix_df_indexed  # Free immediately
 
     # Calculate comparison metrics
-    comparison = _build_comparison(winning_matrix_df, problem)
+    has_custom_affinity = ds.get("has_custom_affinity", False)
+    comparison = _build_comparison(winning_matrix_df, problem, has_custom_affinity)
 
     # Store results
     with _lock:
-        opt_results["pareto_front"] = front.tolist()
-        opt_results["best_idx"] = int(best_idx)
-        opt_results["selected_idx"] = int(best_idx)
-        opt_results["comparison"] = comparison
-        opt_results["winning_matrix_df"] = winning_matrix_df
-        opt_results["winning_file"] = winning_file
-        opt_results["res_X"] = res_X
-        opt_results["res_F"] = res_F
-        opt_results["problem"] = problem
-        opt_results["heatmap_cache"] = _build_heatmap_cache(winning_matrix_df)
-        opt_results["weight_mean"] = round(float(problem.weight_mean), 4) if hasattr(problem, "weight_mean") else 0.5
-        opt_results["weight_min"] = round(float(problem.weight_min), 4) if hasattr(problem, "weight_min") else 0.5
+        opt_res["pareto_front"] = front.tolist()
+        opt_res["best_idx"] = int(best_idx)
+        opt_res["selected_idx"] = int(best_idx)
+        opt_res["comparison"] = comparison
+        opt_res["winning_matrix_df"] = winning_matrix_df
+        opt_res["winning_file"] = winning_file
+        opt_res["res_X"] = res_X
+        opt_res["res_F"] = res_F
+        opt_res["problem"] = problem
+        opt_res["heatmap_cache"] = _build_heatmap_cache(winning_matrix_df)
+        opt_res["weight_mean"] = round(float(problem.weight_mean), 4) if hasattr(problem, "weight_mean") else 0.5
+        opt_res["weight_min"] = round(float(problem.weight_min), 4) if hasattr(problem, "weight_min") else 0.5
 
 
-def _build_comparison(winning_matrix_df, problem):
+def _build_comparison(winning_matrix_df, problem, has_custom_affinity=False):
     """Build comparison metrics dict (mirroring print_comparison logic)."""
     pool_total_cost = problem.pool_total_cost
     pool_mean_sel = problem.pool_mean_sel
@@ -2307,7 +2415,6 @@ def _build_comparison(winning_matrix_df, problem):
 
 
 
-    has_custom_affinity = dataset.get("has_custom_affinity", False)
     compounds_list = []
     for idx, row in winning_matrix_df.iterrows():
         name = row.get("Compound_Name", "")
@@ -2368,31 +2475,35 @@ def _build_comparison(winning_matrix_df, problem):
 
 @app.route("/api/results")
 def get_results():
+    sid, s = _get_session()
+    opt_res = s["opt_results"]
     with _lock:
-        if opt_results["comparison"] is None:
+        if opt_res["comparison"] is None:
             return jsonify({"error": "No results available yet"}), 404
         return jsonify({
-            "comparison": opt_results["comparison"],
-            "best_idx": opt_results["best_idx"],
+            "comparison": opt_res["comparison"],
+            "best_idx": opt_res["best_idx"],
         })
 
 
 @app.route("/api/pareto-data")
 def pareto_data():
+    sid, s = _get_session()
+    opt_res = s["opt_results"]
     with _lock:
-        if opt_results["pareto_front"] is None:
+        if opt_res["pareto_front"] is None:
             return jsonify({"error": "No Pareto data available"}), 404
-        front = opt_results["pareto_front"]
-        best = opt_results["best_idx"]
-        selected = opt_results.get("selected_idx", best)
-        problem = opt_results.get("problem")
-        weight_mean = opt_results.get("weight_mean")
+        front = opt_res["pareto_front"]
+        best = opt_res["best_idx"]
+        selected = opt_res.get("selected_idx", best)
+        problem = opt_res.get("problem")
+        weight_mean = opt_res.get("weight_mean")
         if weight_mean is None and problem and hasattr(problem, "weight_mean"):
             weight_mean = round(float(problem.weight_mean), 4)
         elif weight_mean is None:
             weight_mean = 0.5
 
-        weight_min = opt_results.get("weight_min")
+        weight_min = opt_res.get("weight_min")
         if weight_min is None and problem and hasattr(problem, "weight_min"):
             weight_min = round(float(problem.weight_min), 4)
         elif weight_min is None:
@@ -2409,15 +2520,19 @@ def pareto_data():
 @app.route("/api/select-solution", methods=["POST"])
 def select_solution():
     """Switch the active solution to a different Pareto front point."""
+    sid, s = _get_session()
+    opt_res = s["opt_results"]
+    ds = s["dataset"]
+
     data = request.get_json()
     idx = data.get("index")
     if idx is None:
         return jsonify({"error": "Missing 'index' parameter"}), 400
 
     with _lock:
-        res_X = opt_results.get("res_X")
-        problem = opt_results.get("problem")
-        matrix_file = dataset.get("matrix_file")
+        res_X = opt_res.get("res_X")
+        problem = opt_res.get("problem")
+        matrix_file = ds.get("matrix_file")
 
     if res_X is None or problem is None or matrix_file is None:
         return jsonify({"error": "No optimization results available"}), 404
@@ -2429,10 +2544,11 @@ def select_solution():
     try:
         # Load matrix from CSV on demand (avoids keeping large DataFrame resident)
         matrix_df_indexed = pd.read_csv(matrix_file).set_index("SMILES")
-        res_light = _LightResult(res_X, opt_results.get("res_F"))
+        res_light = _LightResult(res_X, opt_res.get("res_F"))
 
-        output_dir = PROJECT_ROOT / "webapp" / "output"
-        output_dir.mkdir(exist_ok=True)
+        # Save to per-session output directory
+        output_dir = PROJECT_ROOT / "webapp" / "output" / sid
+        output_dir.mkdir(parents=True, exist_ok=True)
         winning_file = str(output_dir / "winning_library.xlsx")
 
         winning_smiles, selected_drug_indices, winning_matrix_df = save_results(
@@ -2441,14 +2557,15 @@ def select_solution():
         )
         del matrix_df_indexed  # Free immediately
 
-        comparison = _build_comparison(winning_matrix_df, problem)
+        has_custom_affinity = ds.get("has_custom_affinity", False)
+        comparison = _build_comparison(winning_matrix_df, problem, has_custom_affinity)
 
         with _lock:
-            opt_results["selected_idx"] = int(idx)
-            opt_results["comparison"] = comparison
-            opt_results["winning_matrix_df"] = winning_matrix_df
-            opt_results["winning_file"] = winning_file
-            opt_results["heatmap_cache"] = _build_heatmap_cache(winning_matrix_df)
+            opt_res["selected_idx"] = int(idx)
+            opt_res["comparison"] = comparison
+            opt_res["winning_matrix_df"] = winning_matrix_df
+            opt_res["winning_file"] = winning_file
+            opt_res["heatmap_cache"] = _build_heatmap_cache(winning_matrix_df)
 
         return jsonify({"ok": True, "selected_idx": idx})
 
@@ -2564,13 +2681,15 @@ def _build_heatmap_cache(df):
 
 @app.route("/api/heatmap-data")
 def heatmap_data():
+    sid, s = _get_session()
+    opt_res = s["opt_results"]
     with _lock:
-        if opt_results["winning_matrix_df"] is None:
+        if opt_res["winning_matrix_df"] is None:
             return jsonify({"error": "No heatmap data available"}), 404
-        cache = opt_results.get("heatmap_cache")
+        cache = opt_res.get("heatmap_cache")
         if cache:
             return jsonify(cache)
-        df = opt_results["winning_matrix_df"]
+        df = opt_res["winning_matrix_df"]
 
     # Fallback: compute on the fly
     sel_cols = [c for c in df.columns if c not in {"Compound_Name", "Molecule_ChEMBL_ID", "SMILES", "Price_USD_per_mg", "InChIKey"}]
@@ -2588,8 +2707,10 @@ def heatmap_data():
 
 @app.route("/api/download/library")
 def download_library():
+    sid, s = _get_session()
+    opt_res = s["opt_results"]
     with _lock:
-        path = opt_results.get("winning_file")
+        path = opt_res.get("winning_file")
     if path and os.path.isfile(path):
         return send_file(path, as_attachment=True, download_name="winning_library.xlsx")
     return jsonify({"error": "No library file available"}), 404
@@ -2597,8 +2718,10 @@ def download_library():
 
 @app.route("/api/download/matrix")
 def download_matrix():
+    sid, s = _get_session()
+    ds = s["dataset"]
     with _lock:
-        csv_path = dataset.get("matrix_file")
+        csv_path = ds.get("matrix_file")
 
     if not (csv_path and os.path.isfile(csv_path)):
         return jsonify({"error": "No matrix file available"}), 404
