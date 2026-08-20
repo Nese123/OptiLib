@@ -79,6 +79,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 window.addEventListener('DOMContentLoaded', async () => {
     setupModeSwitcher();
     setupPriceUpload();
+    setupOptSettings();
 
     // Restore UI if we have saved files
     if (uploadMode === 'target') {
@@ -160,6 +161,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 function goToStep(step) {
     currentStep = step;
     sessionStorage.setItem('currentStep', step);
+
+    if (step === 3) {
+        restoreOptSettings();
+    }
 
     // Update step sections
     $$('.step-section').forEach((s) => s.classList.remove('active'));
@@ -1644,6 +1649,269 @@ function updateHistoryChart(history) {
     }
 }
 
+// ─── Optimization Settings Persistence ───
+function saveOptSettings() {
+    try {
+        const ftolEl = $('#ftol');
+        const maxPriceToggleEl = $('#maxPriceToggle');
+        const maxPriceValEl = $('#maxPriceValue');
+        const advToggleEl = $('#advancedSettingsToggle');
+        const popSizeEl = $('#popSize');
+        const mutEl = $('#mutationMultiplier');
+        const maxGenEl = $('#maxGen');
+        const termEl = $('#termPeriod');
+
+        const settings = {
+            weightMean: weightMean ? weightMean.value : '0.5',
+            weightMin: weightMin ? weightMin.value : '0.5',
+            allowedMiss: allowedMiss ? allowedMiss.value : '10',
+            ftol: ftolEl ? ftolEl.value : '0.0025',
+            maxPriceEnabled: maxPriceToggleEl ? maxPriceToggleEl.checked : false,
+            maxPriceValue: maxPriceValEl ? maxPriceValEl.value : '1000',
+            advancedSettingsEnabled: advToggleEl ? advToggleEl.checked : false,
+            popSize: popSizeEl ? popSizeEl.value : '100',
+            mutationMultiplier: mutEl ? mutEl.value : '1.0',
+            maxGen: maxGenEl ? maxGenEl.value : '1000',
+            termPeriod: termEl ? termEl.value : '30',
+        };
+        localStorage.setItem('optilib_opt_settings', JSON.stringify(settings));
+    } catch (e) {
+        console.error('Failed to save optimization settings', e);
+    }
+}
+
+function restoreOptSettings() {
+    try {
+        const saved = localStorage.getItem('optilib_opt_settings');
+        if (!saved) return;
+        const settings = JSON.parse(saved);
+        if (!settings || typeof settings !== 'object') return;
+
+        if (settings.weightMean !== undefined && weightMean && weightMeanValue) {
+            const val = parseFloat(settings.weightMean);
+            if (!isNaN(val)) {
+                const clamped = Math.max(0, Math.min(1, val));
+                weightMean.value = clamped.toFixed(1);
+                weightMeanValue.value = clamped.toFixed(1);
+                if (weightMin && weightMinValue) {
+                    weightMin.value = (1 - clamped).toFixed(1);
+                    weightMinValue.value = (1 - clamped).toFixed(1);
+                }
+                updateFormula();
+            }
+        }
+
+        if (settings.allowedMiss !== undefined && allowedMiss && allowedMissValue) {
+            const val = parseInt(settings.allowedMiss, 10);
+            if (!isNaN(val)) {
+                const clamped = Math.max(0, Math.min(20, val));
+                allowedMiss.value = clamped;
+                allowedMissValue.value = clamped;
+            }
+        }
+
+        const ftolEl = $('#ftol');
+        if (settings.ftol !== undefined && ftolEl) {
+            const val = parseFloat(settings.ftol);
+            if (!isNaN(val)) {
+                ftolEl.value = val;
+            }
+        }
+
+        const maxPriceToggleEl = $('#maxPriceToggle');
+        const maxPriceContainer = $('#maxPriceInputContainer');
+        if (settings.maxPriceEnabled !== undefined && maxPriceToggleEl) {
+            maxPriceToggleEl.checked = !!settings.maxPriceEnabled;
+            if (maxPriceContainer) {
+                maxPriceContainer.style.display = maxPriceToggleEl.checked ? 'block' : 'none';
+            }
+        }
+
+        const maxPriceValEl = $('#maxPriceValue');
+        if (settings.maxPriceValue !== undefined && maxPriceValEl) {
+            const val = parseFloat(settings.maxPriceValue);
+            if (!isNaN(val)) {
+                maxPriceValEl.value = val;
+            }
+        }
+
+        const advToggleEl = $('#advancedSettingsToggle');
+        const advContainer = $('#advancedSettingsContainer');
+        if (settings.advancedSettingsEnabled !== undefined && advToggleEl) {
+            advToggleEl.checked = !!settings.advancedSettingsEnabled;
+            if (advContainer) {
+                advContainer.style.display = advToggleEl.checked ? 'block' : 'none';
+            }
+        }
+
+        const popSizeEl = $('#popSize');
+        if (settings.popSize !== undefined && popSizeEl) {
+            const val = parseInt(settings.popSize, 10);
+            if (!isNaN(val)) popSizeEl.value = val;
+        }
+
+        const mutEl = $('#mutationMultiplier');
+        if (settings.mutationMultiplier !== undefined && mutEl) {
+            const val = parseFloat(settings.mutationMultiplier);
+            if (!isNaN(val)) mutEl.value = val;
+        }
+
+        const maxGenEl = $('#maxGen');
+        if (settings.maxGen !== undefined && maxGenEl) {
+            const val = parseInt(settings.maxGen, 10);
+            if (!isNaN(val)) maxGenEl.value = val;
+        }
+
+        const termEl = $('#termPeriod');
+        if (settings.termPeriod !== undefined && termEl) {
+            const val = parseInt(settings.termPeriod, 10);
+            if (!isNaN(val)) termEl.value = val;
+        }
+    } catch (e) {
+        console.error('Failed to restore optimization settings', e);
+    }
+}
+
+function setupOptSettings() {
+    restoreOptSettings();
+
+    // Weight Mean & Min listeners
+    weightMean.addEventListener('input', () => {
+        let val = parseFloat(weightMean.value);
+        weightMeanValue.value = val.toFixed(1);
+        weightMin.value = (1 - val).toFixed(1);
+        weightMinValue.value = (1 - val).toFixed(1);
+        updateFormula();
+        saveOptSettings();
+    });
+
+    weightMeanValue.addEventListener('input', () => {
+        let val = parseFloat(weightMeanValue.value);
+        if (!isNaN(val)) {
+            weightMean.value = val.toFixed(1);
+            weightMin.value = (1 - val).toFixed(1);
+            weightMinValue.value = (1 - val).toFixed(1);
+            updateFormula();
+            saveOptSettings();
+        }
+    });
+
+    weightMeanValue.addEventListener('change', () => {
+        let val = parseFloat(weightMeanValue.value);
+        if (!isNaN(val)) {
+            val = Math.max(0, Math.min(1, val));
+            weightMeanValue.value = val.toFixed(1);
+            weightMean.value = val.toFixed(1);
+            weightMin.value = (1 - val).toFixed(1);
+            weightMinValue.value = (1 - val).toFixed(1);
+            updateFormula();
+            saveOptSettings();
+        }
+    });
+
+    weightMin.addEventListener('input', () => {
+        let val = parseFloat(weightMin.value);
+        weightMinValue.value = val.toFixed(1);
+        weightMean.value = (1 - val).toFixed(1);
+        weightMeanValue.value = (1 - val).toFixed(1);
+        updateFormula();
+        saveOptSettings();
+    });
+
+    weightMinValue.addEventListener('input', () => {
+        let val = parseFloat(weightMinValue.value);
+        if (!isNaN(val)) {
+            weightMin.value = val.toFixed(1);
+            weightMean.value = (1 - val).toFixed(1);
+            weightMeanValue.value = (1 - val).toFixed(1);
+            updateFormula();
+            saveOptSettings();
+        }
+    });
+
+    weightMinValue.addEventListener('change', () => {
+        let val = parseFloat(weightMinValue.value);
+        if (!isNaN(val)) {
+            val = Math.max(0, Math.min(1, val));
+            weightMinValue.value = val.toFixed(1);
+            weightMin.value = val.toFixed(1);
+            weightMean.value = (1 - val).toFixed(1);
+            weightMeanValue.value = (1 - val).toFixed(1);
+            updateFormula();
+            saveOptSettings();
+        }
+    });
+
+    // Allowed Miss listeners
+    allowedMiss.addEventListener('input', () => {
+        allowedMissValue.value = parseInt(allowedMiss.value);
+        saveOptSettings();
+    });
+
+    allowedMissValue.addEventListener('input', () => {
+        let val = Math.round(parseFloat(allowedMissValue.value));
+        if (!isNaN(val)) {
+            allowedMiss.value = val;
+            saveOptSettings();
+        }
+    });
+
+    allowedMissValue.addEventListener('change', () => {
+        let val = Math.round(parseFloat(allowedMissValue.value));
+        if (!isNaN(val)) {
+            val = Math.max(0, Math.min(20, val));
+            allowedMissValue.value = val;
+            allowedMiss.value = val;
+            saveOptSettings();
+        }
+    });
+
+    // F-Tolerance
+    const ftolEl = $('#ftol');
+    if (ftolEl) {
+        ftolEl.addEventListener('input', saveOptSettings);
+        ftolEl.addEventListener('change', saveOptSettings);
+    }
+
+    // Maximum Price Limit
+    const maxPriceToggleEl = $('#maxPriceToggle');
+    const maxPriceContainer = $('#maxPriceInputContainer');
+    if (maxPriceToggleEl) {
+        maxPriceToggleEl.addEventListener('change', (e) => {
+            if (maxPriceContainer) {
+                maxPriceContainer.style.display = e.target.checked ? 'block' : 'none';
+            }
+            saveOptSettings();
+        });
+    }
+
+    const maxPriceValEl = $('#maxPriceValue');
+    if (maxPriceValEl) {
+        maxPriceValEl.addEventListener('input', saveOptSettings);
+        maxPriceValEl.addEventListener('change', saveOptSettings);
+    }
+
+    // Advanced Settings
+    const advToggleEl = $('#advancedSettingsToggle');
+    const advContainer = $('#advancedSettingsContainer');
+    if (advToggleEl) {
+        advToggleEl.addEventListener('change', (e) => {
+            if (advContainer) {
+                advContainer.style.display = e.target.checked ? 'block' : 'none';
+            }
+            saveOptSettings();
+        });
+    }
+
+    ['#popSize', '#mutationMultiplier', '#maxGen', '#termPeriod'].forEach(sel => {
+        const el = $(sel);
+        if (el) {
+            el.addEventListener('input', saveOptSettings);
+            el.addEventListener('change', saveOptSettings);
+        }
+    });
+}
+
 // Formula display helper
 function updateFormula() {
     const fMean = document.getElementById('formulaWeightMean');
@@ -1651,87 +1919,6 @@ function updateFormula() {
     if (fMean) fMean.textContent = parseFloat(weightMean.value).toFixed(1);
     if (fMin) fMin.textContent = parseFloat(weightMin.value).toFixed(1);
 }
-
-// Slider displays
-weightMean.addEventListener('input', () => {
-    let val = parseFloat(weightMean.value);
-    weightMeanValue.value = val.toFixed(1);
-    weightMin.value = (1 - val).toFixed(1);
-    weightMinValue.value = (1 - val).toFixed(1);
-    updateFormula();
-});
-
-weightMeanValue.addEventListener('input', () => {
-    let val = parseFloat(weightMeanValue.value);
-    if (!isNaN(val)) {
-        weightMean.value = val.toFixed(1);
-        weightMin.value = (1 - val).toFixed(1);
-        weightMinValue.value = (1 - val).toFixed(1);
-        updateFormula();
-    }
-});
-
-weightMeanValue.addEventListener('change', () => {
-    let val = parseFloat(weightMeanValue.value);
-    if (!isNaN(val)) {
-        val = Math.max(0, Math.min(1, val));
-        weightMeanValue.value = val.toFixed(1);
-        weightMean.value = val.toFixed(1);
-        weightMin.value = (1 - val).toFixed(1);
-        weightMinValue.value = (1 - val).toFixed(1);
-        updateFormula();
-    }
-});
-
-weightMin.addEventListener('input', () => {
-    let val = parseFloat(weightMin.value);
-    weightMinValue.value = val.toFixed(1);
-    weightMean.value = (1 - val).toFixed(1);
-    weightMeanValue.value = (1 - val).toFixed(1);
-    updateFormula();
-});
-
-weightMinValue.addEventListener('input', () => {
-    let val = parseFloat(weightMinValue.value);
-    if (!isNaN(val)) {
-        weightMin.value = val.toFixed(1);
-        weightMean.value = (1 - val).toFixed(1);
-        weightMeanValue.value = (1 - val).toFixed(1);
-        updateFormula();
-    }
-});
-
-weightMinValue.addEventListener('change', () => {
-    let val = parseFloat(weightMinValue.value);
-    if (!isNaN(val)) {
-        val = Math.max(0, Math.min(1, val));
-        weightMinValue.value = val.toFixed(1);
-        weightMin.value = val.toFixed(1);
-        weightMean.value = (1 - val).toFixed(1);
-        weightMeanValue.value = (1 - val).toFixed(1);
-        updateFormula();
-    }
-});
-
-allowedMiss.addEventListener('input', () => {
-    allowedMissValue.value = parseInt(allowedMiss.value);
-});
-
-allowedMissValue.addEventListener('input', () => {
-    let val = Math.round(parseFloat(allowedMissValue.value));
-    if (!isNaN(val)) {
-        allowedMiss.value = val;
-    }
-});
-
-allowedMissValue.addEventListener('change', () => {
-    let val = Math.round(parseFloat(allowedMissValue.value));
-    if (!isNaN(val)) {
-        val = Math.max(0, Math.min(20, val));
-        allowedMissValue.value = val;
-        allowedMiss.value = val;
-    }
-});
 
 async function loadDatasetInfo() {
     try {
@@ -1764,6 +1951,7 @@ $('#stopOptBtn').addEventListener('click', async () => {
 
 // Run Optimization
 runOptBtn.addEventListener('click', async () => {
+    saveOptSettings();
     runOptBtn.disabled = true;
     runOptBtn.style.display = 'none';
     $('#stopOptBtn').style.display = 'inline-flex';
@@ -1973,6 +2161,9 @@ async function resetAllState() {
     $('#seeResultsBtn').style.display = 'none';
     $('#optCompleteBanner').style.display = 'none';
     $('#optCompleteBanner').classList.remove('visible');
+
+    // Ensure configured optimization settings stay preserved
+    restoreOptSettings();
 
     // Re-render based on current mode
     if (uploadMode === 'target') {
