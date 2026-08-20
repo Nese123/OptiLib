@@ -164,7 +164,8 @@
                             ChEMBL IDs, SMILES Strings, or InChIKeys for compound IDs</div>
                         <input type="file" id="priceFileInput" accept=".csv,.xlsx,.xls" multiple>
                     </div>
-                    <div id="priceFileInfo" style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
+                    <div id="priceFileInfo"
+                        style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
                     </div>
 
                     <div id="priceRemoveAllBtnContainer" style="display: none; margin-top: 0.75rem; text-align: right;">
@@ -184,7 +185,8 @@
                     </div>
 
                     <!-- Price Validation / Summary -->
-                    <div class="validation-summary" id="priceValidationSummary" style="display: none; margin-top: 1rem;">
+                    <div class="validation-summary" id="priceValidationSummary"
+                        style="display: none; margin-top: 1rem;">
                         <div class="validation-row matched" id="priceMatchedRow">
                             <span>✅</span>
                             <span id="priceMatchedCount">0 unique prices loaded</span>
@@ -381,13 +383,17 @@
                         <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;">
                             <input type="checkbox" id="maxPriceToggle" style="margin: 0;">
                             <label for="maxPriceToggle" style="margin: 0; font-size: 0.9em; cursor: pointer;">Maximum
-                                Price Limit (USD)
+                                Price Limit
                                 <span class="info-icon"
                                     data-tooltip="When enabled, filters the Pareto front to only show solutions whose total library cost stays below the specified amount.">?</span></label>
                         </div>
                         <div id="maxPriceInputContainer" style="display: none; margin-top: 10px;">
-                            <input type="number" id="maxPriceValue" value="10000" step="100" min="1"
-                                placeholder="e.g. 10000" style="width: 50%;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <input type="number" id="maxPriceValue" value="1000" step="100" min="1"
+                                    placeholder="e.g. 1000" style="width: 140px;">
+                                <span
+                                    style="color: var(--text-secondary); font-size: 0.95rem; font-family: 'JetBrains Mono', monospace; font-weight: 500;">$</span>
+                            </div>
                         </div>
                     </div>
 

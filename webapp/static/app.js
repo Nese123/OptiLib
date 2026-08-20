@@ -1075,7 +1075,7 @@ function renderAffinityFiles() {
         leftSide.style.gap = '0.75rem';
 
         const iconSpan = document.createElement('span');
-        iconSpan.textContent = '🧪';
+        iconSpan.textContent = '📎';
         const textSpan = document.createElement('span');
         textSpan.textContent = fileData.name;
 
