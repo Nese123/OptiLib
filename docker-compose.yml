@@ -1,0 +1,19 @@
+services:
+  optilib:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: optilib
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount the local database directory containing chembl_36.db and molport.db (~32GB)
+      - ./database:/app/database
+      # Persist generated outputs (Excel files, Pareto plots, etc.) on host
+      - ./webapp/output:/app/webapp/output
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PYTHONUNBUFFERED=1

@@ -1,0 +1,41 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Git & IDE files
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Large database files (mount these via Docker volumes instead of baking into image)
+database/*.db
+database/*.db*
+database/*.sqlite*
+
+# Output files (mount as volume to persist output on host)
+webapp/output/*
+
+# Local environment files
+.env
+
+# System artifacts
+.DS_Store
+Thumbs.db
