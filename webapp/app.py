@@ -11,7 +11,6 @@ import uuid
 import sqlite3
 import threading
 import warnings
-import tempfile
 import traceback
 from pathlib import Path
 
@@ -173,7 +172,6 @@ class WebappCallback(Callback):
         self.last_pop_G = None
 
     def notify(self, algorithm):
-        import numpy as np
 
         # Always snapshot the current population before any stop check,
         # so if we stop we have the latest state available.
@@ -645,7 +643,6 @@ def tool():
 @app.route("/api/upload-targets", methods=["POST"])
 def upload_targets():
     """Accept CSV/Excel with target names/IDs, validate against ChEMBL."""
-    import sqlite3
 
     sid, s = _get_session()
     pipeline_st = s["pipeline_state"]
@@ -1422,7 +1419,6 @@ def _update_pipeline(sid, step, label, detail="", summary=None):
 
 def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, matched_count=0):
     """Full pipeline: ChEMBL → pChEMBL rescue → selectivity → prices → save."""
-    import sqlite3
     import hashlib
 
     s = _get_session_by_sid(sid)
@@ -2395,7 +2391,6 @@ def _build_comparison(winning_matrix_df, problem, has_custom_affinity=False):
     lib_prices = winning_matrix_df["Price_USD_per_mg"].to_numpy(dtype=float)
 
     lib_total_cost = float(np.sum(lib_prices))
-    import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
         lib_best_per_target = np.nanmax(lib_sel_matrix, axis=0)
@@ -2412,8 +2407,6 @@ def _build_comparison(winning_matrix_df, problem, has_custom_affinity=False):
     min_sel_pct = (lib_min_sel / pool_min_sel * 100) if pool_min_sel else 0
     tgt_pct = (lib_num_targets / pool_num_targets * 100) if pool_num_targets else 0
     cmp_pct = (lib_num_drugs / problem.pool_num_drugs * 100) if problem.pool_num_drugs else 0
-
-
 
     compounds_list = []
     for idx, row in winning_matrix_df.iterrows():

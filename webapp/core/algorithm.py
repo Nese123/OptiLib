@@ -8,7 +8,6 @@ from pymoo.operators.mutation.bitflip import BitflipMutation
 from pymoo.optimize import minimize
 from pymoo.termination.default import DefaultMultiObjectiveTermination
 from pymoo.visualization.scatter import Scatter
-import matplotlib.pyplot as plt
 from pymoo.operators.crossover.pntx import SinglePointCrossover
 from pymoo.operators.crossover.pntx import TwoPointCrossover
 from pathlib import Path
@@ -288,8 +287,6 @@ def select_best_solution(res, problem):
     front[:, 0] *= -problem.pool_baseline_score   # Undo negation + normalization → real selectivity
     front[:, 1] *= problem.pool_total_cost  # Undo normalization → real cost (USD)
 
-    front_for_plotting = front.copy()
-
     # Initialize the Scatter plot
     w_mean = round(float(problem.weight_mean), 4) if hasattr(problem, "weight_mean") else 0.5
     w_min = round(float(problem.weight_min), 4) if hasattr(problem, "weight_min") else 0.5
@@ -297,7 +294,7 @@ def select_best_solution(res, problem):
         title="Pareto Front",
         labels=[f"Selectivity Score ({w_mean} * Mean Selectivity + {w_min} * Min Selectivity)", "Total Library Cost"]
     )
-    plot.add(front_for_plotting, color="green", facecolor="none", s=40)
+    plot.add(front, color="green", facecolor="none", s=40)
 
     # Format the cost axis (Y) with comma separators for readability
     import matplotlib.ticker as mticker
@@ -313,11 +310,11 @@ def select_best_solution(res, problem):
 
     # Normalize the PLOTTED values (selectivity score vs cost) to [0, 1]
     # so the knee-point calculation matches what is visually shown on the Pareto front.
-    min_vals = np.min(front_for_plotting, axis=0)
-    max_vals = np.max(front_for_plotting, axis=0)
+    min_vals = np.min(front, axis=0)
+    max_vals = np.max(front, axis=0)
     range_vals = max_vals - min_vals
     range_vals[range_vals == 0] = 1.0  # Avoid division by zero if all solutions share a value
-    norm_front = (front_for_plotting - min_vals) / range_vals
+    norm_front = (front - min_vals) / range_vals
 
     # Knee-point selection: Maximum Perpendicular Distance to the Secant Line (Chord method)
     # 1. Identify the extreme endpoints on the Pareto front (lowest and highest selectivity)

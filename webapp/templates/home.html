@@ -7,8 +7,12 @@
     <meta name="description"
         content="OptiLib — An intelligent drug library optimization platform using NSGA-II to maximize target selectivity while minimizing cost.">
     <title>OptiLib — Drug Library Optimization</title>
-    <link rel="stylesheet" href="/static/style.css?v=1.1">
-    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="/static/style.css?v=1.4">
+    <script src="https://cdn.plot.ly/plotly-cartesian-2.35.0.min.js" charset="utf-8" defer></script>
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%%22 y=%2250%%22 dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2280%22>💊</text></svg>">
 </head>
@@ -23,7 +27,7 @@
                 <span class="navbar-title"><span class="text-teal">Opti</span><span class="text-white">Lib</span></span>
             </a>
             <div class="navbar-links">
-                <a href="/" class="nav-link active">Home</a>
+                <a href="#" class="nav-link active" onclick="event.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' });">Home</a>
                 <a href="#set-up" class="nav-link">Set Up</a>
                 <a href="#optimization" class="nav-link">Optimization</a>
                 <a href="#visualizations" class="nav-link">Visualization</a>
@@ -38,7 +42,7 @@
         </div>
         <!-- Mobile menu -->
         <div class="navbar-mobile-menu" id="navMobileMenu">
-            <a href="/" class="nav-link active">Home</a>
+            <a href="#" class="nav-link active" onclick="event.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' });">Home</a>
             <a href="#set-up" class="nav-link">Set Up</a>
             <a href="#optimization" class="nav-link">Optimization</a>
             <a href="#visualizations" class="nav-link">Visualization</a>
@@ -82,126 +86,223 @@
         <div class="section-container">
             <div class="section-header">
                 <h2 class="section-title">Set Up</h2>
-                <p class="section-subtitle">Upload a target file with your targets of interest. OptiLib will find all
-                    compounds for the targets and construct a selectivity matrix for the optimization algorithm.</p>
+                <p class="section-subtitle">OptiLib supports flexible data uploads: automatically discover selective
+                    compounds from target lists via ChEMBL or upload custom bioactivity data.</p>
             </div>
 
-            <div class="setup-workflow-grid">
-                <!-- Step 1: Target Ingestion & Validation -->
-                <div class="setup-step-card" data-aos="fade-up">
-                    <div class="setup-card-top">
-                        <h3 class="setup-card-title">Target Upload & Validation</h3>
-                        <p class="setup-card-desc">
-                            Upload your biological targets of interest. OptiLib validates each entry against the ChEMBL
-                            database <a href="#references" class="citation-ref">[1]</a> in real time, resolving
-                            identifiers and confirming bioactivity assay coverage.
-                        </p>
+            <div class="setup-grid-container">
+                <!-- Tier 1: Primary Input Modes (2 Columns) -->
+                <div class="setup-tier-primary">
+                    <!-- Option A: Target List Ingestion -->
+                    <div class="setup-step-card setup-card-teal" data-aos="fade-up">
+                        <div class="setup-card-top">
+                            <h3 class="setup-card-title">Target Upload &amp; Validation</h3>
+                            <p class="setup-card-desc">
+                                Upload your biological targets of interest. OptiLib validates each entry against the
+                                ChEMBL
+                                database <a href="#references" class="citation-ref">[1]</a> in real time, discovering
+                                selective candidate compounds.
+                            </p>
+                        </div>
+
+                        <div class="setup-interactive-preview">
+                            <!-- Drop zone mockup -->
+                            <div class="setup-dropzone-mock setup-dropzone-teal">
+                                <div class="setup-dropzone-icon">
+                                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="17 8 12 3 7 8"></polyline>
+                                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                                    </svg>
+                                </div>
+                                <div class="setup-dropzone-title">Upload Target List</div>
+                                <div class="setup-dropzone-sub">Drop CSV or Excel (.xlsx) with a "Target" column</div>
+                                <div class="setup-format-badges">
+                                    <span>Target Name</span>
+                                    <span>ChEMBL ID</span>
+                                    <span>Gene Symbol</span>
+                                    <span>UniProt ID</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="setup-feature-list">
+                            <div class="setup-feat-item">
+                                <span class="setup-feat-bullet">•</span>
+                                <div><strong>Real-Time Target Validation:</strong> Direct database queries separate
+                                    matched targets from unrecognised entries before query processing.</div>
+                            </div>
+                            <div class="setup-feat-item">
+                                <span class="setup-feat-bullet">•</span>
+                                <div><strong>Compound Pool Search:</strong> OptiLib automatically searches ChEMBL for
+                                    compounds that have affinity data for provided targets and constructs a compounds x
+                                    targets selectivity matrix.</div>
+                            </div>
+                            <div class="setup-feat-item">
+                                <span class="setup-feat-bullet">•</span>
+                                <div><strong>Selectivity Filtering:</strong> Configurable threshold eliminates
+                                    non-selective compounds in the compound pool search.</div>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="setup-interactive-preview">
-                        <!-- Drop zone mockup -->
-                        <div class="setup-dropzone-mock">
-                            <div class="setup-dropzone-icon">
-                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                    <polyline points="17 8 12 3 7 8"></polyline>
-                                    <line x1="12" y1="3" x2="12" y2="15"></line>
-                                </svg>
-                            </div>
-                            <div class="setup-dropzone-title">Upload Target Files</div>
-                            <div class="setup-dropzone-sub">Drop CSV or Excel (.xlsx) containing a "Target" column</div>
-                            <div class="setup-format-badges">
-                                <span>Target Name</span>
-                                <span>ChEMBL ID</span>
-                                <span>Gene Symbol</span>
-                                <span>UniProt</span>
-                            </div>
+                    <!-- Option B: Custom Affinity Data Upload -->
+                    <div class="setup-step-card setup-card-purple" data-aos="fade-up">
+                        <div class="setup-card-top">
+                            <h3 class="setup-card-title">Custom Affinity Data Upload</h3>
+                            <p class="setup-card-desc">
+                                Upload your own pre-calculated bioactivity or experimental affinity measurements
+                                directly. OptiLib uses the provided affinity data directly in the optimization process.
+                            </p>
                         </div>
-                    </div>
 
-                    <div class="setup-feature-list">
-                        <div class="setup-feat-item">
-                            <span class="setup-feat-bullet">•</span>
-                            <div><strong>Flexible Input Formats:</strong> Upload one or more CSV or Excel (.xlsx) files.
-                                Multiple identification formats of targets are accepted.</div>
+                        <div class="setup-interactive-preview">
+                            <!-- Drop zone mockup for Affinity Data -->
+                            <div class="setup-dropzone-mock setup-dropzone-purple">
+                                <div class="setup-dropzone-icon">
+                                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                        <polyline points="14 2 14 8 20 8"></polyline>
+                                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                                        <polyline points="10 9 9 9 8 9"></polyline>
+                                    </svg>
+                                </div>
+                                <div class="setup-dropzone-title">Upload Affinity Dataset</div>
+                                <div class="setup-dropzone-sub">CSV or Excel (.xlsx) with "Compound", "Target" &amp;
+                                    "Affinity" (pKd) columns</div>
+
+                                <div class="setup-format-badges">
+                                    <span class="badge-group-label">Compounds:</span>
+                                    <span>Name</span>
+                                    <span>ChEMBL ID</span>
+                                    <span>SMILES</span>
+                                    <span>InChIKey</span>
+                                </div>
+                                <div class="setup-format-badges" style="margin-top: 0.35rem;">
+                                    <span class="badge-group-label">Targets:</span>
+                                    <span>Target Name</span>
+                                    <span>ChEMBL ID</span>
+                                    <span>Gene Symbol</span>
+                                    <span>UniProt</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="setup-feat-item">
-                            <span class="setup-feat-bullet">•</span>
-                            <div><strong>Automatic Validation:</strong> Real-time database queries separate matched and
-                                unmatched targets.</div>
-                        </div>
-                        <div class="setup-feat-item">
-                            <span class="setup-feat-bullet">•</span>
-                            <div><strong>Selectivity Cutoff:</strong> Configurable threshold eliminates non-selective
-                                compounds before matrix calculation begins.</div>
+
+                        <div class="setup-feature-list">
+                            <div class="setup-feat-item">
+                                <span class="setup-feat-bullet setup-bullet-purple">•</span>
+                                <div><strong>Direct Selectivity Matrix Calculation:</strong> Constructs the selectivity
+                                    matrix straight from the affinity data provided.
+                                </div>
+                            </div>
+                            <div class="setup-feat-item">
+                                <span class="setup-feat-bullet setup-bullet-purple">•</span>
+                                <div><strong>Flexible Identifiers:</strong> Accepts various identifiers for both
+                                    compounds and targets.</div>
+                            </div>
+                            <div class="setup-feat-item">
+                                <span class="setup-feat-bullet setup-bullet-purple">•</span>
+                                <div><strong>Multi-File Merging:</strong> Combine multiple assay screens; OptiLib merges
+                                    and deduplicates measurement points seamlessly.</div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Step 2: Selectivity Matrix & Pricing Pipeline -->
-                <div class="setup-step-card" data-aos="fade-up">
+                <!-- Tier 2: Compound Pricing Engine & Custom Price Uploads (Full Width) -->
+                <div class="setup-step-card setup-pricing-card setup-card-amber" data-aos="fade-up">
                     <div class="setup-card-top">
-                        <h3 class="setup-card-title">Selectivity Matrix & Pricing</h3>
+                        <h3 class="setup-card-title">Compound Pricing &amp; Custom Price Uploads</h3>
                         <p class="setup-card-desc">
-                            OptiLib queries the ChEMBL database <a href="#references" class="citation-ref">[1]</a> for
-                            selective candidate compounds, assigns a price to
-                            each compound, and builds the full
-                            compound × target selectivity matrix.
+                            OptiLib couples selectivity optimization with real-world price data. Every compound gets
+                            assigned a price from either the MolPort database with real prices or the price is predicted
+                            using MolPrice. Custom price data is also supported.
                         </p>
                     </div>
 
-                    <div class="setup-interactive-preview">
-                        <!-- Pipeline stages preview -->
-                        <div class="setup-pipeline-card">
-                            <div class="setup-pipeline-step-v2">
-                                <div class="setup-step-marker">✓</div>
-                                <div class="setup-step-body">
-                                    <div class="setup-step-heading">1. Selective Compound Search</div>
-                                    <div class="setup-step-sub">Scans the database for selective compounds
-                                        against given targets</div>
-                                </div>
+                    <div class="setup-pricing-split">
+                        <!-- Left Sub-panel: Price Hierarchy Pipeline -->
+                        <div class="setup-pricing-subpanel">
+                            <div class="setup-subpanel-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="m4.93 4.93 4.24 4.24"></path>
+                                    <path d="m14.83 9.17 4.24-4.24"></path>
+                                    <path d="m14.83 14.83 4.24 4.24"></path>
+                                    <path d="m9.17 14.83-4.24 4.24"></path>
+                                </svg>
+                                <span>Price Data Integration</span>
                             </div>
-                            <div class="setup-pipeline-step-v2">
-                                <div class="setup-step-marker">✓</div>
-                                <div class="setup-step-body">
-                                    <div class="setup-step-heading">2. Price Search</div>
-                                    <div class="setup-step-sub">Assigns a price for each compound
+                            <div class="setup-pipeline-card">
+                                <div class="setup-pipeline-step-v2 setup-pipe-amber">
+                                    <div class="setup-step-marker setup-marker-amber">1</div>
+                                    <div class="setup-step-body">
+                                        <div class="setup-step-heading">Custom Prices</div>
+                                        <div class="setup-step-sub">Uses uploaded custom compound prices for compounds
+                                            for which price data was uploaded.</div>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="setup-pipeline-step-v2">
-                                <div class="setup-step-marker">✓</div>
-                                <div class="setup-step-body">
-                                    <div class="setup-step-heading">3. Selectivity Matrix Formation</div>
-                                    <div class="setup-step-sub">Converts the data into a compounds × targets selectivity
-                                        matrix
+                                <div class="setup-pipeline-step-v2 setup-pipe-amber">
+                                    <div class="setup-step-marker setup-marker-amber">2</div>
+                                    <div class="setup-step-body">
+                                        <div class="setup-step-heading">MolPort Database Catalog</div>
+                                        <div class="setup-step-sub">For compounds with no custom price, queries the
+                                            MolPort commercial vendor inventory for
+                                            real-world supplier catalog prices <a href="#references"
+                                                class="citation-ref">[3]</a>.</div>
+                                    </div>
+                                </div>
+                                <div class="setup-pipeline-step-v2 setup-pipe-amber">
+                                    <div class="setup-step-marker setup-marker-amber">3</div>
+                                    <div class="setup-step-body">
+                                        <div class="setup-step-heading">MolPrice Predictive Model</div>
+                                        <div class="setup-step-sub">For compounds with no custom price and not in
+                                            MolPort, predicts prices directly from chemical structure using the MolPrice
+                                            machine learning model <a href="#references" class="citation-ref">[4]</a>.
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
 
-                    <div class="setup-feature-list">
-                        <div class="setup-feat-item">
-                            <span class="setup-feat-bullet">•</span>
-                            <div><strong>Automated Bioactivity Discovery:</strong> The algorithm uses target-specific
-                                selectivity
-                                scores <a href="#references" class="citation-ref">[2]</a> to discover selective
-                                compounds.</div>
-                        </div>
-                        <div class="setup-feat-item">
-                            <span class="setup-feat-bullet">•</span>
-                            <div><strong>Price Data:</strong> Uses the MolPort database <a href="#references"
-                                    class="citation-ref">[3]</a> to find real prices for
-                                compounds. If the compound is not on MolPort, the MolPrice machine learning model <a
-                                    href="#references" class="citation-ref">[4]</a> is
-                                used to predict prices from chemical structure.</div>
-                        </div>
-                        <div class="setup-feat-item">
-                            <span class="setup-feat-bullet">•</span>
-                            <div><strong>Compound × Target Matrix:</strong> Transforms the selectivity data into a
-                                standardized matrix ready for optimization.</div>
+                        <!-- Right Sub-panel: Custom Price Upload Dropzone Mock -->
+                        <div class="setup-pricing-subpanel">
+                            <div class="setup-subpanel-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="1" x2="12" y2="23"></line>
+                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                </svg>
+                                <span>Custom Compound Price Upload</span>
+                            </div>
+                            <div class="setup-dropzone-mock setup-dropzone-amber">
+                                <div class="setup-dropzone-icon">
+                                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="17 8 12 3 7 8"></polyline>
+                                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                                    </svg>
+                                </div>
+                                <div class="setup-dropzone-title">Upload Custom Price Files</div>
+                                <div class="setup-dropzone-sub">Drop CSV or Excel (.xlsx) with "Compound" and "Price"
+                                    (USD/mg) columns</div>
+                                <div class="setup-format-badges">
+                                    <span class="badge-group-label">Compounds:</span>
+                                    <span>Name</span>
+                                    <span>ChEMBL ID</span>
+                                    <span>SMILES</span>
+                                    <span>InChIKey</span>
+                                </div>
+                                <div class="setup-format-badges" style="margin-top: 0.35rem;">
+                                    <span class="badge-group-label">Prices:</span>
+                                    <span class="badge-accent">USD / mg</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -218,7 +319,7 @@
                     best drug libraries for your set of targets, integrated via the pymoo Python
                     library <a href="#references" class="citation-ref">[5]</a>. The algorithm has many parameters to
                     tweak. Run it with the default
-                    options or tweak them to your specific needs!</p>
+                    options or tweak them to your specific needs.</p>
             </div>
 
             <!-- Cockpit Dashboard (Asymmetric Grid) -->
@@ -317,6 +418,48 @@
                     <!-- Plotly Dual Axis History Chart Container -->
                     <div class="opt-chart-wrapper">
                         <div class="chart-container" id="demoHistoryChart" style="height: 380px;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Maximum Price Limit Card -->
+            <div class="opt-budget-card" data-aos="fade-up">
+                <div class="opt-budget-card-header">
+                    <h3 class="opt-budget-card-title">Maximum Price Limit</h3>
+                    <p class="opt-budget-card-desc">
+                        OptiLib lets you set a strict budget cap on the total library cost, which applies a
+                        post-optimization filter to retain only
+                        solutions within your price limit.
+                    </p>
+                </div>
+
+                <div class="opt-budget-grid">
+                    <!-- Left: Unconstrained Pareto Front Plot -->
+                    <div class="opt-budget-panel">
+                        <div class="opt-budget-panel-top">
+                            <div class="opt-budget-panel-title">
+                                <span class="opt-budget-dot opt-dot-cyan"></span>
+                                <span>No Price Limit</span>
+                            </div>
+                            <span class="opt-budget-count-badge">Full Set Of Solutions</span>
+                        </div>
+                        <div class="opt-chart-wrapper">
+                            <div class="chart-container" id="demoBudgetUnconstrainedChart" style="height: 350px;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Budget Filtered Pareto Front Plot -->
+                    <div class="opt-budget-panel opt-panel-filtered">
+                        <div class="opt-budget-panel-top">
+                            <div class="opt-budget-panel-title">
+                                <span class="opt-budget-dot opt-dot-indigo"></span>
+                                <span>With Price Limit <span class="opt-budget-limit-pill">Limit: ≤ $1,000</span></span>
+                            </div>
+                            <span class="opt-budget-count-badge opt-badge-green">6 In Budget • 9 Excluded</span>
+                        </div>
+                        <div class="opt-chart-wrapper">
+                            <div class="chart-container" id="demoBudgetFilteredChart" style="height: 350px;"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -684,7 +827,7 @@
                     <span class="footer-title"><span class="text-teal">Opti</span><span
                             class="text-white">Lib</span></span>
                 </div>
-                <p class="footer-text">© Copyright 2026 Nestori Toppari. All rights reserved.</p>
+                <p class="footer-text">© Copyright 2026 <a href="https://www.helsinki.fi/en/hilife-helsinki-institute-life-science/units/fimm" target="_blank" rel="noopener noreferrer">FIMM</a> – Institute for Molecular Medicine Finland. All rights reserved.</p>
             </div>
         </div>
     </footer>
@@ -698,7 +841,7 @@
             } else {
                 navbar.classList.remove('scrolled');
             }
-        });
+        }, { passive: true });
 
         // ─── Mobile hamburger menu ───
         const hamburger = document.getElementById('navHamburger');
@@ -744,7 +887,7 @@
             });
         }, observerOptions);
 
-        document.querySelectorAll('.viz-item, .setup-step-card, .opt-cockpit-panel, .opt-cockpit-chart-card, .opt-advanced-card').forEach(el => {
+        document.querySelectorAll('.viz-item, .setup-step-card, .opt-cockpit-panel, .opt-cockpit-chart-card, .opt-budget-card, .opt-advanced-card').forEach(el => {
             el.classList.add('animate-on-scroll');
             observer.observe(el);
         });
@@ -847,7 +990,7 @@
         function createParticles() {
             const container = document.getElementById('heroParticles');
             if (!container) return;
-            const particleCount = 30;
+            const particleCount = 15;
             for (let i = 0; i < particleCount; i++) {
                 const particle = document.createElement('div');
                 particle.className = 'hero-particle';
@@ -933,12 +1076,7 @@
                     symbol: 'star',
                     line: { width: 1.5, color: '#fff' },
                 },
-                hovertemplate: 'Selectivity: %{x:.2f}<br>Cost: $%{y:,.0f}<br><i>Best Compromise Solution</i><extra></extra>',
-                hoverlabel: {
-                    bgcolor: '#845ef7',
-                    font: { color: '#fff', size: 12, family: 'Inter, sans-serif' },
-                    bordercolor: 'transparent',
-                },
+                hoverinfo: 'skip',
             };
 
             const traceSelected = {
@@ -1344,25 +1482,258 @@
             updateDemoHistoryChart(0.0025);
         }
 
-        // Initialize charts
-        function initDemoCharts() {
-            initDemoParetoChart();
-            initDemoHeatmapChart();
-            initDemoDistributionChart();
-            initDemoHistoryChart();
+        // ─── Maximum Price Limit Demo Charts ───
+        function initDemoBudgetUnconstrainedChart() {
+            const chartEl = document.getElementById('demoBudgetUnconstrainedChart');
+            if (!chartEl) return;
+
+            const rawPoints = [
+                { x: 0.68, y: 310 },
+                { x: 0.74, y: 380 },
+                { x: 0.82, y: 460 },
+                { x: 0.91, y: 550 },
+                { x: 1.02, y: 680 },
+                { x: 1.12, y: 840 },
+                { x: 1.22, y: 1050 },
+                { x: 1.31, y: 1300 },
+                { x: 1.40, y: 1620 },
+                { x: 1.48, y: 1980 },
+                { x: 1.55, y: 2400 },
+                { x: 1.62, y: 2900 },
+                { x: 1.67, y: 3450 },
+                { x: 1.71, y: 4100 },
+                { x: 1.74, y: 4800 },
+            ];
+
+            const x = rawPoints.map(p => p.x);
+            const y = rawPoints.map(p => p.y);
+
+            const traceAll = {
+                x: x,
+                y: y,
+                mode: 'markers',
+                type: 'scatter',
+                name: 'Pareto Solutions',
+                marker: {
+                    size: 10,
+                    color: 'rgba(56, 217, 169, 0.85)',
+                    symbol: 'circle',
+                    line: { width: 1.5, color: '#12f3b9' },
+                },
+                hovertemplate: 'Selectivity: %{x:.2f}<br>Cost: $%{y:,.0f}<extra></extra>',
+                hoverlabel: {
+                    bgcolor: 'rgba(56, 217, 169, 0.95)',
+                    font: { color: '#070712', size: 12, family: 'Inter, sans-serif' },
+                    bordercolor: 'transparent',
+                },
+            };
+
+            const layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0.15)',
+                font: { family: 'Inter, sans-serif', color: '#9898b8' },
+                xaxis: {
+                    title: { text: 'Selectivity Score', font: { size: 11, color: '#9898b8' }, standoff: 12 },
+                    gridcolor: 'rgba(120, 120, 255, 0.08)',
+                    zerolinecolor: 'rgba(120, 120, 255, 0.12)',
+                    automargin: true,
+                    fixedrange: true,
+                    range: [0.6, 1.82],
+                },
+                yaxis: {
+                    title: { text: 'Total Library Cost (USD)', font: { size: 11, color: '#9898b8' }, standoff: 12 },
+                    gridcolor: 'rgba(120, 120, 255, 0.08)',
+                    zerolinecolor: 'rgba(120, 120, 255, 0.12)',
+                    tickformat: '$,.0f',
+                    fixedrange: true,
+                    range: [0, 5200],
+                },
+                legend: {
+                    font: { size: 10 },
+                    bgcolor: 'rgba(0,0,0,0.4)',
+                    bordercolor: 'rgba(120,120,255,0.15)',
+                    borderwidth: 1,
+                    x: 0.02,
+                    y: 0.98,
+                    xanchor: 'left',
+                    yanchor: 'top',
+                },
+                margin: { l: 65, r: 20, t: 15, b: 50 },
+            };
+
+            Plotly.newPlot('demoBudgetUnconstrainedChart', [traceAll], layout, {
+                responsive: true,
+                displayModeBar: false,
+                scrollZoom: false,
+                doubleClick: false,
+            });
+        }
+
+        function initDemoBudgetFilteredChart() {
+            const chartEl = document.getElementById('demoBudgetFilteredChart');
+            if (!chartEl) return;
+
+            const allPoints = [
+                { x: 0.68, y: 310 },
+                { x: 0.74, y: 380 },
+                { x: 0.82, y: 460 },
+                { x: 0.91, y: 550 },
+                { x: 1.02, y: 680 },
+                { x: 1.12, y: 840 },
+                { x: 1.22, y: 1050 },
+                { x: 1.31, y: 1300 },
+                { x: 1.40, y: 1620 },
+                { x: 1.48, y: 1980 },
+                { x: 1.55, y: 2400 },
+                { x: 1.62, y: 2900 },
+                { x: 1.67, y: 3450 },
+                { x: 1.71, y: 4100 },
+                { x: 1.74, y: 4800 },
+            ];
+
+            const limit = 1000;
+            const validPoints = allPoints.filter(p => p.y <= limit);
+            const overPoints = allPoints.filter(p => p.y > limit);
+
+            const traceValid = {
+                x: validPoints.map(p => p.x),
+                y: validPoints.map(p => p.y),
+                mode: 'markers',
+                type: 'scatter',
+                name: 'Within Budget',
+                marker: {
+                    size: 10,
+                    color: 'rgba(56, 217, 169, 0.85)',
+                    symbol: 'circle',
+                    line: { width: 1.5, color: '#12f3b9' },
+                },
+                hovertemplate: 'Selectivity: %{x:.2f}<br>Cost: $%{y:,.0f}<extra></extra>',
+                hoverlabel: {
+                    bgcolor: 'rgba(56, 217, 169, 0.95)',
+                    font: { color: '#070712', size: 12, family: 'Inter, sans-serif' },
+                    bordercolor: 'transparent',
+                },
+            };
+
+            const traceOver = {
+                x: overPoints.map(p => p.x),
+                y: overPoints.map(p => p.y),
+                mode: 'markers',
+                type: 'scatter',
+                name: 'Exceeds Limit',
+                marker: {
+                    size: 9,
+                    color: 'rgba(100, 100, 130, 0.35)',
+                    symbol: 'circle',
+                    line: { width: 1.5, color: 'rgba(140, 140, 170, 0.5)' },
+                },
+                hovertemplate: 'Selectivity: %{x:.2f}<br>Cost: $%{y:,.0f}<br><b style="color:#ff6b6b">Exceeds $1,000 Limit</b><extra></extra>',
+                hoverlabel: {
+                    bgcolor: 'rgba(25, 25, 38, 0.95)',
+                    font: { color: '#c0c0d8', size: 12, family: 'Inter, sans-serif' },
+                    bordercolor: 'rgba(255, 107, 107, 0.4)',
+                },
+            };
+
+            const traceLimitLine = {
+                x: [0.6, 1.82],
+                y: [limit, limit],
+                mode: 'lines',
+                type: 'scatter',
+                name: 'Limit ($1,000)',
+                line: { color: 'rgba(255, 94, 176, 0.85)', width: 1.75, dash: 'dash' },
+                hoverinfo: 'skip',
+            };
+
+            const layout = {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0.15)',
+                font: { family: 'Inter, sans-serif', color: '#9898b8' },
+                xaxis: {
+                    title: { text: 'Selectivity Score', font: { size: 11, color: '#9898b8' }, standoff: 12 },
+                    gridcolor: 'rgba(120, 120, 255, 0.08)',
+                    zerolinecolor: 'rgba(120, 120, 255, 0.12)',
+                    automargin: true,
+                    fixedrange: true,
+                    range: [0.6, 1.82],
+                },
+                yaxis: {
+                    title: { text: 'Total Library Cost (USD)', font: { size: 11, color: '#9898b8' }, standoff: 12 },
+                    gridcolor: 'rgba(120, 120, 255, 0.08)',
+                    zerolinecolor: 'rgba(120, 120, 255, 0.12)',
+                    tickformat: '$,.0f',
+                    fixedrange: true,
+                    range: [0, 5200],
+                },
+                legend: {
+                    font: { size: 10 },
+                    bgcolor: 'rgba(0,0,0,0.4)',
+                    bordercolor: 'rgba(120,120,255,0.15)',
+                    borderwidth: 1,
+                    x: 0.02,
+                    y: 0.98,
+                    xanchor: 'left',
+                    yanchor: 'top',
+                },
+                margin: { l: 65, r: 20, t: 15, b: 50 },
+            };
+
+            Plotly.newPlot('demoBudgetFilteredChart', [traceValid, traceOver, traceLimitLine], layout, {
+                responsive: true,
+                displayModeBar: false,
+                scrollZoom: false,
+                doubleClick: false,
+            });
+        }
+
+        // Initialize charts lazily when they scroll into view
+        const chartInitMap = {
+            'demoHistoryChart': { init: initDemoHistoryChart, done: false },
+            'demoBudgetUnconstrainedChart': { init: initDemoBudgetUnconstrainedChart, done: false },
+            'demoBudgetFilteredChart': { init: initDemoBudgetFilteredChart, done: false },
+            'demoParetoChart': { init: initDemoParetoChart, done: false },
+            'demoHeatmapChart': { init: initDemoHeatmapChart, done: false },
+            'demoDistributionChart': { init: initDemoDistributionChart, done: false },
+        };
+
+        function lazyInitCharts() {
+            const chartObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const id = entry.target.id;
+                        const chart = chartInitMap[id];
+                        if (chart && !chart.done) {
+                            chart.init();
+                            chart.done = true;
+                        }
+                        chartObserver.unobserve(entry.target);
+                    }
+                });
+            }, { rootMargin: '200px 0px' });
+
+            Object.keys(chartInitMap).forEach(id => {
+                const el = document.getElementById(id);
+                if (el) chartObserver.observe(el);
+            });
         }
 
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initDemoCharts);
+            document.addEventListener('DOMContentLoaded', lazyInitCharts);
         } else {
-            initDemoCharts();
+            lazyInitCharts();
         }
 
+        // Debounced resize handler
+        let resizeTimer;
         window.addEventListener('resize', () => {
-            Plotly.Plots.resize('demoParetoChart');
-            Plotly.Plots.resize('demoHeatmapChart');
-            Plotly.Plots.resize('demoDistributionChart');
-            Plotly.Plots.resize('demoHistoryChart');
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                Object.keys(chartInitMap).forEach(id => {
+                    if (chartInitMap[id].done) {
+                        Plotly.Plots.resize(id);
+                    }
+                });
+            }, 150);
         });
     </script>
 

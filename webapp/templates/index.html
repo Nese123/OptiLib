@@ -152,10 +152,6 @@
                         <span class="secondary-upload-title">
                             <span>💰</span> Custom Compound Prices (Optional)
                         </span>
-                        <a href="/static/example_prices.xlsx" download="example_prices.xlsx" class="btn btn-secondary"
-                            style="padding: 0.25rem 0.6rem; font-size: 0.78rem;">
-                            <span class="btn-icon">📥</span> Example Prices
-                        </a>
                     </div>
                     <div class="price-drop-zone" id="priceDropZone">
                         <div class="price-drop-text">Drag & drop custom price file(s), or click to browse</div>
@@ -164,6 +160,14 @@
                             ChEMBL IDs, SMILES Strings, or InChIKeys for compound IDs</div>
                         <input type="file" id="priceFileInput" accept=".csv,.xlsx,.xls" multiple>
                     </div>
+
+                    <div style="margin-top: 1rem; text-align: center;">
+                        <a href="/static/example_prices.xlsx" download="example_prices.xlsx" class="btn btn-secondary"
+                            id="priceExampleDownloadBtn" style="padding: 0.45rem 0.9rem; font-size: 0.85rem;">
+                            <span class="btn-icon">📥</span> Download Example Price Data
+                        </a>
+                    </div>
+
                     <div id="priceFileInfo"
                         style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
                     </div>

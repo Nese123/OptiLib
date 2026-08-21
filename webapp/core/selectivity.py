@@ -54,12 +54,7 @@ def generate_selectivity_matrix(affinities, target_indices=None, h=5):
             # Ignore self
             diffs[j] = np.inf
             
-            # Find the h nearest measured neighbors
-            # The indices where diffs are finite are the measured neighbors
-            valid_diffs = diffs[mask]
-            # Wait, easier to just sort diffs directly, NaNs/Infs will go to the end
-            # but we only want to pick h valid ones.
-            # Using partition for performance:
+            # Find the h nearest measured neighbors using partition for performance
             effective_h = min(h, other_count)
             if effective_h == 0:
                 local_matrix[i, j] = 0.0
