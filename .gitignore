@@ -25,3 +25,5 @@ webapp/final_constrained_pareto_front.png
 .idea/
 .DS_Store
 Thumbs.db
+
+DEPLOYMENT.md
