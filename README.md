@@ -22,62 +22,6 @@ The OptiLib pipeline performs the following steps:
 * `MolPrice/` - A submodule used for compound price predictions.
 * `database/` - Local storage for compound databases (e.g., `chembl_36.db`, `molport.db`).
 
-## Setup and Installation
-
-1. Create and activate a Python virtual environment.
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Ensure the `database/` directory contains the necessary database files (`chembl_36.db`, `molport.db`).
-4. Ensure the `MolPrice` submodule is initialized and its dependencies are satisfied.
-
-## Running the Application
-
-To start the OptiLib web application, run:
-
-```bash
-python webapp/app.py
-```
-
-The application will typically be accessible at `http://127.0.0.1:5000/`.
-
-## Running with Docker
-
-You can run OptiLib in a containerized environment using Docker or Docker Compose.
-
-> **Note:** The SQLite databases in `database/` (`chembl_36.db` and `molport.db`, totaling ~32 GB) are mounted as volumes at runtime rather than baked into the Docker image.
-
-### Option 1: Docker Compose (Recommended)
-
-```bash
-# Build and run in the background
-docker compose up --build -d
-
-# View logs
-docker compose logs -f
-
-# Stop the container
-docker compose down
-```
-
-### Option 2: Docker CLI
-
-```bash
-# Build the Docker image
-docker build -t optilib .
-
-# Run the container with database and output volume mounts
-docker run -d \
-  -p 5000:5000 \
-  -v $(pwd)/database:/app/database \
-  -v $(pwd)/webapp/output:/app/webapp/output \
-  --name optilib \
-  optilib
-```
-
-Access the web interface at `http://localhost:5000/`.
-
 ## Technologies Used
 
 * **Web Framework:** Flask
