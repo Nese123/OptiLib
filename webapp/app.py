@@ -13,6 +13,7 @@ import shutil
 import atexit
 import sqlite3
 import threading
+import logging
 import warnings
 import traceback
 from pathlib import Path
@@ -21,13 +22,32 @@ import numpy as np
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, send_file, session
 from pymoo.core.callback import Callback
+from werkzeug.middleware.proxy_fix import ProxyFix
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 # ═══════════════════════════════════════════════════════════════
-#  PATH SETUP — resolve project root so imports work
+#  PATH SETUP & ENVIRONMENT VARIABLES
 # ═══════════════════════════════════════════════════════════════
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATABASE_DIR = PROJECT_ROOT / "database"
 MOLPRICE_DIR = PROJECT_ROOT / "MolPrice"
+
+# Automatically load .env if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
+
+# Configure logging
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("optilib")
 
 sys.path.insert(0, str(PROJECT_ROOT / "webapp"))
 sys.path.insert(0, str(MOLPRICE_DIR))
@@ -46,13 +66,67 @@ from core.algorithm import (
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 # ═══════════════════════════════════════════════════════════════
-#  FLASK APP
+#  FLASK APP & SECURITY CONFIGURATION
 # ═══════════════════════════════════════════════════════════════
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+# Security and session settings
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB upload limit
-app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32).hex())
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
+
+secret_key = os.environ.get("SECRET_KEY")
+if not secret_key:
+    logger.warning("SECRET_KEY environment variable is not set! Using ephemeral key.")
+    secret_key = os.urandom(32).hex()
+app.secret_key = secret_key
+
+# Rate limiter setup
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[os.environ.get("RATE_LIMIT_DEFAULT", "120 per minute")],
+    storage_uri=os.environ.get("RATE_LIMIT_STORAGE_URL", "memory://"),
+    strategy="fixed-window",
+)
+
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    """Clean JSON response for rate limit violations."""
+    return jsonify({
+        "error": "Rate limit exceeded. Please wait a moment before making more requests.",
+        "status": 429
+    }), 429
+
+
+@app.after_request
+def set_security_headers(response):
+    """Add standard HTTP security headers to all responses."""
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
+def _init_sqlite_wal():
+    """Ensure SQLite databases use WAL mode for non-blocking concurrent reads and writes."""
+    for db_name in ["molport.db", "chembl_36.db"]:
+        db_file = DATABASE_DIR / db_name
+        if db_file.exists():
+            try:
+                with sqlite3.connect(str(db_file), timeout=10.0) as conn:
+                    conn.execute("PRAGMA journal_mode=WAL;")
+                logger.info(f"SQLite WAL mode active on {db_name}")
+            except Exception as e:
+                logger.warning(f"Could not activate WAL mode on {db_name}: {e}")
+
+_init_sqlite_wal()
 
 # ═══════════════════════════════════════════════════════════════
 #  SESSION-SCOPED STATE & INACTIVITY CLEANER
@@ -235,7 +309,7 @@ def _startup_cleanup():
             elif item.is_file():
                 item.unlink(missing_ok=True)
     except Exception as e:
-        print(f"Warning during startup output cleanup: {e}", file=sys.stderr)
+        logger.warning(f"Startup output cleanup error: {e}")
 
 
 def _shutdown_cleanup():
@@ -260,7 +334,7 @@ def _cleanup_worker():
         try:
             _cleanup_stale_sessions()
         except Exception as e:
-            print(f"Error in output cleanup worker: {e}", file=sys.stderr)
+            logger.error(f"Error in output cleanup worker: {e}")
 
 
 # Run startup cleanup of stale generated files
@@ -552,7 +626,7 @@ def _resolve_compounds(compound_ids):
                 q4 = f"SELECT md.chembl_id, md.pref_name, cs.standard_inchi_key, cs.canonical_smiles FROM compound_structures cs JOIN molecule_dictionary md ON cs.molregno = md.molregno WHERE cs.canonical_smiles IN ({ph})"
                 raw_matches.extend(conn.execute(q4, chunk).fetchall())
     except Exception as e:
-        print("Warning during compound resolution:", e)
+        logger.warning(f"Warning during compound resolution: {e}")
         
     # Build fast lookup indexes
     by_chembl_id = {}
@@ -692,7 +766,7 @@ def _resolve_targets(target_ids):
                 """
                 rows.extend(conn.execute(query, chunk * 4).fetchall())
     except Exception as e:
-        print("Warning during target resolution:", e)
+        logger.warning(f"Warning during target resolution: {e}")
         
     resolved = {}
     for target_in in unique_targets:
@@ -765,7 +839,7 @@ def _lookup_custom_price(compound_raw, resolved_info=None, price_state=None):
 
 
 # ═══════════════════════════════════════════════════════════════
-#  ROUTES — Pages
+#  ROUTES — Pages & Health Checks
 # ═══════════════════════════════════════════════════════════════
 
 @app.route("/")
@@ -778,11 +852,30 @@ def tool():
     return render_template("index.html")
 
 
+@app.route("/health")
+@app.route("/api/health")
+@limiter.exempt
+def health_check():
+    """Health check endpoint for Docker, Nginx, and cloud orchestrators."""
+    chembl_exists = (DATABASE_DIR / "chembl_36.db").exists()
+    molport_exists = (DATABASE_DIR / "molport.db").exists()
+    is_healthy = chembl_exists and molport_exists
+    return jsonify({
+        "status": "healthy" if is_healthy else "degraded",
+        "timestamp": time.time(),
+        "databases": {
+            "chembl_36": chembl_exists,
+            "molport": molport_exists,
+        }
+    }), (200 if is_healthy else 503)
+
+
 # ═══════════════════════════════════════════════════════════════
 #  ROUTES — Target Upload & Validation
 # ═══════════════════════════════════════════════════════════════
 
 @app.route("/api/upload-targets", methods=["POST"])
+@limiter.limit("30 per minute")
 def upload_targets():
     """Accept CSV/Excel with target names/IDs, validate against ChEMBL."""
 
@@ -915,6 +1008,7 @@ def upload_targets():
 # ═══════════════════════════════════════════════════════════════
 
 @app.route("/api/upload-affinity", methods=["POST"])
+@limiter.limit("30 per minute")
 def upload_affinity():
     """Accept CSV/Excel with compound, target, and affinity value (supports incremental multi-file upload)."""
     sid, s = _get_session()
@@ -1063,6 +1157,7 @@ def upload_affinity():
 
 
 @app.route("/api/upload-prices", methods=["POST"])
+@limiter.limit("30 per minute")
 def upload_prices():
     """Accept CSV/Excel with compound and price (supports incremental multi-file upload)."""
     sid, s = _get_session()
@@ -1181,6 +1276,7 @@ def upload_prices():
 
 
 @app.route("/api/remove-affinity-file", methods=["POST"])
+@limiter.limit("60 per minute")
 def remove_affinity_file():
     """Remove a specific uploaded affinity file by name."""
     sid, s = _get_session()
@@ -1220,6 +1316,7 @@ def remove_affinity_file():
 
 
 @app.route("/api/remove-affinity-target", methods=["POST"])
+@limiter.limit("60 per minute")
 def remove_affinity_target():
     """Remove a single target from the uploaded affinity dataset across all files."""
     sid, s = _get_session()
@@ -1281,6 +1378,7 @@ def remove_affinity_target():
 
 
 @app.route("/api/remove-affinity-compound", methods=["POST"])
+@limiter.limit("60 per minute")
 def remove_affinity_compound():
     """Remove a single compound from the uploaded affinity dataset across all files."""
     sid, s = _get_session()
@@ -1342,6 +1440,7 @@ def remove_affinity_compound():
 
 
 @app.route("/api/clear-affinity", methods=["POST"])
+@limiter.limit("60 per minute")
 def clear_affinity():
     sid, s = _get_session()
     aff_state = s["affinity_upload_state"]
@@ -1352,6 +1451,7 @@ def clear_affinity():
 
 
 @app.route("/api/remove-price-file", methods=["POST"])
+@limiter.limit("60 per minute")
 def remove_price_file():
     """Remove a specific uploaded price file by name."""
     sid, s = _get_session()
@@ -1389,6 +1489,7 @@ def remove_price_file():
 
 
 @app.route("/api/remove-price-compound", methods=["POST"])
+@limiter.limit("60 per minute")
 def remove_price_compound():
     """Remove a single compound from the uploaded price dataset."""
     sid, s = _get_session()
@@ -1440,6 +1541,7 @@ def remove_price_compound():
 
 
 @app.route("/api/clear-prices", methods=["POST"])
+@limiter.limit("60 per minute")
 def clear_prices():
     sid, s = _get_session()
     price_state = s["price_upload_state"]
@@ -1459,6 +1561,7 @@ def clear_prices():
 # ═══════════════════════════════════════════════════════════════
 
 @app.route("/api/build-matrix", methods=["POST"])
+@limiter.limit("20 per minute")
 def build_matrix():
     """Launch the full pipeline in a background thread."""
     sid, s = _get_session()
@@ -1501,6 +1604,7 @@ def build_matrix():
 
 
 @app.route("/api/build-matrix-from-affinity", methods=["POST"])
+@limiter.limit("20 per minute")
 def build_matrix_from_affinity():
     """Launch the affinity-based pipeline in a background thread."""
     sid, s = _get_session()
@@ -1541,6 +1645,7 @@ def build_matrix_from_affinity():
 
 
 @app.route("/api/pipeline-status")
+@limiter.limit("300 per minute")
 def pipeline_status():
     sid, s = _get_session()
     pipeline_st = s["pipeline_state"]
@@ -2049,7 +2154,7 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
                                 molport_dict[ik_val] = price_val
                                 molport_source_dict[ik_val] = molport_id_val
             except Exception as e:
-                print("MolPort DB lookup warning:", e)
+                logger.warning(f"MolPort DB lookup warning: {e}")
 
         molprice_model = None
         prices = []
@@ -2159,6 +2264,7 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
 # ═══════════════════════════════════════════════════════════════
 
 @app.route("/api/dataset-info")
+@limiter.limit("300 per minute")
 def dataset_info():
     sid, s = _get_session()
     ds = s["dataset"]
@@ -2177,6 +2283,7 @@ def dataset_info():
 # ═══════════════════════════════════════════════════════════════
 
 @app.route("/api/run", methods=["POST"])
+@limiter.limit("20 per minute")
 def run_optimization_route():
     """Launch NSGA-II optimization in a background thread."""
     sid, s = _get_session()
@@ -2227,6 +2334,7 @@ def run_optimization_route():
 
 
 @app.route("/api/status")
+@limiter.limit("300 per minute")
 def optimization_status():
     sid, s = _get_session()
     opt_st = s["opt_state"]
@@ -2235,6 +2343,7 @@ def optimization_status():
 
 
 @app.route("/api/reset", methods=["POST"])
+@limiter.limit("60 per minute")
 def reset_state():
     sid, s = _get_session()
     with _lock:
@@ -2309,6 +2418,7 @@ def reset_state():
 
 
 @app.route("/api/reset-opt", methods=["POST"])
+@limiter.limit("60 per minute")
 def reset_opt_state():
     sid, s = _get_session()
     opt_st = s["opt_state"]
@@ -2323,6 +2433,7 @@ def reset_opt_state():
     return jsonify({"status": "reset"})
 
 @app.route("/api/stop-opt", methods=["POST"])
+@limiter.limit("60 per minute")
 def stop_opt_state():
     sid, s = _get_session()
     opt_st = s["opt_state"]
@@ -2626,6 +2737,7 @@ def _build_comparison(winning_matrix_df, problem, has_custom_affinity=False):
 # ═══════════════════════════════════════════════════════════════
 
 @app.route("/api/results")
+@limiter.limit("300 per minute")
 def get_results():
     sid, s = _get_session()
     opt_res = s["opt_results"]
@@ -2639,6 +2751,7 @@ def get_results():
 
 
 @app.route("/api/pareto-data")
+@limiter.limit("300 per minute")
 def pareto_data():
     sid, s = _get_session()
     opt_res = s["opt_results"]
@@ -2670,6 +2783,7 @@ def pareto_data():
 
 
 @app.route("/api/select-solution", methods=["POST"])
+@limiter.limit("120 per minute")
 def select_solution():
     """Switch the active solution to a different Pareto front point."""
     sid, s = _get_session()
@@ -2864,6 +2978,7 @@ def _build_heatmap_cache(df):
 
 
 @app.route("/api/heatmap-data")
+@limiter.limit("300 per minute")
 def heatmap_data():
     sid, s = _get_session()
     opt_res = s["opt_results"]
@@ -2890,6 +3005,7 @@ def heatmap_data():
 
 
 @app.route("/api/download/library")
+@limiter.limit("60 per minute")
 def download_library():
     sid, s = _get_session()
     opt_res = s["opt_results"]
@@ -2901,6 +3017,7 @@ def download_library():
 
 
 @app.route("/api/download/matrix")
+@limiter.limit("60 per minute")
 def download_matrix():
     sid, s = _get_session()
     ds = s["dataset"]
@@ -2924,7 +3041,7 @@ def download_matrix():
 # ═══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print(f"Project root: {PROJECT_ROOT}")
-    print(f"ChEMBL database: {DATABASE_DIR / 'chembl_36.db'}")
-    print(f"MolPort database: {DATABASE_DIR / 'molport.db'}")
+    logger.info(f"Project root: {PROJECT_ROOT}")
+    logger.info(f"ChEMBL database: {DATABASE_DIR / 'chembl_36.db'}")
+    logger.info(f"MolPort database: {DATABASE_DIR / 'molport.db'}")
     app.run(debug=False, host="0.0.0.0", port=5000)

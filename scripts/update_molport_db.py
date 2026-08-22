@@ -172,7 +172,9 @@ def main():
         print("FTP connection closed.")
         
         print(f"Connecting to database {DB_PATH}...")
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(str(DB_PATH), timeout=120.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout = 60000;")
         
         try:
             if removed_file and removed_file.exists():

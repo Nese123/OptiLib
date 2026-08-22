@@ -6,11 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=5000
 
-# Install system dependencies required for scientific libraries and C/C++ extensions
+# Install system dependencies required for scientific libraries, C/C++ extensions, and cron
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
     curl \
+    cron \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -29,6 +31,10 @@ RUN mkdir -p /app/database /app/webapp/output
 
 # Expose the Flask port
 EXPOSE 5000
+
+# Container healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
 
 # Start with Gunicorn production WSGI server
 # --workers 1    : single process so in-memory session state is shared
