@@ -852,6 +852,12 @@ def tool():
     return render_template("index.html")
 
 
+@app.route("/favicon.ico")
+@limiter.exempt
+def favicon():
+    return send_file(PROJECT_ROOT / "webapp" / "static" / "favicon.svg", mimetype="image/svg+xml")
+
+
 @app.route("/health")
 @app.route("/api/health")
 @limiter.exempt

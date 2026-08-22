@@ -7,7 +7,7 @@ OptiLib is a drug library optimization platform combining a modern Flask web app
 OptiLib provides two flexible pipelines to generate and optimize candidate compound libraries:
 
 1. **Target-Driven Pipeline (ChEMBL):**
-   * **Target Input & Validation:** Upload target identifiers (gene symbols, UniProt accessions, ChEMBL IDs, or protein names) with instant validation against a local ChEMBL 36 database.
+   * **Target Input & Validation:** Upload target identifiers (gene symbols, UniProt accessions, ChEMBL IDs, or protein names) with instant validation against a local ChEMBL database.
    * **Bioactivity Querying & Matrix Building:** Extracts affinity data, computes compound selectivities across targets, and applies a customizable selectivity threshold.
 
 2. **Custom Affinity Pipeline:**

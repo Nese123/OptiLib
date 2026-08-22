@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <!-- Purple Gradient (Top-Right Cap) -->
+    <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#bda0ff"/>
+      <stop offset="50%" stop-color="#9d7cff"/>
+      <stop offset="100%" stop-color="#6f42c1"/>
+    </linearGradient>
+
+    <!-- Teal Gradient (Bottom-Left Cap) -->
+    <linearGradient id="tealGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4dffdc"/>
+      <stop offset="50%" stop-color="#12f3b9"/>
+      <stop offset="100%" stop-color="#05a87d"/>
+    </linearGradient>
+
+    <!-- Gloss Specular Gradient -->
+    <linearGradient id="glossGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.8"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Drop Shadow Filter -->
+    <filter id="pillShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="2" dy="5" stdDeviation="4" flood-color="#000000" flood-opacity="0.38"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#12f3b9" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <!-- Main Capsule Group Rotated 45deg (90 degrees clockwise from previous -45deg) -->
+  <g filter="url(#pillShadow)" transform="rotate(45 50 50)">
+    <!-- Top Cap (Purple) -->
+    <path d="M 32 50 L 32 32 A 18 18 0 0 1 68 32 L 68 50 Z" 
+          fill="url(#purpleGradient)"/>
+    
+    <!-- Bottom Cap (Teal) -->
+    <path d="M 32 50 L 32 68 A 18 18 0 0 0 68 68 L 68 50 Z" 
+          fill="url(#tealGradient)"/>
+
+    <!-- Capsule Seam / Division Line -->
+    <line x1="32" y1="50" x2="68" y2="50" 
+          stroke="rgba(0, 0, 0, 0.2)" stroke-width="1.5"/>
+    <line x1="32" y1="50.8" x2="68" y2="50.8" 
+          stroke="rgba(255, 255, 255, 0.35)" stroke-width="1"/>
+
+    <!-- 3D Gloss Highlight Streak (Along upper-left curved side) -->
+    <path d="M 38 24 A 12 12 0 0 1 48 16 L 48 20 A 8 8 0 0 0 40 26 Z" 
+          fill="url(#glossGradient)"/>
+    <rect x="36" y="28" width="5" height="42" rx="2.5" 
+          fill="url(#glossGradient)" opacity="0.6"/>
+
+    <!-- Subtle Inner Rim Lighting -->
+    <path d="M 32 32 A 18 18 0 0 1 68 32 L 68 68 A 18 18 0 0 1 32 68 Z" 
+          fill="none" stroke="rgba(255, 255, 255, 0.2)" stroke-width="1.5"/>
+  </g>
+</svg>
