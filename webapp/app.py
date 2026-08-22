@@ -8,7 +8,9 @@ import os
 import sys
 import json
 import uuid
+import time
 import shutil
+import atexit
 import sqlite3
 import threading
 import warnings
@@ -53,8 +55,12 @@ app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB upload limit
 app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32).hex())
 
 # ═══════════════════════════════════════════════════════════════
-#  SESSION-SCOPED STATE
+#  SESSION-SCOPED STATE & INACTIVITY CLEANER
 # ═══════════════════════════════════════════════════════════════
+
+# Inactivity TTL and background cleanup frequency
+SESSION_TTL_SECONDS = int(os.environ.get("SESSION_TTL_SECONDS", 1800))       # 30 minutes
+CLEANUP_INTERVAL_SECONDS = int(os.environ.get("CLEANUP_INTERVAL_SECONDS", 300))  # 5 minutes
 
 # Thread lock for state access
 _lock = threading.Lock()
@@ -66,6 +72,7 @@ _sessions = {}
 def _make_fresh_state():
     """Create a fresh set of state dicts for a new user session."""
     return {
+        "last_activity": time.time(),
         "pipeline_state": {
             "status": "idle",           # idle | running | complete | error
             "current_step": 0,
@@ -147,6 +154,8 @@ def _get_session():
     with _lock:
         if sid not in _sessions:
             _sessions[sid] = _make_fresh_state()
+        else:
+            _sessions[sid]["last_activity"] = time.time()
         return sid, _sessions[sid]
 
 
@@ -155,7 +164,114 @@ def _get_session_by_sid(sid):
     with _lock:
         if sid not in _sessions:
             _sessions[sid] = _make_fresh_state()
+        else:
+            _sessions[sid]["last_activity"] = time.time()
         return _sessions[sid]
+
+
+def _cleanup_stale_sessions():
+    """Clean up expired in-memory sessions and all expired output folders/files."""
+    now = time.time()
+    output_base = PROJECT_ROOT / "webapp" / "output"
+
+    # 1. Identify expired sessions in memory
+    expired_sids = []
+    with _lock:
+        for sid, s in list(_sessions.items()):
+            # Do not clean up if an active computation is running
+            is_pipeline_running = s.get("pipeline_state", {}).get("status") == "running"
+            is_opt_running = s.get("opt_state", {}).get("status") == "running"
+            if is_pipeline_running or is_opt_running:
+                continue
+
+            last_act = s.get("last_activity", 0)
+            if now - last_act > SESSION_TTL_SECONDS:
+                expired_sids.append(sid)
+                del _sessions[sid]
+
+    # 2. Remove session output folders for expired sessions
+    for sid in expired_sids:
+        s_dir = output_base / sid
+        if s_dir.exists():
+            shutil.rmtree(s_dir, ignore_errors=True)
+
+    # 3. Clean up unmanaged/orphan session folders or stale files in webapp/output
+    if output_base.exists():
+        try:
+            for item in output_base.iterdir():
+                # Subdirectories (session folders)
+                if item.is_dir():
+                    dir_sid = item.name
+                    with _lock:
+                        is_active_session = dir_sid in _sessions
+                    if not is_active_session:
+                        try:
+                            mtime = item.stat().st_mtime
+                            if now - mtime > SESSION_TTL_SECONDS:
+                                shutil.rmtree(item, ignore_errors=True)
+                        except OSError:
+                            pass
+                # Loose files in output root (e.g. legacy/cached files)
+                elif item.is_file():
+                    try:
+                        mtime = item.stat().st_mtime
+                        if now - mtime > SESSION_TTL_SECONDS:
+                            item.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+
+def _startup_cleanup():
+    """Clean up all legacy loose files and orphan session directories on server start."""
+    output_base = PROJECT_ROOT / "webapp" / "output"
+    if not output_base.exists():
+        return
+    try:
+        for item in output_base.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            elif item.is_file():
+                item.unlink(missing_ok=True)
+    except Exception as e:
+        print(f"Warning during startup output cleanup: {e}", file=sys.stderr)
+
+
+def _shutdown_cleanup():
+    """Clean up temporary session directories and generated output files on server shutdown."""
+    output_base = PROJECT_ROOT / "webapp" / "output"
+    if not output_base.exists():
+        return
+    try:
+        for item in output_base.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            elif item.is_file():
+                item.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _cleanup_worker():
+    """Periodic background daemon worker that runs cleanup sweeps."""
+    while True:
+        time.sleep(CLEANUP_INTERVAL_SECONDS)
+        try:
+            _cleanup_stale_sessions()
+        except Exception as e:
+            print(f"Error in output cleanup worker: {e}", file=sys.stderr)
+
+
+# Run startup cleanup of stale generated files
+_startup_cleanup()
+
+# Start background cleanup thread as daemon
+_cleanup_thread = threading.Thread(target=_cleanup_worker, name="OutputCleanupWorker", daemon=True)
+_cleanup_thread.start()
+
+# Register shutdown hook
+atexit.register(_shutdown_cleanup)
 
 
 class StopOptimization(Exception):

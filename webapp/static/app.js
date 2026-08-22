@@ -251,7 +251,7 @@ function setupModeSwitcher() {
             modeTargetBtn.classList.remove('active');
             if (step1Title) step1Title.innerHTML = '<span class="icon">📂</span> Upload Predefined Affinity Data';
             if (dropZoneText) dropZoneText.textContent = 'Drag & drop your affinity data here, or click to browse';
-            if (dropZoneHint) dropZoneHint.textContent = 'CSV or Excel (.xlsx) with "Compound", "Target", and "Affinity" (pKd) columns · Accepts compound names, ChEMBL IDs, SMILES Strings, and InChIKeys for compound IDs & target names, ChEMBL IDs, Gene Symbols and UniProt Accessions for target IDs';
+            if (dropZoneHint) dropZoneHint.textContent = 'CSV or Excel (.xlsx) with columns "Compound", "Target", and "Affinity" (pKd, higher value means better affinity) · Accepts compound names, ChEMBL IDs, SMILES Strings, and InChIKeys for compound IDs & target names, ChEMBL IDs, Gene Symbols and UniProt Accessions for target IDs';
             if (exampleDownloadBtn) exampleDownloadBtn.href = '/static/example_affinity.xlsx';
             if (exampleDownloadText) exampleDownloadText.textContent = 'Download Example Affinity Data';
             if (validationSummary) validationSummary.style.display = 'none';
