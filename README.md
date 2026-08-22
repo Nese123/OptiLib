@@ -8,7 +8,7 @@ OptiLib provides two flexible pipelines to generate and optimize candidate compo
 
 1. **Target-Driven Pipeline (ChEMBL):**
    * **Target Input & Validation:** Upload target identifiers (gene symbols, UniProt accessions, ChEMBL IDs, or protein names) with instant validation against a local ChEMBL 36 database.
-   * **Bioactivity Querying & Matrix Building:** Extracts bioactivities ($p\text{ChEMBL}$, $pK_i$, $pK_d$, $p\text{IC}_{50}$), aggregates compound selectivities across targets, and applies a customizable selectivity threshold.
+   * **Bioactivity Querying & Matrix Building:** Extracts affinity data, computes compound selectivities across targets, and applies a customizable selectivity threshold.
 
 2. **Custom Affinity Pipeline:**
    * **Experimental Data Upload:** Upload multi-file custom affinity datasets (compound, target, affinity value) with automatic identifier resolution (InChIKeys, ChEMBL IDs, SMILES) and real-time dataset management.
