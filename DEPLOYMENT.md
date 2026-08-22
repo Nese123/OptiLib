@@ -9,7 +9,7 @@ This guide provides instructions for hosting the **OptiLib Drug Library Optimiza
 * **Operating System:** Linux (Ubuntu 22.04 / 24.04 LTS or Debian 12 recommended)
 * **CPU:** Minimum 4 vCPUs (8+ vCPUs recommended for multi-user NSGA-II optimization)
 * **RAM:** Minimum 8 GB (16 GB recommended)
-* **Storage:** Minimum 60 GB SSD / NVMe (to host `chembl_36.db` ~30 GB, `molport.db` ~1.6 GB, plus temporary calculation caches and Docker images)
+* **Storage:** Minimum 60 GB SSD / NVMe (to host `chembl_37.db` ~30 GB, `molport.db` ~1.6 GB, plus temporary calculation caches and Docker images)
 * **Software:** Docker Engine (24.0+) and Docker Compose (2.20+)
 
 ---
@@ -28,7 +28,7 @@ Ensure the `database/` directory contains the SQLite databases:
 ```bash
 mkdir -p database webapp/output
 # Place your databases here:
-# /opt/optilib/database/chembl_36.db
+# /opt/optilib/database/chembl_37.db
 # /opt/optilib/database/molport.db
 ```
 
@@ -160,7 +160,8 @@ sudo systemctl reload nginx
     "status": "healthy",
     "timestamp": 1771675200.0,
     "databases": {
-      "chembl_36": true,
+      "chembl": true,
+      "chembl_37": true,
       "molport": true
     }
   }

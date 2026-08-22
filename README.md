@@ -38,7 +38,7 @@ OptiLib provides two flexible pipelines to generate and optimize candidate compo
   * `templates/` & `static/` - Modern UI interface, styles, charts, and interactive dashboards.
   * `output/` - Session-scoped directory for generated matrices and export files.
 * `MolPrice/` - Machine learning module for compound price prediction from chemical structures.
-* `database/` - Local storage for compound and bioactivity databases (`chembl_36.db`, `molport.db`).
+* `database/` - Local storage for compound and bioactivity databases (`chembl_37.db`, `molport.db`).
 * `scripts/` - Maintenance utilities, including `update_molport_db.py` for monthly MolPort FTP syncs.
 * `nginx/` - Production reverse proxy configuration with TLS/HTTPS support.
 * `DEPLOYMENT.md` - Production server deployment guide.

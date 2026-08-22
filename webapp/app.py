@@ -114,9 +114,23 @@ def set_security_headers(response):
     return response
 
 
+def get_chembl_db_path() -> Path:
+    """Return path to active ChEMBL database (defaults to chembl_37.db, falls back to chembl_36.db or any chembl_*.db)."""
+    custom = os.environ.get("CHEMBL_DB_NAME")
+    if custom:
+        custom_path = DATABASE_DIR / custom
+        if custom_path.exists():
+            return custom_path
+    for candidate in ["chembl_37.db", "chembl_36.db", "chembl.db"]:
+        p = DATABASE_DIR / candidate
+        if p.exists():
+            return p
+    return DATABASE_DIR / "chembl_37.db"
+
+
 def _init_sqlite_wal():
     """Ensure SQLite databases use WAL mode for non-blocking concurrent reads and writes."""
-    for db_name in ["molport.db", "chembl_36.db"]:
+    for db_name in ["molport.db", "chembl_37.db", "chembl_36.db"]:
         db_file = DATABASE_DIR / db_name
         if db_file.exists():
             try:
@@ -601,7 +615,7 @@ def _resolve_compounds(compound_ids):
         search_set.add(cid.lower())
     search_list = list(search_set)
     
-    db_path = str(DATABASE_DIR / "chembl_36.db")
+    db_path = str(get_chembl_db_path())
     raw_matches = []
     try:
         with sqlite3.connect(db_path) as conn:
@@ -734,7 +748,7 @@ def _resolve_targets(target_ids):
         search_set.add(tid.lower())
     search_list = list(search_set)
     
-    db_path = str(DATABASE_DIR / "chembl_36.db")
+    db_path = str(get_chembl_db_path())
     rows = []
     try:
         with sqlite3.connect(db_path) as conn:
@@ -863,14 +877,16 @@ def favicon():
 @limiter.exempt
 def health_check():
     """Health check endpoint for Docker, Nginx, and cloud orchestrators."""
-    chembl_exists = (DATABASE_DIR / "chembl_36.db").exists()
+    chembl_file = get_chembl_db_path()
+    chembl_exists = chembl_file.exists()
     molport_exists = (DATABASE_DIR / "molport.db").exists()
     is_healthy = chembl_exists and molport_exists
     return jsonify({
         "status": "healthy" if is_healthy else "degraded",
         "timestamp": time.time(),
         "databases": {
-            "chembl_36": chembl_exists,
+            "chembl": chembl_exists,
+            "chembl_37": chembl_exists,
             "molport": molport_exists,
         }
     }), (200 if is_healthy else 503)
@@ -931,7 +947,7 @@ def upload_targets():
     if not input_targets:
         return jsonify({"error": "No targets found in the files"}), 400
 
-    db_path = str(DATABASE_DIR / "chembl_36.db")
+    db_path = str(get_chembl_db_path())
     matched_chembl_ids = set()
     matched = []
     unmatched = []
@@ -1715,7 +1731,7 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         # ─────────────────────────────────────────────
         _update_pipeline(sid, 1, "Searching for selective compounds...", f"Querying database for compounds active against {matched_count} targets...")
 
-        db_path = str(DATABASE_DIR / "chembl_36.db")
+        db_path = str(get_chembl_db_path())
 
         # Build WHERE clause
         id_ph = ",".join(["?"] * len(chembl_ids))
@@ -2874,7 +2890,7 @@ def _get_target_info(target_list):
             to_lookup.add(t_str)
 
     try:
-        db_path = str(DATABASE_DIR / "chembl_36.db")
+        db_path = str(get_chembl_db_path())
         if os.path.exists(db_path) and to_lookup:
             lookup_list = list(to_lookup)
             with sqlite3.connect(db_path) as conn:
@@ -3048,6 +3064,6 @@ def download_matrix():
 
 if __name__ == "__main__":
     logger.info(f"Project root: {PROJECT_ROOT}")
-    logger.info(f"ChEMBL database: {DATABASE_DIR / 'chembl_36.db'}")
+    logger.info(f"ChEMBL database: {get_chembl_db_path()}")
     logger.info(f"MolPort database: {DATABASE_DIR / 'molport.db'}")
     app.run(debug=False, host="0.0.0.0", port=5000)
