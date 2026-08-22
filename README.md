@@ -27,5 +27,4 @@ The OptiLib pipeline performs the following steps:
 * **Web Framework:** Flask
 * **Optimization:** `pymoo` (NSGA-II)
 * **Data Processing:** `numpy`, `pandas`
-* **File Handling:** `openpyxl`, `xlsxwriter`
 
