@@ -250,8 +250,8 @@ function setupModeSwitcher() {
             modeAffinityBtn.classList.add('active');
             modeTargetBtn.classList.remove('active');
             if (step1Title) step1Title.innerHTML = '<span class="icon">📂</span> Upload Predefined Affinity Data';
-            if (dropZoneText) dropZoneText.textContent = 'Drag & drop your affinity data here, or click to browse';
-            if (dropZoneHint) dropZoneHint.textContent = 'CSV or Excel (.xlsx) with columns "Compound", "Target", and "Affinity" (pKd, higher value means better affinity) · Accepts compound names, ChEMBL IDs, SMILES Strings, and InChIKeys for compound IDs & target names, ChEMBL IDs, Gene Symbols and UniProt Accessions for target IDs';
+            if (dropZoneText) dropZoneText.textContent = 'Drag & drop your custom affinity data files here, or click to browse';
+            if (dropZoneHint) dropZoneHint.textContent = 'CSV or Excel (.xlsx) with "Compound", "Target", and "Affinity" (pKd, higher value means better affinity) columns · Accepts compound names, ChEMBL IDs, SMILES Strings, and InChIKeys for compound IDs & target names, ChEMBL IDs, Gene Symbols and UniProt Accessions for target IDs';
             if (exampleDownloadBtn) exampleDownloadBtn.href = '/static/example_affinity.xlsx';
             if (exampleDownloadText) exampleDownloadText.textContent = 'Download Example Affinity Data';
             if (validationSummary) validationSummary.style.display = 'none';
@@ -1041,7 +1041,15 @@ function renderFiles() {
         if (unmatchedRow) unmatchedRow.style.display = 'flex';
         if (unmatchedList) {
             unmatchedList.style.display = 'block';
-            unmatchedList.textContent = uniqueUnmatched.join('\n');
+            unmatchedList.innerHTML = '';
+            uniqueUnmatched.forEach((targetName) => {
+                const item = document.createElement('div');
+                item.className = 'target-list-item';
+                const textSpan = document.createElement('span');
+                textSpan.textContent = targetName;
+                item.appendChild(textSpan);
+                unmatchedList.appendChild(item);
+            });
         }
         if (unmatchedCount) unmatchedCount.textContent = `${uniqueUnmatched.length} targets not found`;
     } else {
@@ -1521,31 +1529,46 @@ function updatePipelineUI(data) {
         const icon = s.querySelector('.step-icon');
         const detailEl = s.querySelector('.step-detail');
 
-        s.classList.remove('active', 'completed', 'error');
-
         if (pStep < currentPipeStep) {
+            s.classList.remove('active', 'error');
             s.classList.add('completed');
-            icon.textContent = '✅';
+            if (icon.textContent !== '✅') {
+                icon.textContent = '✅';
+            }
             if (data.step_summaries && data.step_summaries[pStep]) {
-                detailEl.textContent = data.step_summaries[pStep];
+                if (detailEl.textContent !== data.step_summaries[pStep]) {
+                    detailEl.textContent = data.step_summaries[pStep];
+                }
             }
 
         } else if (pStep === currentPipeStep) {
             if (data.status === 'error') {
+                s.classList.remove('active', 'completed');
                 s.classList.add('error');
-                icon.textContent = '❌';
+                if (icon.textContent !== '❌') {
+                    icon.textContent = '❌';
+                }
             } else if (data.status === 'complete') {
+                s.classList.remove('active', 'error');
                 s.classList.add('completed');
-                icon.textContent = '✅';
+                if (icon.textContent !== '✅') {
+                    icon.textContent = '✅';
+                }
             } else {
+                s.classList.remove('completed', 'error');
                 s.classList.add('active');
-                icon.innerHTML = '<span class="spinner"></span>';
+                if (!icon.querySelector('.spinner')) {
+                    icon.innerHTML = '<span class="spinner"></span>';
+                }
             }
-            if (data.detail) {
+            if (data.detail && detailEl.textContent !== data.detail) {
                 detailEl.textContent = data.detail;
             }
         } else {
-            icon.textContent = '⬜';
+            s.classList.remove('active', 'completed', 'error');
+            if (icon.textContent !== '⬜') {
+                icon.textContent = '⬜';
+            }
         }
     });
 
@@ -3001,8 +3024,12 @@ async function loadDistributionChart(prefetchedData) {
                 bgcolor: 'rgba(0,0,0,0.3)',
                 bordercolor: 'rgba(120,120,255,0.1)',
                 borderwidth: 1,
+                x: 1.015,
+                xanchor: 'left',
+                y: 1,
+                yanchor: 'top',
             },
-            margin: { l: 55, r: 30, t: 20, b: 70 },
+            margin: { l: 55, r: 120, t: 20, b: 90 },
             hovermode: 'closest',
             dragmode: false
         };

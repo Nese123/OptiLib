@@ -1602,7 +1602,7 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         # ─────────────────────────────────────────────
         # Step 1: Searching for selective compounds
         # ─────────────────────────────────────────────
-        _update_pipeline(sid, 1, "Searching for selective compounds...", f"Querying database for compounds active against {matched_count} targets... (this may take a few minutes)")
+        _update_pipeline(sid, 1, "Searching for selective compounds...", f"Querying database for compounds active against {matched_count} targets...")
 
         db_path = str(DATABASE_DIR / "chembl_36.db")
 
@@ -2741,7 +2741,7 @@ def _get_target_info(target_list):
 
     for t in target_list:
         t_str = str(t).strip()
-        m = re.match(r"^(.+?)\s*\((.+?)\)$", t_str)
+        m = re.match(r"^(.*?)\s*\(([^()]+)\)$", t_str)
         if m:
             p_name = m.group(1).strip()
             g_sym = m.group(2).strip()
@@ -2749,6 +2749,7 @@ def _get_target_info(target_list):
             parsed_names[t] = p_name
             to_lookup.add(p_name)
             to_lookup.add(g_sym)
+            to_lookup.add(t_str)
         else:
             to_lookup.add(t_str)
 
@@ -2797,8 +2798,8 @@ def _get_target_info(target_list):
                     if t in parsed_symbols:
                         g_sym = parsed_symbols[t]
                         p_name = parsed_names[t]
-                        db_sym = sym_map.get(g_sym.lower()) or sym_map.get(p_name.lower()) or g_sym
-                        db_name = name_map.get(p_name.lower()) or name_map.get(g_sym.lower()) or p_name
+                        db_sym = sym_map.get(g_sym.lower()) or sym_map.get(p_name.lower()) or sym_map.get(str(t).lower()) or g_sym
+                        db_name = name_map.get(p_name.lower()) or name_map.get(g_sym.lower()) or name_map.get(str(t).lower()) or p_name
                         symbols.append(db_sym)
                         names.append(db_name)
                     else:

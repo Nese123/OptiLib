@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="/static/style.css?v=1.4">
+    <link rel="stylesheet" href="/static/style.css?v=1.5">
     <script src="https://cdn.plot.ly/plotly-cartesian-2.35.0.min.js" charset="utf-8" defer></script>
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%%22 y=%2250%%22 dominant-baseline=%22central%22 text-anchor=%22middle%22 font-size=%2280%22>💊</text></svg>">
@@ -27,7 +27,8 @@
                 <span class="navbar-title"><span class="text-teal">Opti</span><span class="text-white">Lib</span></span>
             </a>
             <div class="navbar-links">
-                <a href="#" class="nav-link active" onclick="event.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' });">Home</a>
+                <a href="#" class="nav-link active"
+                    onclick="event.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' });">Home</a>
                 <a href="#set-up" class="nav-link">Set Up</a>
                 <a href="#optimization" class="nav-link">Optimization</a>
                 <a href="#visualizations" class="nav-link">Visualization</a>
@@ -42,7 +43,8 @@
         </div>
         <!-- Mobile menu -->
         <div class="navbar-mobile-menu" id="navMobileMenu">
-            <a href="#" class="nav-link active" onclick="event.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' });">Home</a>
+            <a href="#" class="nav-link active"
+                onclick="event.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' });">Home</a>
             <a href="#set-up" class="nav-link">Set Up</a>
             <a href="#optimization" class="nav-link">Optimization</a>
             <a href="#visualizations" class="nav-link">Visualization</a>
@@ -419,6 +421,9 @@
                     <div class="opt-chart-wrapper">
                         <div class="chart-container" id="demoHistoryChart" style="height: 380px;"></div>
                     </div>
+                    <p class="opt-chart-desc">
+                        The algorithm automatically stops the optimization when it detects the solutions have converged. Optimization can also be stopped manually at any time by pressing "Stop Optimization".
+                    </p>
                 </div>
             </div>
 
@@ -756,7 +761,8 @@
         <div class="cta-glow"></div>
         <div class="section-container">
             <h2 class="cta-title">Ready to Optimize?</h2>
-            <p class="cta-subtitle">Upload your targets and let OptiLib find the optimal drug library for your
+            <p class="cta-subtitle">Upload your targets or affinity data and let OptiLib find the optimal drug library
+                for your
                 research.</p>
             <a href="/optimize" class="btn btn-primary btn-lg" id="ctaLaunchBtn">
                 <span>Get Started</span>
@@ -827,7 +833,10 @@
                     <span class="footer-title"><span class="text-teal">Opti</span><span
                             class="text-white">Lib</span></span>
                 </div>
-                <p class="footer-text">© Copyright 2026 <a href="https://www.helsinki.fi/en/hilife-helsinki-institute-life-science/units/fimm" target="_blank" rel="noopener noreferrer">FIMM</a> – Institute for Molecular Medicine Finland. All rights reserved.</p>
+                <p class="footer-text">© Copyright 2026 <a
+                        href="https://www.helsinki.fi/en/hilife-helsinki-institute-life-science/units/fimm"
+                        target="_blank" rel="noopener noreferrer">FIMM</a> – Institute for Molecular Medicine Finland.
+                    All rights reserved.</p>
             </div>
         </div>
     </footer>
