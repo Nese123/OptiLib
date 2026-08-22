@@ -343,7 +343,7 @@ def select_best_solution(res, problem):
 #  RESULT EXTRACTION & SAVING
 # ═══════════════════════════════════════════════════════════════
 
-def save_results(res, best_idx, full_df, output_file='winning_library_matrix.xlsx'):
+def save_results(res, best_idx, full_df, output_file='optimized_library.xlsx'):
     """Extract the winning library from the optimizer result and save it to Excel.
 
     Returns:

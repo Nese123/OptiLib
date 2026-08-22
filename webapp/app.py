@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import uuid
+import shutil
 import sqlite3
 import threading
 import warnings
@@ -501,6 +502,31 @@ def _resolve_compounds(compound_ids):
     return resolved
 
 
+def _format_target_col(pref_name, gene_symbol, fallback=""):
+    """Format target column header as 'Target Name (Gene Symbol)' if distinct, otherwise fallback."""
+    p_name = str(pref_name).strip() if pd.notna(pref_name) and pref_name is not None else ""
+    g_sym = str(gene_symbol).strip() if pd.notna(gene_symbol) and gene_symbol is not None else ""
+    fb = str(fallback).strip() if pd.notna(fallback) and fallback is not None else ""
+
+    if p_name in ("nan", "None", "Unknown"):
+        p_name = ""
+    if g_sym in ("nan", "None", "Unknown"):
+        g_sym = ""
+    if fb in ("nan", "None", "Unknown"):
+        fb = ""
+
+    if p_name and g_sym and p_name.lower() != g_sym.lower():
+        return f"{p_name} ({g_sym})"
+    elif p_name:
+        return p_name
+    elif g_sym:
+        return g_sym
+    elif fb:
+        return fb
+    else:
+        return "Unknown"
+
+
 def _resolve_targets(target_ids):
     """Resolve target identifiers (ChEMBL IDs, names, gene symbols, accessions) against ChEMBL database."""
     if not target_ids:
@@ -563,8 +589,8 @@ def _resolve_targets(target_ids):
                 (gene_sym and target_in_lower == str(gene_sym).lower()) or
                 (acc and target_in_lower == str(acc).lower()) or
                 (syn and target_in_lower == str(syn).lower())):
-                # Preferred canonical display name: Gene Symbol -> Preferred Name -> ChEMBL ID
-                canonical = gene_sym if gene_sym else (name if name else cid)
+                # Preferred canonical display name: Target Name (Gene Symbol)
+                canonical = _format_target_col(name, gene_sym, cid or target_in)
                 resolved[target_in] = {
                     "raw_id": target_in,
                     "chembl_id": cid or "",
@@ -1427,11 +1453,11 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
     price_state = s["price_upload_state"]
 
     try:
-        output_dir = PROJECT_ROOT / "webapp" / "output"
-        output_dir.mkdir(exist_ok=True)
+        output_dir = PROJECT_ROOT / "webapp" / "output" / sid
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate cache key based on inputs
-        cache_str = f"{sorted(chembl_ids)}_{selectivity_threshold}_{remove_targets}_{matched_count}"
+        cache_str = f"v2_{sorted(chembl_ids)}_{selectivity_threshold}_{remove_targets}_{matched_count}"
         cache_key = hashlib.md5(cache_str.encode('utf-8')).hexdigest()
         matrix_file = str(output_dir / f"selectivity_matrix_{cache_key}.csv")
         
@@ -1471,21 +1497,21 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
 
         # Get the actual names of the uploaded targets
         query0 = f"""
-            SELECT DISTINCT COALESCE(
-                (SELECT csy.component_synonym 
-                 FROM target_components tc 
-                 JOIN component_synonyms csy ON tc.component_id = csy.component_id 
-                 WHERE tc.tid = td.tid AND csy.syn_type = 'GENE_SYMBOL' 
-                 LIMIT 1),
-                td.pref_name, 
-                td.chembl_id
-            ) AS Target_Name
+            SELECT td.chembl_id, td.pref_name,
+                   (SELECT csy.component_synonym 
+                    FROM target_components tc 
+                    JOIN component_synonyms csy ON tc.component_id = csy.component_id 
+                    WHERE tc.tid = td.tid AND csy.syn_type = 'GENE_SYMBOL' 
+                    LIMIT 1) AS gene_symbol
             FROM target_dictionary td
             WHERE ({where_targets})
         """
         with sqlite3.connect(db_path) as conn:
             uploaded_targets_df = pd.read_sql_query(query0, conn, params=params)
-        uploaded_target_names = uploaded_targets_df['Target_Name'].tolist()
+        uploaded_target_names = [
+            _format_target_col(r["pref_name"], r["gene_symbol"], r["chembl_id"])
+            for _, r in uploaded_targets_df.iterrows()
+        ]
 
         # Query 1: Fetch selective and potent compounds in a single unified query
         query1 = f"""
@@ -1497,15 +1523,12 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
                 cs.standard_inchi_key AS InChIKey,
                 cp.full_mwt AS MW,
                 td.chembl_id AS Target_ChEMBL_ID,
-                COALESCE(
-                    (SELECT csy.component_synonym 
-                     FROM target_components tc 
-                     JOIN component_synonyms csy ON tc.component_id = csy.component_id 
-                     WHERE tc.tid = td.tid AND csy.syn_type = 'GENE_SYMBOL' 
-                     LIMIT 1),
-                    td.pref_name,
-                    td.chembl_id
-                ) AS Target_Name,
+                td.pref_name AS Target_Pref_Name,
+                (SELECT csy.component_synonym 
+                 FROM target_components tc 
+                 JOIN component_synonyms csy ON tc.component_id = csy.component_id 
+                 WHERE tc.tid = td.tid AND csy.syn_type = 'GENE_SYMBOL' 
+                 LIMIT 1) AS Target_Gene_Symbol,
                 cts.selectivity_score AS Selectivity_Score
             FROM compound_target_selectivity cts
             JOIN target_dictionary td ON cts.tid = td.tid
@@ -1551,7 +1574,10 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         compounds_found_initial = df_raw['Clean_Molregno'].nunique() if not df_raw.empty else 0
         if compounds_found_initial == 0:
             raise ValueError("No highly active and selective compounds found for the provided targets.")
-        df_raw["Target_Name"] = df_raw["Target_Name"].fillna(df_raw["Target_ChEMBL_ID"])
+        df_raw["Target_Name"] = [
+            _format_target_col(p, g, c)
+            for p, g, c in zip(df_raw["Target_Pref_Name"], df_raw["Target_Gene_Symbol"], df_raw["Target_ChEMBL_ID"])
+        ]
         _update_pipeline(sid, 1, "Searching for selective compounds...",
                          f"Fetched selectivity scores for {len(df_raw)} records covering {compounds_found_initial} compounds")
 
@@ -1676,9 +1702,12 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         custom_matched_count = custom_price_series.notna().sum()
         molprice_approx_count = (final_export_df["Molport_Source"] == "MolPrice").sum()
         molport_direct_count = found_count - molprice_approx_count - custom_matched_count
+        has_custom_price = bool(price_state.get("files")) or bool(price_state.get("price_map")) or (price_state.get("count", 0) > 0) or (custom_matched_count > 0)
+        custom_part_summary = f"{custom_matched_count} prices assigned from custom price file, " if has_custom_price else ""
+        custom_part_detail = f"Custom: {custom_matched_count}, " if has_custom_price else ""
         
         _update_pipeline(sid, 2, "Getting price data...",
-                         f"Found prices for {found_count}/{len(final_export_df)} compounds (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})")
+                         f"Found prices for {found_count}/{len(final_export_df)} compounds ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})")
 
         # ─────────────────────────────────────────────
         # Handle missing prices
@@ -1704,14 +1733,12 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
                 final_prices = final_export_df["Molport_Price"].copy()
                 final_prices.loc[missing_price_mask] = predicted_prices
                 final_prices = final_prices.values
+                molprice_approx_count += missing_count
 
                 _update_pipeline(sid, 2, "Getting price data...",
-                                 f"MolPrice predicted prices for {missing_count} compounds. (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice: {molprice_approx_count})",
-                                 summary=f"Predicted {missing_count} prices. (Custom: {custom_matched_count}, MolPort: {molport_direct_count})")
+                                 f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})",
+                                 summary=f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_approx_count} prices approximated using MolPrice.")
             except Exception as e:
-                _update_pipeline(sid, 2, "Getting price data...",
-                                 f"MolPrice prediction failed ({e}), using median fallback.",
-                                 summary=f"Prediction failed, used fallback.")
                 fallback = final_export_df["Molport_Price"].median()
                 if pd.isna(fallback):
                     fallback = 100.0
@@ -1720,10 +1747,13 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
                     fallback,
                     final_export_df["Molport_Price"]
                 )
+                _update_pipeline(sid, 2, "Getting price data...",
+                                 f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count}, Fallback: {missing_count})",
+                                 summary=f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_approx_count} prices approximated using MolPrice, {missing_count} median fallback.")
         else:
             _update_pipeline(sid, 2, "Getting price data...", 
-                             f"All prices assigned (Custom: {custom_matched_count}, MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})", 
-                             summary=f"All prices assigned: {custom_matched_count} from custom file, {molport_direct_count} direct MolPort, {molprice_approx_count} MolPrice.")
+                             f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})", 
+                             summary=f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_approx_count} prices approximated using MolPrice.")
             final_prices = final_export_df["Molport_Price"].values
         final_export_df["Price_USD_per_mg"] = final_prices
         final_export_df.drop(columns=["MW", "Molport_Price", "Molport_Source"], inplace=True, errors="ignore")
@@ -1780,8 +1810,8 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
     price_state = s["price_upload_state"]
 
     try:
-        output_dir = PROJECT_ROOT / "webapp" / "output"
-        output_dir.mkdir(exist_ok=True)
+        output_dir = PROJECT_ROOT / "webapp" / "output" / sid
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         with _lock:
             raw_df = aff_state["df"]
@@ -1885,6 +1915,7 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
         # MolPort lookup cache
         inchikeys = [r["InChIKey"] for r in meta_records if r["InChIKey"]]
         molport_dict = {}
+        molport_source_dict = {}
         if inchikeys:
             molport_db = str(DATABASE_DIR / "molport.db")
             try:
@@ -1893,16 +1924,21 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
                     for i in range(0, len(inchikeys), mp_chunk_size):
                         chunk = inchikeys[i:i + mp_chunk_size]
                         ph = ",".join(["?"] * len(chunk))
-                        query = f"SELECT INCHIKEY, PRICE_1MG FROM compounds WHERE INCHIKEY IN ({ph})"
+                        query = f"SELECT INCHIKEY, PRICE_1MG, MOLPORTID FROM compounds WHERE INCHIKEY IN ({ph})"
                         for row in conn.execute(query, chunk).fetchall():
-                            molport_dict[row[0]] = float(row[1])
+                            ik_val = row[0]
+                            price_val = float(row[1])
+                            molport_id_val = str(row[2]) if row[2] else ""
+                            if ik_val not in molport_dict:
+                                molport_dict[ik_val] = price_val
+                                molport_source_dict[ik_val] = molport_id_val
             except Exception as e:
                 print("MolPort DB lookup warning:", e)
 
         molprice_model = None
         prices = []
         custom_price_count = 0
-        molport_count = 0
+        molport_direct_count = 0
         molprice_count = 0
         fallback_count = 0
 
@@ -1917,11 +1953,15 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
                 custom_price_count += 1
                 continue
 
-            # Tier 2: MolPort Database
+            # Tier 2: MolPort Database (checking if genuine MolPort or DB pre-computed MolPrice)
             ik = row_meta["InChIKey"]
             if ik and ik in molport_dict:
                 prices.append(float(molport_dict[ik]))
-                molport_count += 1
+                src = molport_source_dict.get(ik, "")
+                if src == "MolPrice":
+                    molprice_count += 1
+                else:
+                    molport_direct_count += 1
                 continue
 
             # Tier 3: MolPrice ML Model
@@ -1950,18 +1990,18 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
 
         final_export_df["Price_USD_per_mg"] = prices
 
-        price_summary_parts = []
-        if custom_price_count > 0:
-            price_summary_parts.append(f"{custom_price_count} custom file")
-        if molport_count > 0:
-            price_summary_parts.append(f"{molport_count} MolPort DB")
-        if molprice_count > 0:
-            price_summary_parts.append(f"{molprice_count} MolPrice predicted")
-        if fallback_count > 0:
-            price_summary_parts.append(f"{fallback_count} median fallback (${fallback_val:.2f}/mg)")
+        has_custom_price = bool(price_state.get("files")) or bool(price_state.get("price_map")) or (price_state.get("count", 0) > 0) or (custom_price_count > 0)
+        custom_part_summary = f"{custom_price_count} prices assigned from custom price file, " if has_custom_price else ""
+        custom_part_detail = f"Custom: {custom_price_count}, " if has_custom_price else ""
 
-        price_summary_str = ", ".join(price_summary_parts) or "All prices assigned."
-        _update_pipeline(sid, 2, "Getting price data...", f"Resolved prices: {price_summary_str}", summary=f"Prices resolved: {price_summary_str}")
+        if fallback_count > 0:
+            summary_msg = f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_count} prices approximated using MolPrice, {fallback_count} median fallback."
+            detail_msg = f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_count}, Fallback: {fallback_count})"
+        else:
+            summary_msg = f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_count} prices approximated using MolPrice."
+            detail_msg = f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_count})"
+
+        _update_pipeline(sid, 2, "Getting price data...", detail_msg, summary=summary_msg)
 
         # ─────────────────────────────────────────────
         # Step 3: Saving matrix
@@ -1972,7 +2012,7 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
         meta_cols = ["Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"]
         final_export_df = final_export_df[meta_cols + target_cols]
 
-        cache_key = hashlib.md5(f"affinity_{len(final_export_df)}_{selectivity_threshold}_{remove_targets}".encode('utf-8')).hexdigest()
+        cache_key = hashlib.md5(f"v2_affinity_{len(final_export_df)}_{selectivity_threshold}_{remove_targets}".encode('utf-8')).hexdigest()
         matrix_file = str(output_dir / f"selectivity_matrix_affinity_{cache_key}.csv")
         final_export_df.to_csv(matrix_file, index=False)
 
@@ -2145,7 +2185,10 @@ def reset_state():
             "filename": "",
             "count": 0,
         })
-    # We no longer clear the global cache files on reset, as they are cached by parameters.
+    # Clean up per-session output directory on reset
+    session_output_dir = PROJECT_ROOT / "webapp" / "output" / sid
+    if session_output_dir.exists():
+        shutil.rmtree(session_output_dir, ignore_errors=True)
     return jsonify({"status": "reset"})
 
 
@@ -2350,7 +2393,7 @@ def _process_and_store_results(sid, res_X, res_F, best_idx, front, problem, max_
     # Save results to per-session output directory
     output_dir = PROJECT_ROOT / "webapp" / "output" / sid
     output_dir.mkdir(parents=True, exist_ok=True)
-    winning_file = str(output_dir / "winning_library.xlsx")
+    winning_file = str(output_dir / "optimized_library.xlsx")
 
     winning_smiles, selected_drug_indices, winning_matrix_df = save_results(
         res_light, best_idx, matrix_df_indexed,
@@ -2542,7 +2585,7 @@ def select_solution():
         # Save to per-session output directory
         output_dir = PROJECT_ROOT / "webapp" / "output" / sid
         output_dir.mkdir(parents=True, exist_ok=True)
-        winning_file = str(output_dir / "winning_library.xlsx")
+        winning_file = str(output_dir / "optimized_library.xlsx")
 
         winning_smiles, selected_drug_indices, winning_matrix_df = save_results(
             res_light, idx, matrix_df_indexed,
@@ -2574,61 +2617,92 @@ def _get_target_info(target_list):
     """
     if not target_list:
         return target_list, target_list
+
+    import re
+    parsed_symbols = {}
+    parsed_names = {}
+    to_lookup = set()
+
+    for t in target_list:
+        t_str = str(t).strip()
+        m = re.match(r"^(.+?)\s*\((.+?)\)$", t_str)
+        if m:
+            p_name = m.group(1).strip()
+            g_sym = m.group(2).strip()
+            parsed_symbols[t] = g_sym
+            parsed_names[t] = p_name
+            to_lookup.add(p_name)
+            to_lookup.add(g_sym)
+        else:
+            to_lookup.add(t_str)
+
     try:
         db_path = str(DATABASE_DIR / "chembl_36.db")
-        if not os.path.exists(db_path):
-            return target_list, target_list
-        with sqlite3.connect(db_path) as conn:
-            placeholders = ",".join(["?"] * len(target_list))
-            query = f"""
-                SELECT td.chembl_id, td.pref_name, 
-                       (SELECT csy2.component_synonym 
-                        FROM target_components tc2 
-                        JOIN component_synonyms csy2 ON tc2.component_id = csy2.component_id 
-                        WHERE tc2.tid = td.tid AND csy2.syn_type = 'GENE_SYMBOL' 
-                        LIMIT 1) AS gene_symbol,
-                       cs.accession, csy.component_synonym
-                FROM target_dictionary td
-                LEFT JOIN target_components tc ON td.tid = tc.tid
-                LEFT JOIN component_sequences cs ON tc.component_id = cs.component_id
-                LEFT JOIN component_synonyms csy ON cs.component_id = csy.component_id
-                WHERE (
-                    td.pref_name COLLATE NOCASE IN ({placeholders}) OR
-                    td.chembl_id COLLATE NOCASE IN ({placeholders}) OR
-                    cs.accession COLLATE NOCASE IN ({placeholders}) OR
-                    csy.component_synonym COLLATE NOCASE IN ({placeholders})
-                )
-                AND td.target_type = 'SINGLE PROTEIN'
-                AND td.organism = 'Homo sapiens'
-            """
-            rows = conn.execute(query, target_list * 4).fetchall()
-            
-            sym_map = {}
-            name_map = {}
-            for cid, pref_name, sym, acc, csy_syn in rows:
-                p_name = pref_name or sym or cid or acc
-                s_name = sym or pref_name or cid or acc
-                if cid:
-                    sym_map[str(cid).lower()] = s_name
-                    name_map[str(cid).lower()] = p_name
-                if pref_name:
-                    sym_map[str(pref_name).lower()] = s_name
-                    name_map[str(pref_name).lower()] = p_name
-                if sym:
-                    sym_map[str(sym).lower()] = s_name
-                    name_map[str(sym).lower()] = p_name
-                if acc:
-                    sym_map[str(acc).lower()] = s_name
-                    name_map[str(acc).lower()] = p_name
-                if csy_syn:
-                    sym_map[str(csy_syn).lower()] = s_name
-                    name_map[str(csy_syn).lower()] = p_name
-            
-            symbols = [sym_map.get(str(t).lower(), t) for t in target_list]
-            names = [name_map.get(str(t).lower(), t) for t in target_list]
-            return symbols, names
+        if os.path.exists(db_path) and to_lookup:
+            lookup_list = list(to_lookup)
+            with sqlite3.connect(db_path) as conn:
+                placeholders = ",".join(["?"] * len(lookup_list))
+                query = f"""
+                    SELECT td.chembl_id, td.pref_name, 
+                           (SELECT csy2.component_synonym 
+                            FROM target_components tc2 
+                            JOIN component_synonyms csy2 ON tc2.component_id = csy2.component_id 
+                            WHERE tc2.tid = td.tid AND csy2.syn_type = 'GENE_SYMBOL' 
+                            LIMIT 1) AS gene_symbol,
+                           cs.accession, csy.component_synonym
+                    FROM target_dictionary td
+                    LEFT JOIN target_components tc ON td.tid = tc.tid
+                    LEFT JOIN component_sequences cs ON tc.component_id = cs.component_id
+                    LEFT JOIN component_synonyms csy ON cs.component_id = csy.component_id
+                    WHERE (
+                        td.pref_name COLLATE NOCASE IN ({placeholders}) OR
+                        td.chembl_id COLLATE NOCASE IN ({placeholders}) OR
+                        cs.accession COLLATE NOCASE IN ({placeholders}) OR
+                        csy.component_synonym COLLATE NOCASE IN ({placeholders})
+                    )
+                    AND td.target_type = 'SINGLE PROTEIN'
+                    AND td.organism = 'Homo sapiens'
+                """
+                rows = conn.execute(query, lookup_list * 4).fetchall()
+                
+                sym_map = {}
+                name_map = {}
+                for cid, pref_name, sym, acc, csy_syn in rows:
+                    p_name = pref_name or sym or cid or acc
+                    s_name = sym or pref_name or cid or acc
+                    for key in (cid, pref_name, sym, acc, csy_syn):
+                        if key:
+                            sym_map[str(key).lower()] = s_name
+                            name_map[str(key).lower()] = p_name
+
+                symbols = []
+                names = []
+                for t in target_list:
+                    if t in parsed_symbols:
+                        g_sym = parsed_symbols[t]
+                        p_name = parsed_names[t]
+                        db_sym = sym_map.get(g_sym.lower()) or sym_map.get(p_name.lower()) or g_sym
+                        db_name = name_map.get(p_name.lower()) or name_map.get(g_sym.lower()) or p_name
+                        symbols.append(db_sym)
+                        names.append(db_name)
+                    else:
+                        t_lower = str(t).lower()
+                        symbols.append(sym_map.get(t_lower, str(t)))
+                        names.append(name_map.get(t_lower, str(t)))
+                return symbols, names
     except Exception:
-        return target_list, target_list
+        pass
+
+    symbols = []
+    names = []
+    for t in target_list:
+        if t in parsed_symbols:
+            symbols.append(parsed_symbols[t])
+            names.append(parsed_names[t])
+        else:
+            symbols.append(str(t))
+            names.append(str(t))
+    return symbols, names
 
 
 def _map_targets_to_gene_symbols(target_list):
@@ -2705,7 +2779,7 @@ def download_library():
     with _lock:
         path = opt_res.get("winning_file")
     if path and os.path.isfile(path):
-        return send_file(path, as_attachment=True, download_name="winning_library.xlsx")
+        return send_file(path, as_attachment=True, download_name="optimized_library.xlsx")
     return jsonify({"error": "No library file available"}), 404
 
 
