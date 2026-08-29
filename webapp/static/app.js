@@ -2,6 +2,30 @@
    Drug Library Optimization — Frontend Logic
    ═══════════════════════════════════════════════════════════════ */
 
+// ─── CSRF Protection ───
+// Automatically include the X-CSRFToken header on all mutating requests.
+// The token is rendered server-side in a <meta name="csrf-token"> tag.
+const _nativeFetch = window.fetch;
+window.fetch = function(url, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+        const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+        if (csrfMeta) {
+            const token = csrfMeta.getAttribute('content');
+            if (options.headers instanceof Headers) {
+                if (!options.headers.has('X-CSRFToken')) {
+                    options.headers.set('X-CSRFToken', token);
+                }
+            } else {
+                options.headers = Object.assign({}, options.headers || {}, {
+                    'X-CSRFToken': options.headers?.['X-CSRFToken'] || token
+                });
+            }
+        }
+    }
+    return _nativeFetch.call(this, url, options);
+};
+
 // ─── State ───
 let currentStep = 1;
 let uploadMode = sessionStorage.getItem('uploadMode') || 'target'; // 'target' | 'affinity'

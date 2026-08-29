@@ -23,8 +23,10 @@ import pandas as pd
 from flask import Flask, render_template, request, jsonify, send_file, session
 from pymoo.core.callback import Callback
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect
 
 # ═══════════════════════════════════════════════════════════════
 #  PATH SETUP & ENVIRONMENT VARIABLES
@@ -85,6 +87,9 @@ if not secret_key:
     secret_key = os.urandom(32).hex()
 app.secret_key = secret_key
 
+# CSRF protection (double-submit cookie pattern for AJAX)
+csrf = CSRFProtect(app)
+
 # Rate limiter setup
 limiter = Limiter(
     get_remote_address,
@@ -111,6 +116,15 @@ def set_security_headers(response):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.plot.ly; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'self'"
+    )
     return response
 
 
@@ -875,6 +889,7 @@ def favicon():
 @app.route("/health")
 @app.route("/api/health")
 @limiter.exempt
+@csrf.exempt
 def health_check():
     """Health check endpoint for Docker, Nginx, and cloud orchestrators."""
     chembl_file = get_chembl_db_path()
@@ -913,16 +928,17 @@ def upload_targets():
         if file.filename == "":
             continue
 
+        safe_name = secure_filename(file.filename) or "upload"
         try:
-            filename = file.filename.lower()
+            filename = safe_name.lower()
             if filename.endswith(".csv"):
                 df = pd.read_csv(file)
             elif filename.endswith((".xlsx", ".xls")):
                 df = pd.read_excel(file)
             else:
-                return jsonify({"error": f"Unsupported file type for {file.filename}. Use CSV or Excel (.xlsx)."}), 400
+                return jsonify({"error": f"Unsupported file type for {safe_name}. Use CSV or Excel (.xlsx)."}), 400
         except Exception as e:
-            return jsonify({"error": f"Failed to read {file.filename}: {str(e)}"}), 400
+            return jsonify({"error": f"Failed to read {safe_name}: {str(e)}"}), 400
 
         target_col = None
         for col in df.columns:
@@ -935,7 +951,7 @@ def upload_targets():
                 target_col = df.columns[0]
             else:
                 return jsonify({
-                    "error": f"Could not find Target column in {file.filename}."
+                    "error": f"Could not find Target column in {safe_name}."
                 }), 400
 
         file_targets = df[target_col].dropna().astype(str).str.strip().tolist()
@@ -1047,16 +1063,17 @@ def upload_affinity():
     for file in files:
         if not file or file.filename == "":
             continue
+        safe_name = secure_filename(file.filename) or "upload"
         try:
-            filename = file.filename.lower()
+            filename = safe_name.lower()
             if filename.endswith(".csv"):
                 df = pd.read_csv(file)
             elif filename.endswith((".xlsx", ".xls")):
                 df = pd.read_excel(file)
             else:
-                return jsonify({"error": f"Unsupported file type for {file.filename}. Use CSV or Excel (.xlsx)."}), 400
+                return jsonify({"error": f"Unsupported file type for {safe_name}. Use CSV or Excel (.xlsx)."}), 400
         except Exception as e:
-            return jsonify({"error": f"Failed to read {file.filename}: {str(e)}"}), 400
+            return jsonify({"error": f"Failed to read {safe_name}: {str(e)}"}), 400
 
         cmpd_col = None
         tgt_col = None
@@ -1083,7 +1100,7 @@ def upload_affinity():
 
         if cmpd_col is None or tgt_col is None or aff_col is None:
             return jsonify({
-                "error": f"Could not identify Compound, Target, and Affinity columns in {file.filename}. "
+                "error": f"Could not identify Compound, Target, and Affinity columns in {safe_name}. "
                          f"Please ensure columns are named 'Compound', 'Target', and 'Affinity'."
             }), 400
 
@@ -1095,7 +1112,7 @@ def upload_affinity():
         sub_df = sub_df.drop_duplicates()
 
         if sub_df.empty:
-            return jsonify({"error": f"No valid data rows found in {file.filename}."}), 400
+            return jsonify({"error": f"No valid data rows found in {safe_name}."}), 400
 
         file_compounds = sub_df["Compound_Raw"].unique().tolist()
         file_targets = sub_df["Target_Raw"].unique().tolist()
@@ -1133,7 +1150,7 @@ def upload_affinity():
         with _lock:
             if "files" not in aff_state:
                 aff_state["files"] = {}
-            aff_state["files"][file.filename] = {
+            aff_state["files"][safe_name] = {
                 "df": sub_df,
                 "resolved_compounds": res_compounds,
                 "resolved_targets": res_targets,
@@ -1142,7 +1159,7 @@ def upload_affinity():
             }
 
         uploaded_files_summary.append({
-            "name": file.filename,
+            "name": safe_name,
             "num_datapoints": len(sub_df),
             "num_compounds": len(file_compounds),
             "num_targets": len(file_targets),
@@ -1197,16 +1214,17 @@ def upload_prices():
         if not file or file.filename == "":
             continue
 
+        safe_name = secure_filename(file.filename) or "upload"
         try:
-            filename = file.filename.lower()
+            filename = safe_name.lower()
             if filename.endswith(".csv"):
                 df = pd.read_csv(file)
             elif filename.endswith((".xlsx", ".xls")):
                 df = pd.read_excel(file)
             else:
-                return jsonify({"error": f"Unsupported file type for {file.filename}. Use CSV or Excel (.xlsx)."}), 400
+                return jsonify({"error": f"Unsupported file type for {safe_name}. Use CSV or Excel (.xlsx)."}), 400
         except Exception as e:
-            return jsonify({"error": f"Failed to read price file {file.filename}: {str(e)}"}), 400
+            return jsonify({"error": f"Failed to read price file {safe_name}: {str(e)}"}), 400
 
         cmpd_col = None
         price_col = None
@@ -1225,7 +1243,7 @@ def upload_prices():
 
         if cmpd_col is None or price_col is None:
             return jsonify({
-                "error": f"Could not identify Compound and Price columns in {file.filename}. Please use 'Compound' and 'Price'."
+                "error": f"Could not identify Compound and Price columns in {safe_name}. Please use 'Compound' and 'Price'."
             }), 400
 
         clean_df = pd.DataFrame({
@@ -1236,7 +1254,7 @@ def upload_prices():
         clean_df = clean_df.drop_duplicates(subset=["Compound"], keep="last")
 
         if clean_df.empty:
-            return jsonify({"error": f"No valid positive price rows found in {file.filename}."}), 400
+            return jsonify({"error": f"No valid positive price rows found in {safe_name}."}), 400
 
         unique_cmpds = clean_df["Compound"].unique().tolist()
         resolved_cmpds = _resolve_compounds(unique_cmpds)
@@ -1259,14 +1277,14 @@ def upload_prices():
         with _lock:
             if "files" not in price_state:
                 price_state["files"] = {}
-            price_state["files"][file.filename] = {
+            price_state["files"][safe_name] = {
                 "df": clean_df,
                 "resolved_compounds": resolved_cmpds,
                 "formatted_compounds": file_formatted,
             }
 
         uploaded_files_summary.append({
-            "name": file.filename,
+            "name": safe_name,
             "num_prices": len(clean_df),
             "compounds": file_formatted
         })
