@@ -119,7 +119,7 @@ sudo apt install -y nginx certbot python3-certbot-nginx
 ### Step B: Obtain SSL Certificates
 
 ```bash
-sudo certbot certonly --nginx -d yourdomain.com
+sudo certbot certonly --nginx -d optilib.aittokallio.group
 ```
 
 ### Step C: Configure Nginx
@@ -130,7 +130,7 @@ Copy the production Nginx config template:
 sudo cp nginx/nginx.conf /etc/nginx/sites-available/optilib.conf
 ```
 
-Edit `/etc/nginx/sites-available/optilib.conf` to replace `yourdomain.com` with your actual domain and point upstream to `127.0.0.1:5000`:
+Edit `/etc/nginx/sites-available/optilib.conf` to replace `optilib.aittokallio.group` with your actual domain and point upstream to `127.0.0.1:5000`:
 
 ```nginx
 upstream optilib_app {
@@ -152,7 +152,7 @@ sudo systemctl reload nginx
 
 * **Health Endpoint:** `GET /health` or `GET /api/health`
   ```bash
-  curl -i https://yourdomain.com/health
+  curl -i https://optilib.aittokallio.group/health
   ```
   Returns `200 OK` JSON:
   ```json
