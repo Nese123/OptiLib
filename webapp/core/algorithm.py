@@ -97,17 +97,19 @@ class DrugLibraryProblem(ElementwiseProblem):
         # If we miss 3 targets, and 2 are allowed: 3 - 2 = 1 (Fail)
         coverage_violation = missed_targets - self.max_allowed_misses
 
-        # Filter the array to only look at targets with a score > 0
-        covered_scores = target_max_scores[target_max_scores > 0]
+        # Score all targets: covered targets get their max score, uncovered get 0.
+        # This penalizes dropping targets even when the constraint allows it.
+        all_scores = np.maximum(target_max_scores, 0)
+        covered_scores = all_scores[all_scores > 0]
 
         out["G"] = [coverage_violation]
 
-        # Calculate the weakest link of the covered targets
+        # Calculate biological score across ALL targets (uncovered = 0)
         if len(covered_scores) > 0:
             if self.use_median:
-                biological_score = np.median(covered_scores)
+                biological_score = np.median(all_scores)
             else:
-                biological_score = self.weight_mean * np.mean(covered_scores) + self.weight_min * np.min(covered_scores)
+                biological_score = self.weight_mean * np.mean(all_scores) + self.weight_min * np.min(covered_scores)
         else:
             biological_score = 0.0  # Fallback if all targets are missed
 
@@ -337,6 +339,89 @@ def select_best_solution(res, problem):
         best_idx = 0
 
     return best_idx, front
+
+
+# ═══════════════════════════════════════════════════════════════
+#  PROGRESS HISTORY PLOT
+# ═══════════════════════════════════════════════════════════════
+
+def save_progress_history_plot(history, output_dir=None):
+    """Save a clean, white-background matplotlib plot of the optimization progress history.
+
+    Generates a single combined plot with dual y-axes (left: Selectivity, right: Cost)
+    over generations, matching the webpage progress history chart.
+
+    Args:
+        history: List of dicts with keys 'generation', 'best_selectivity', 'best_cost'.
+        output_dir: Path to save the image. Defaults to webapp/output/.
+    """
+    if not history or len(history) == 0:
+        return
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+
+    generations = [h["generation"] for h in history]
+    selectivities = [h["best_selectivity"] for h in history]
+    costs = [h["best_cost"] for h in history]
+
+    fig, ax1 = plt.subplots(figsize=(9, 6))
+    fig.patch.set_facecolor("white")
+    ax1.set_facecolor("white")
+
+    color_sel = "#d93025"   # Red (Selectivity)
+    color_cost = "#1a73e8"  # Blue (Cost)
+
+    # ── Left Y-axis: Selectivity ──
+    line1 = ax1.plot(
+        generations, selectivities,
+        color=color_sel, linewidth=2,
+        marker="o", markersize=4, markerfacecolor="white", markeredgecolor=color_sel, markeredgewidth=1.5,
+        label="Selectivity"
+    )
+    ax1.set_xlabel("Generation", fontsize=12, labelpad=8)
+    ax1.set_ylabel("Best Selectivity Score", color=color_sel, fontsize=12, labelpad=8)
+    ax1.tick_params(axis="y", labelcolor=color_sel, labelsize=10)
+    ax1.tick_params(axis="x", labelsize=10)
+    ax1.grid(True, linestyle="--", alpha=0.4, color="#cccccc")
+
+    # ── Right Y-axis: Cost (Twin Axis) ──
+    ax2 = ax1.twinx()
+    line2 = ax2.plot(
+        generations, costs,
+        color=color_cost, linewidth=2,
+        marker="o", markersize=4, markerfacecolor="white", markeredgecolor=color_cost, markeredgewidth=1.5,
+        label="Cost"
+    )
+    ax2.set_ylabel("Lowest Cost (USD)", color=color_cost, fontsize=12, labelpad=8)
+    ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+    ax2.tick_params(axis="y", labelcolor=color_cost, labelsize=10)
+    ax2.grid(False)  # Avoid overlapping gridlines
+
+    # ── Title & Combined Legend ──
+    plt.title("Optimization Progress History", fontsize=14, fontweight="bold", pad=15)
+    
+    lines = line1 + line2
+    labels = [l.get_label() for l in lines]
+    ax1.legend(lines, labels, loc="upper center", bbox_to_anchor=(0.5, -0.12),
+               ncol=2, frameon=True, facecolor="#f8f9fa", edgecolor="#dee2e6", fontsize=10)
+
+    fig.tight_layout()
+
+    if output_dir is None:
+        output_dir = Path(__file__).resolve().parent.parent / "output"
+    else:
+        output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    img_path = output_dir / "optimization_progress_history.png"
+    fig.savefig(str(img_path), dpi=200, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    print(f"Progress history plot saved as '{img_path.name}' in {output_dir}!")
+
+    return str(img_path)
 
 
 # ═══════════════════════════════════════════════════════════════

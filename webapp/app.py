@@ -26,7 +26,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, CSRFError
 
 # ═══════════════════════════════════════════════════════════════
 #  PATH SETUP & ENVIRONMENT VARIABLES
@@ -62,6 +62,7 @@ from core.algorithm import (
     run_optimization,
     select_best_solution,
     save_results,
+    save_progress_history_plot,
 )
 
 # Suppress sklearn version mismatch warning from MolPrice's pickled scaler
@@ -80,6 +81,7 @@ app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB upload limit
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
+app.config["WTF_CSRF_TIME_LIMIT"] = int(os.environ.get("WTF_CSRF_TIME_LIMIT", 7200))  # 2 hours (7200 seconds)
 
 secret_key = os.environ.get("SECRET_KEY")
 if not secret_key:
@@ -100,6 +102,16 @@ limiter = Limiter(
 )
 
 
+@app.errorhandler(CSRFError)
+def csrf_error_handler(e):
+    """Clean JSON response for CSRF validation and session expiration failures."""
+    return jsonify({
+        "error": "Your session or security token has expired. Please refresh the page.",
+        "reason": getattr(e, "description", str(e)),
+        "status": 400
+    }), 400
+
+
 @app.errorhandler(429)
 def ratelimit_handler(e):
     """Clean JSON response for rate limit violations."""
@@ -118,7 +130,7 @@ def set_security_headers(response):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' https://cdn.plot.ly; "
+        "script-src 'self' 'unsafe-inline' https://cdn.plot.ly; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: blob:; "
@@ -161,7 +173,7 @@ _init_sqlite_wal()
 # ═══════════════════════════════════════════════════════════════
 
 # Inactivity TTL and background cleanup frequency
-SESSION_TTL_SECONDS = int(os.environ.get("SESSION_TTL_SECONDS", 1800))       # 30 minutes
+SESSION_TTL_SECONDS = int(os.environ.get("SESSION_TTL_SECONDS", 7200))       # 2 hours (7200 seconds)
 CLEANUP_INTERVAL_SECONDS = int(os.environ.get("CLEANUP_INTERVAL_SECONDS", 300))  # 5 minutes
 
 # Thread lock for state access
@@ -2534,6 +2546,12 @@ def _run_nsga2(sid, weight_mean, allowed_miss_pct, mutation_multiplier, pop_size
 
         _process_and_store_results(sid, res_X, res_F, best_idx, front, problem, max_price=max_price)
 
+        # Save a clean matplotlib progress history plot (white background PNG)
+        with _lock:
+            history_snapshot = list(opt_st["history"])
+        session_output_dir = PROJECT_ROOT / "webapp" / "output" / sid
+        save_progress_history_plot(history_snapshot, output_dir=session_output_dir)
+
         with _lock:
             opt_st["status"] = "complete"
 
@@ -2542,6 +2560,11 @@ def _run_nsga2(sid, weight_mean, allowed_miss_pct, mutation_multiplier, pop_size
         if cb is not None and cb.last_pop_X is not None and problem is not None:
             try:
                 _process_stopped_results(sid, cb, problem, max_price=max_price)
+                # Save progress history plot even on early stop
+                with _lock:
+                    history_snapshot = list(opt_st["history"])
+                session_output_dir = PROJECT_ROOT / "webapp" / "output" / sid
+                save_progress_history_plot(history_snapshot, output_dir=session_output_dir)
             except Exception as inner_e:
                 with _lock:
                     opt_st["status"] = "error"
@@ -2712,11 +2735,23 @@ def _build_comparison(winning_matrix_df, problem, has_custom_affinity=False):
     lib_num_targets = lib_sel_matrix.shape[1]
     lib_num_drugs = lib_sel_matrix.shape[0]
 
-    cost_pct = (lib_total_cost / pool_total_cost * 100) if pool_total_cost else 0
-    sel_pct = (lib_mean_sel / pool_mean_sel * 100) if pool_mean_sel else 0
-    min_sel_pct = (lib_min_sel / pool_min_sel * 100) if pool_min_sel else 0
-    tgt_pct = (lib_num_targets / pool_num_targets * 100) if pool_num_targets else 0
-    cmp_pct = (lib_num_drugs / problem.pool_num_drugs * 100) if problem.pool_num_drugs else 0
+    # Rounded metrics matching the displayed table values
+    pool_cost_val = int(round(pool_total_cost))
+    lib_cost_val = int(round(lib_total_cost))
+    pool_mean_val = round(pool_mean_sel, 2)
+    lib_mean_val = round(lib_mean_sel, 2)
+    pool_min_val = round(pool_min_sel, 2)
+    lib_min_val = round(lib_min_sel, 2)
+    pool_targets_val = pool_num_targets
+    lib_targets_val = lib_num_targets
+    pool_drugs_val = problem.pool_num_drugs
+    lib_drugs_val = lib_num_drugs
+
+    cost_pct = (lib_cost_val / pool_cost_val * 100) if pool_cost_val else 0
+    sel_pct = (lib_mean_val / pool_mean_val * 100) if pool_mean_val else 0
+    min_sel_pct = (lib_min_val / pool_min_val * 100) if pool_min_val else 0
+    tgt_pct = (lib_targets_val / pool_targets_val * 100) if pool_targets_val else 0
+    cmp_pct = (lib_drugs_val / pool_drugs_val * 100) if pool_drugs_val else 0
 
     compounds_list = []
     for idx, row in winning_matrix_df.iterrows():
@@ -2747,18 +2782,18 @@ def _build_comparison(winning_matrix_df, problem, has_custom_affinity=False):
     return {
         "has_custom_affinity": has_custom_affinity,
         "pool": {
-            "total_cost": int(round(pool_total_cost)),
-            "mean_selectivity": round(pool_mean_sel, 2),
-            "min_selectivity": round(pool_min_sel, 2),
-            "num_targets": pool_num_targets,
-            "num_drugs": problem.pool_num_drugs,
+            "total_cost": pool_cost_val,
+            "mean_selectivity": pool_mean_val,
+            "min_selectivity": pool_min_val,
+            "num_targets": pool_targets_val,
+            "num_drugs": pool_drugs_val,
         },
         "library": {
-            "total_cost": int(round(lib_total_cost)),
-            "mean_selectivity": round(lib_mean_sel, 2),
-            "min_selectivity": round(lib_min_sel, 2),
-            "num_targets": lib_num_targets,
-            "num_drugs": lib_num_drugs,
+            "total_cost": lib_cost_val,
+            "mean_selectivity": lib_mean_val,
+            "min_selectivity": lib_min_val,
+            "num_targets": lib_targets_val,
+            "num_drugs": lib_drugs_val,
             "compounds": compounds_list,
         },
         "percentages": {
@@ -3074,6 +3109,19 @@ def download_matrix():
         pd.read_csv(csv_path).to_excel(xlsx_path, index=False, engine='xlsxwriter')
 
     return send_file(xlsx_path, as_attachment=True, download_name="selectivity_matrix.xlsx")
+
+
+@app.route("/api/download/progress-plot")
+@limiter.limit("60 per minute")
+def download_progress_plot():
+    sid, s = _get_session()
+    session_output_dir = PROJECT_ROOT / "webapp" / "output" / sid
+    plot_path = session_output_dir / "optimization_progress_history.png"
+    if not plot_path.exists():
+        plot_path = PROJECT_ROOT / "webapp" / "output" / "optimization_progress_history.png"
+    if plot_path.exists():
+        return send_file(plot_path, as_attachment=True, download_name="optimization_progress_history.png")
+    return jsonify({"error": "No progress history plot available"}), 404
 
 
 # ═══════════════════════════════════════════════════════════════
