@@ -11,6 +11,7 @@ Criteria & Inactivity Imputation Rules:
   3. If pchembl_value IS NULL and standard_relation IN ('>', '>=') with molar concentration >= 10,000 nM (10 uM): set pchembl_value = 5.0.
 - Molecules: Grouped by parent molecule (COALESCE(molecule_hierarchy.parent_molregno, activities.molregno))
 - Per-target affinity: Median pchembl_value per (parent_molregno, tid) pair
+- Compound filter: Only compounds with at least one median pchembl_value > 5.0 are retained
 - Selectivity formula: OptiLib blended formula (50% global mean diff + 50% top-5 nearest neighbors mean diff; 0.0 for 1-target compounds)
 - Output table: compound_target_selectivity (molregno INTEGER, tid INTEGER, selectivity_score REAL, PRIMARY KEY (molregno, tid))
 - Indexes: idx_cts_tid, idx_cts_molregno, idx_cts_score
@@ -224,6 +225,23 @@ def main():
     df_median = df_act.groupby(["molregno", "tid"], as_index=False)["pchembl_value"].median()
     del df_act  # Free memory immediately
     logger.info(f"Aggregated into {len(df_median):,} unique (molregno, tid) pairs across {df_median['molregno'].nunique():,} unique compounds in {time.time() - t0:.2f}s")
+
+    # 3b. Filter: keep only compounds with at least one median pchembl_value > 5.0
+    logger.info("Step 3b: Filtering out compounds with no median pChEMBL > 5.0...")
+    t0 = time.time()
+    pre_filter_compounds = df_median['molregno'].nunique()
+    pre_filter_pairs = len(df_median)
+    max_pchembl = df_median.groupby('molregno')['pchembl_value'].transform('max')
+    df_median = df_median[max_pchembl > 5.0].reset_index(drop=True)
+    del max_pchembl
+    post_filter_compounds = df_median['molregno'].nunique()
+    post_filter_pairs = len(df_median)
+    logger.info(
+        f"Removed {pre_filter_compounds - post_filter_compounds:,} compounds "
+        f"({pre_filter_pairs - post_filter_pairs:,} pairs) with max median pChEMBL <= 5.0. "
+        f"Remaining: {post_filter_pairs:,} pairs across {post_filter_compounds:,} compounds "
+        f"in {time.time() - t0:.2f}s"
+    )
 
     # 4. Compute blended selectivity scores
     logger.info("Step 4: Computing blended selectivity scores...")

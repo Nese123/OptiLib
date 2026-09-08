@@ -1730,7 +1730,7 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate cache key based on inputs
-        cache_str = f"v2_{sorted(chembl_ids)}_{selectivity_threshold}_{remove_targets}_{matched_count}"
+        cache_str = f"v3_{sorted(chembl_ids)}_{selectivity_threshold}_{remove_targets}_{matched_count}"
         cache_key = hashlib.md5(cache_str.encode('utf-8')).hexdigest()
         matrix_file = str(output_dir / f"selectivity_matrix_{cache_key}.csv")
         
@@ -1764,6 +1764,43 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         db_path = str(get_chembl_db_path())
 
         # Build WHERE clause
+        id_ph = ",".join(["?"] * len(chembl_ids))
+        where_targets = f"td.chembl_id IN ({id_ph})"
+        params = [cid.upper() for cid in chembl_ids]
+
+        # Filter: Drop targets that do not have any compound with pChEMBL > 5.0
+        query_active_targets = f"""
+            SELECT DISTINCT td.chembl_id
+            FROM target_dictionary td
+            JOIN assays ass ON td.tid = ass.tid
+            JOIN activities act ON act.assay_id = ass.assay_id
+            WHERE ({where_targets})
+              AND td.target_type = 'SINGLE PROTEIN'
+              AND td.organism = 'Homo sapiens'
+              AND ass.confidence_score IN (8, 9)
+              AND act.pchembl_value > 5.0;
+        """
+        with sqlite3.connect(db_path) as conn:
+            active_targets_df = pd.read_sql_query(query_active_targets, conn, params=params)
+
+        active_chembl_ids = set(active_targets_df["chembl_id"].str.upper()) if not active_targets_df.empty else set()
+        dropped_targets_no_pchembl = [cid for cid in chembl_ids if cid.upper() not in active_chembl_ids]
+
+        if dropped_targets_no_pchembl:
+            logger.info(
+                f"Dropping {len(dropped_targets_no_pchembl)} target(s) with no compound having pChEMBL > 5.0: "
+                f"{dropped_targets_no_pchembl}"
+            )
+            _update_pipeline(
+                sid, 1, "Searching for selective compounds...",
+                f"Dropped {len(dropped_targets_no_pchembl)} target(s) lacking compounds with pChEMBL > 5.0..."
+            )
+
+        if not active_chembl_ids:
+            raise ValueError("None of the provided targets have any compounds with pChEMBL > 5.0 in high-confidence human single-protein assays.")
+
+        # Retain only qualifying targets for downstream query and matrix building
+        chembl_ids = [cid for cid in chembl_ids if cid.upper() in active_chembl_ids]
         id_ph = ",".join(["?"] * len(chembl_ids))
         where_targets = f"td.chembl_id IN ({id_ph})"
         params = [cid.upper() for cid in chembl_ids]
@@ -1825,7 +1862,7 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
                       AND td2.target_type = 'SINGLE PROTEIN'
                       AND td2.organism = 'Homo sapiens'
                       AND ass.confidence_score IN (8, 9)
-                      AND act.pchembl_value > 6.0
+                      AND act.pchembl_value > 5.0
               );
         """
         
