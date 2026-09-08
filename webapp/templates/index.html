@@ -11,13 +11,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="/static/style.css?v=1.5">
+    <link rel="stylesheet" href="/static/style.css?v=1.6">
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
 
 <body class="tool-page">
+
+    <a class="skip-link" href="#main-content">Skip to content</a>
 
     <!-- ═══ Navigation Bar ═══ -->
     <nav class="navbar scrolled" id="navbar">
@@ -30,7 +32,7 @@
                 <a href="/" class="nav-link">Home</a>
                 <a href="/optimize" class="nav-link active">Optimizer</a>
             </div>
-            <button class="navbar-hamburger" id="navHamburger" aria-label="Toggle navigation menu">
+            <button class="navbar-hamburger" id="navHamburger" aria-label="Toggle navigation menu" aria-controls="navMobileMenu" aria-expanded="false">
                 <span></span>
                 <span></span>
                 <span></span>
@@ -42,17 +44,21 @@
         </div>
     </nav>
 
-    <div class="app-container tool-app-container">
+    <main class="app-container tool-app-container" id="main-content" tabindex="-1">
+        <header class="workspace-header">
+            <h1>Build your optimized library</h1>
+            <p>Upload your data, configure the optimization, and explore the balance between selectivity and cost.</p>
+        </header>
 
         <!-- ═══ Step Indicator ═══ -->
-        <nav class="step-indicator" id="stepIndicator">
-            <div class="step-dot active" data-step="1">1</div>
+        <nav class="step-indicator" id="stepIndicator" aria-label="Optimization progress">
+            <div class="step-dot active" data-step="1" aria-current="step"><span>1</span><span class="step-label">Upload</span></div>
             <div class="step-line" id="line-1-2"></div>
-            <div class="step-dot" data-step="2">2</div>
+            <div class="step-dot" data-step="2"><span>2</span><span class="step-label">Prepare</span></div>
             <div class="step-line" id="line-2-3"></div>
-            <div class="step-dot" data-step="3">3</div>
+            <div class="step-dot" data-step="3"><span>3</span><span class="step-label">Optimize</span></div>
             <div class="step-line" id="line-3-4"></div>
-            <div class="step-dot" data-step="4">4</div>
+            <div class="step-dot" data-step="4"><span>4</span><span class="step-label">Results</span></div>
         </nav>
 
         <!-- ═══════════════════════════════════════════════════════ -->
@@ -62,29 +68,29 @@
             <div class="card">
                 <!-- Mode Switcher -->
                 <div class="mode-switch-container" id="uploadModeSwitch">
-                    <button type="button" class="mode-tab-btn active" id="modeTargetBtn" data-mode="target">
+                    <button type="button" class="mode-tab-btn active" id="modeTargetBtn" data-mode="target" aria-pressed="true">
                         <span>Target List</span>
                     </button>
-                    <button type="button" class="mode-tab-btn" id="modeAffinityBtn" data-mode="affinity">
+                    <button type="button" class="mode-tab-btn" id="modeAffinityBtn" data-mode="affinity" aria-pressed="false">
                         <span>Custom Affinity Data</span>
                     </button>
                 </div>
 
-                <h2 class="card-title" id="step1Title"><span class="icon">📂</span> Upload Target List</h2>
+                <h2 class="card-title" id="step1Title"><span class="icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#folder"></use></svg></span> Upload Target List</h2>
 
                 <div class="drop-zone" id="dropZone">
-                    <span class="upload-icon">📄</span>
+                    <span class="upload-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#file"></use></svg></span>
                     <div class="upload-text" id="dropZoneText">Drag & drop your files here, or click to browse</div>
                     <div class="upload-hint" id="dropZoneHint">CSV or Excel (.xlsx) with a "Target" column · Accepts
                         target names, ChEMBL
                         IDs, Gene Symbols, or UniProt Accessions</div>
-                    <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" multiple>
+                    <input type="file" id="fileInput" aria-labelledby="step1Title" aria-describedby="dropZoneHint" accept=".csv,.xlsx,.xls" multiple>
                 </div>
 
                 <div style="margin-top: 1.5rem; text-align: center;">
                     <a href="/static/example_targets.xlsx" download="example_targets.xlsx" class="btn btn-secondary"
                         id="exampleDownloadBtn" style="padding: 0.5rem 1rem; font-size: 0.9rem;">
-                        <span class="btn-icon">📥</span> <span id="exampleDownloadText">Download Example Targets</span>
+                        <span class="btn-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#download"></use></svg></span> <span id="exampleDownloadText">Download Example Targets</span>
                     </a>
                 </div>
 
@@ -154,7 +160,7 @@
                 <div class="secondary-upload-card" id="priceUploadCard">
                     <div class="secondary-upload-header">
                         <span class="secondary-upload-title">
-                            <span>💰</span> Custom Compound Prices (Optional)
+                            <span><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#price"></use></svg></span> Custom Compound Prices (Optional)
                         </span>
                     </div>
                     <div class="price-drop-zone" id="priceDropZone">
@@ -162,13 +168,13 @@
                         <div class="price-drop-hint">CSV or Excel (.xlsx) with "Compound" and "Price" (USD/mg) column
                             · Accepts compound names,
                             ChEMBL IDs, SMILES Strings, or InChIKeys for compound IDs</div>
-                        <input type="file" id="priceFileInput" accept=".csv,.xlsx,.xls" multiple>
+                        <input type="file" id="priceFileInput" aria-label="Upload custom compound prices" accept=".csv,.xlsx,.xls" multiple>
                     </div>
 
                     <div style="margin-top: 1rem; text-align: center;">
                         <a href="/static/example_prices.xlsx" download="example_prices.xlsx" class="btn btn-secondary"
                             id="priceExampleDownloadBtn" style="padding: 0.45rem 0.9rem; font-size: 0.85rem;">
-                            <span class="btn-icon">📥</span> Download Example Price Data
+                            <span class="btn-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#download"></use></svg></span> Download Example Price Data
                         </a>
                     </div>
 
@@ -469,32 +475,34 @@
 
                 <div class="error-box" id="optError" style="display: none;"></div>
 
-                <div class="btn-row" style="margin-top: 0;">
+                <div class="btn-row optimization-actions" style="margin-top: 0;">
                     <div id="optCompleteBanner" class="opt-complete-inline" style="display: none;">
                         <span class="opt-complete-icon">✅</span>
                         <span class="opt-complete-text" id="optCompleteText">Optimization Complete</span>
                     </div>
-                    <button class="btn btn-secondary" id="backToStep1Btn">
-                        <span class="btn-icon">←</span>
-                        <span>Start Over</span>
-                    </button>
-                    <button class="btn btn-secondary" id="runAgainBtn" style="display: none;">
-                        <span class="btn-icon">🔄</span>
-                        <span>Run Again</span>
-                    </button>
-                    <button class="btn btn-primary" id="seeResultsBtn" style="display: none;">
-                        <span>See Results</span>
-                        <span class="btn-icon">→</span>
-                    </button>
-                    <button class="btn btn-primary" id="runOptBtn">
-                        <span>Run Optimization</span>
-                        <span class="btn-icon">▶</span>
-                    </button>
-                    <button class="btn btn-secondary" id="stopOptBtn"
-                        style="display: none; background: #ff4a4a; color: white; border-color: #ff4a4a;">
-                        <span>Stop Optimization</span>
-                        <span class="btn-icon">⏹</span>
-                    </button>
+                    <div class="optimization-buttons">
+                        <button class="btn btn-secondary" id="backToStep1Btn">
+                            <span class="btn-icon">←</span>
+                            <span>Start Over</span>
+                        </button>
+                        <button class="btn btn-secondary" id="runAgainBtn" style="display: none;">
+                            <span class="btn-icon">🔄</span>
+                            <span>Run Again</span>
+                        </button>
+                        <button class="btn btn-primary" id="seeResultsBtn" style="display: none;">
+                            <span>See Results</span>
+                            <span class="btn-icon">→</span>
+                        </button>
+                        <button class="btn btn-primary" id="runOptBtn">
+                            <span>Run Optimization</span>
+                            <span class="btn-icon">▶</span>
+                        </button>
+                        <button class="btn btn-secondary" id="stopOptBtn"
+                            style="display: none; background: #ff4a4a; color: white; border-color: #ff4a4a;">
+                            <span>Stop Optimization</span>
+                            <span class="btn-icon">⏹</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -664,14 +672,14 @@
 
                 <!-- Downloads -->
                 <div class="card">
-                    <h2 class="card-title"><span class="icon">📥</span> Download Results</h2>
+                    <h2 class="card-title"><span class="icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#download"></use></svg></span> Download Results</h2>
                     <div class="download-row">
                         <a class="btn btn-primary" href="/api/download/library" id="downloadLibBtn">
-                            <span class="btn-icon">📄</span>
+                            <span class="btn-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#file"></use></svg></span>
                             <span>Optimized Library (.xlsx)</span>
                         </a>
                         <a class="btn btn-secondary" href="/api/download/matrix" id="downloadMatBtn">
-                            <span class="btn-icon">📄</span>
+                            <span class="btn-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#file"></use></svg></span>
                             <span>Original Selectivity Matrix (.xlsx)</span>
                         </a>
                     </div>
@@ -689,7 +697,7 @@
             </div>
         </section>
 
-    </div>
+    </main>
 
     <!-- ═══ Footer ═══ -->
     <footer class="site-footer">
@@ -708,23 +716,8 @@
         </div>
     </footer>
 
+    <script src="/static/navigation.js?v=1.0"></script>
     <script>
-        // ─── Navbar hamburger menu ───
-        const hamburger = document.getElementById('navHamburger');
-        const mobileMenu = document.getElementById('navMobileMenu');
-        if (hamburger && mobileMenu) {
-            hamburger.addEventListener('click', () => {
-                hamburger.classList.toggle('open');
-                mobileMenu.classList.toggle('open');
-            });
-            mobileMenu.querySelectorAll('.nav-link').forEach(link => {
-                link.addEventListener('click', () => {
-                    hamburger.classList.remove('open');
-                    mobileMenu.classList.remove('open');
-                });
-            });
-        }
-
         // ─── Advanced Settings Toggle ───
         const advancedSettingsToggle = document.getElementById('advancedSettingsToggle');
         const advancedSettingsContainer = document.getElementById('advancedSettingsContainer');
@@ -743,7 +736,7 @@
             });
         }
     </script>
-    <script src="/static/app.js?v=5.1"></script>
+    <script src="/static/app.js?v=5.2"></script>
 
 </body>
 

@@ -198,6 +198,8 @@ function goToStep(step) {
     $$('.step-dot').forEach((dot) => {
         const dotStep = parseInt(dot.dataset.step);
         dot.classList.remove('active', 'completed');
+        if (dotStep === step) dot.setAttribute('aria-current', 'step');
+        else dot.removeAttribute('aria-current');
         if (dotStep === step) dot.classList.add('active');
         else if (dotStep < step) dot.classList.add('completed');
     });
@@ -257,13 +259,15 @@ function setupModeSwitcher() {
     if (!modeTargetBtn || !modeAffinityBtn) return;
 
     function applyMode(mode) {
+        modeTargetBtn.setAttribute('aria-pressed', String(mode === 'target'));
+        modeAffinityBtn.setAttribute('aria-pressed', String(mode === 'affinity'));
         uploadMode = mode;
         sessionStorage.setItem('uploadMode', mode);
 
         if (mode === 'target') {
             modeTargetBtn.classList.add('active');
             modeAffinityBtn.classList.remove('active');
-            if (step1Title) step1Title.innerHTML = '<span class="icon">📂</span> Upload Target List';
+            if (step1Title) step1Title.innerHTML = '<span class="icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#folder"></use></svg></span> Upload Target List';
             if (dropZoneText) dropZoneText.textContent = 'Drag & drop your target files here, or click to browse';
             if (dropZoneHint) dropZoneHint.textContent = 'CSV or Excel (.xlsx) with a "Target" column · Accepts target names, ChEMBL IDs, Gene Symbols, or UniProt Accessions';
             if (exampleDownloadBtn) exampleDownloadBtn.href = '/static/example_targets.xlsx';
@@ -273,7 +277,7 @@ function setupModeSwitcher() {
         } else {
             modeAffinityBtn.classList.add('active');
             modeTargetBtn.classList.remove('active');
-            if (step1Title) step1Title.innerHTML = '<span class="icon">📂</span> Upload Predefined Affinity Data';
+            if (step1Title) step1Title.innerHTML = '<span class="icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#folder"></use></svg></span> Upload Predefined Affinity Data';
             if (dropZoneText) dropZoneText.textContent = 'Drag & drop your custom affinity data files here, or click to browse';
             if (dropZoneHint) dropZoneHint.textContent = 'CSV or Excel (.xlsx) with "Compound", "Target", and "Affinity" (pKd, higher value means better affinity) columns · Accepts compound names, ChEMBL IDs, SMILES Strings, and InChIKeys for compound IDs & target names, ChEMBL IDs, Gene Symbols and UniProt Accessions for target IDs';
             if (exampleDownloadBtn) exampleDownloadBtn.href = '/static/example_affinity.xlsx';
