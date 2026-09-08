@@ -12,6 +12,7 @@ from pymoo.operators.crossover.pntx import SinglePointCrossover
 from pymoo.operators.crossover.pntx import TwoPointCrossover
 from pathlib import Path
 from pymoo.operators.crossover.ux import UniformCrossover
+import warnings
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -43,7 +44,6 @@ class DrugLibraryProblem(ElementwiseProblem):
 
         # Compute pool-level baselines for normalization and reporting
         self.pool_total_cost = float(np.sum(self.prices))
-        import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             pool_max_scores = np.nanmax(self.matrix, axis=0)
@@ -83,7 +83,6 @@ class DrugLibraryProblem(ElementwiseProblem):
             out["G"] = [self.num_targets]
             return
 
-        import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             target_max_scores = np.nanmax(self.matrix[mask, :], axis=0)
@@ -266,6 +265,55 @@ def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0
     return res, elapsed_time
 
 
+def find_knee_point(front):
+    """Find the knee point (elbow) on a 2D Pareto front using the chord method.
+
+    Uses the Maximum Perpendicular Distance to the Secant Line connecting
+    the two extreme points on the front, in normalized [0, 1] space.
+
+    Args:
+        front: 2D array of shape (N, 2) with real-world [selectivity, cost].
+
+    Returns:
+        best_idx: Index of the knee point in the front array.
+    """
+    if len(front) <= 1:
+        return 0
+
+    # Normalize to [0, 1]
+    min_vals = np.min(front, axis=0)
+    max_vals = np.max(front, axis=0)
+    range_vals = max_vals - min_vals
+    range_vals[range_vals == 0] = 1.0
+    norm_front = (front - min_vals) / range_vals
+
+    # Extreme endpoints
+    idx_min_sel = np.argmin(norm_front[:, 0])
+    idx_max_sel = np.argmax(norm_front[:, 0])
+    p1 = norm_front[idx_min_sel]
+    p2 = norm_front[idx_max_sel]
+
+    line_vec = p2 - p1
+    line_len = np.linalg.norm(line_vec)
+
+    if line_len > 1e-9:
+        cross_product = (line_vec[0] * (norm_front[:, 1] - p1[1])) - (line_vec[1] * (norm_front[:, 0] - p1[0]))
+        distances = np.abs(cross_product) / line_len
+        return int(np.argmax(distances))
+    return 0
+
+
+def reorder_meta_columns(df):
+    """Move metadata columns to the front of a DataFrame, preserving the rest."""
+    cols = df.columns.tolist()
+    meta_cols = []
+    for mc in ["Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"]:
+        if mc in cols:
+            cols.remove(mc)
+            meta_cols.append(mc)
+    return df[meta_cols + cols]
+
+
 # ══════════════════════════════════════════════════════════════
 #  BEST SOLUTION SELECTION (Knee Point / Secant Line Distance)
 # ═══════════════════════════════════════════════════════════════
@@ -310,33 +358,7 @@ def select_best_solution(res, problem):
     plot.fig.savefig(str(img_path), dpi=200, bbox_inches="tight")
     print(f"Plot successfully saved as '{img_path.name}' in {output_dir}!")
 
-    # Normalize the PLOTTED values (selectivity score vs cost) to [0, 1]
-    # so the knee-point calculation matches what is visually shown on the Pareto front.
-    min_vals = np.min(front, axis=0)
-    max_vals = np.max(front, axis=0)
-    range_vals = max_vals - min_vals
-    range_vals[range_vals == 0] = 1.0  # Avoid division by zero if all solutions share a value
-    norm_front = (front - min_vals) / range_vals
-
-    # Knee-point selection: Maximum Perpendicular Distance to the Secant Line (Chord method)
-    # 1. Identify the extreme endpoints on the Pareto front (lowest and highest selectivity)
-    idx_min_sel = np.argmin(norm_front[:, 0])
-    idx_max_sel = np.argmax(norm_front[:, 0])
-    p1 = norm_front[idx_min_sel]  # Extreme low selectivity / low cost
-    p2 = norm_front[idx_max_sel]  # Extreme high selectivity / high cost
-
-    # 2. Vector of the secant line connecting the two extremes
-    line_vec = p2 - p1
-    line_len = np.linalg.norm(line_vec)
-
-    if line_len > 1e-9:
-        # Perpendicular distance from each point p to the line passing through p1 and p2:
-        # Distance = |(p2_x - p1_x)*(p_y - p1_y) - (p2_y - p1_y)*(p_x - p1_x)| / ||p2 - p1||
-        cross_product = (line_vec[0] * (norm_front[:, 1] - p1[1])) - (line_vec[1] * (norm_front[:, 0] - p1[0]))
-        distances = np.abs(cross_product) / line_len
-        best_idx = int(np.argmax(distances))
-    else:
-        best_idx = 0
+    best_idx = find_knee_point(front)
 
     return best_idx, front
 
@@ -457,14 +479,7 @@ def save_results(res, best_idx, full_df, output_file='optimized_library.xlsx'):
     # Reset the index so SMILES becomes a proper column
     winning_matrix_df.reset_index(inplace=True)
 
-    # Reorder exactly to match requested output
-    cols = winning_matrix_df.columns.tolist()
-    meta_cols = []
-    for mc in ["Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"]:
-        if mc in cols:
-            cols.remove(mc)
-            meta_cols.append(mc)
-    winning_matrix_df = winning_matrix_df[meta_cols + cols]
+    winning_matrix_df = reorder_meta_columns(winning_matrix_df)
 
     winning_matrix_df.to_excel(output_file, index=False, engine='xlsxwriter')
 

@@ -63,6 +63,8 @@ from core.algorithm import (
     select_best_solution,
     save_results,
     save_progress_history_plot,
+    find_knee_point,
+    reorder_meta_columns,
 )
 
 # Suppress sklearn version mismatch warning from MolPrice's pickled scaler
@@ -190,7 +192,7 @@ def _make_fresh_state():
         "pipeline_state": {
             "status": "idle",           # idle | running | complete | error
             "current_step": 0,
-            "total_steps": 5,
+            "total_steps": 3,
             "step_label": "",
             "detail": "",
             "error": "",
@@ -337,8 +339,8 @@ def _cleanup_stale_sessions():
             pass
 
 
-def _startup_cleanup():
-    """Clean up all legacy loose files and orphan session directories on server start."""
+def _wipe_output_dir():
+    """Remove all files and directories from the output folder."""
     output_base = PROJECT_ROOT / "webapp" / "output"
     if not output_base.exists():
         return
@@ -349,22 +351,7 @@ def _startup_cleanup():
             elif item.is_file():
                 item.unlink(missing_ok=True)
     except Exception as e:
-        logger.warning(f"Startup output cleanup error: {e}")
-
-
-def _shutdown_cleanup():
-    """Clean up temporary session directories and generated output files on server shutdown."""
-    output_base = PROJECT_ROOT / "webapp" / "output"
-    if not output_base.exists():
-        return
-    try:
-        for item in output_base.iterdir():
-            if item.is_dir():
-                shutil.rmtree(item, ignore_errors=True)
-            elif item.is_file():
-                item.unlink(missing_ok=True)
-    except Exception:
-        pass
+        logger.warning(f"Output cleanup error: {e}")
 
 
 def _cleanup_worker():
@@ -378,14 +365,14 @@ def _cleanup_worker():
 
 
 # Run startup cleanup of stale generated files
-_startup_cleanup()
+_wipe_output_dir()
 
 # Start background cleanup thread as daemon
 _cleanup_thread = threading.Thread(target=_cleanup_worker, name="OutputCleanupWorker", daemon=True)
 _cleanup_thread.start()
 
 # Register shutdown hook
-atexit.register(_shutdown_cleanup)
+atexit.register(_wipe_output_dir)
 
 
 class StopOptimization(Exception):
@@ -447,17 +434,6 @@ class _LightResult:
 def _recompute_affinity_state(aff_state):
     """Recompute combined dataframe, resolved entities, and stats across all uploaded affinity files."""
     files_dict = aff_state.get("files", {})
-    if not files_dict:
-        aff_state["df"] = None
-        aff_state["resolved_compounds"] = {}
-        aff_state["resolved_targets"] = {}
-        aff_state["num_compounds"] = 0
-        aff_state["num_targets"] = 0
-        aff_state["num_datapoints"] = 0
-        aff_state["unique_targets"] = []
-        aff_state["formatted_targets"] = []
-        aff_state["formatted_compounds"] = []
-        return
 
     all_dfs = []
     all_resolved_compounds = {}
@@ -494,34 +470,8 @@ def _recompute_affinity_state(aff_state):
     if missing_targets:
         all_resolved_targets.update(_resolve_targets(missing_targets))
 
-    formatted_compounds = []
-    for c in unique_compounds:
-        info = all_resolved_compounds.get(c, {})
-        ik = info.get("inchi_key") or ""
-        cid = info.get("chembl_id") or ""
-        if ik and cid:
-            display_str = f"{c} -> {ik} ({cid})"
-        elif ik:
-            display_str = f"{c} -> {ik}"
-        elif cid:
-            display_str = f"{c} -> ({cid})"
-        else:
-            display_str = f"{c}"
-        formatted_compounds.append(display_str)
-
-    formatted_targets = []
-    for t in unique_targets:
-        info = all_resolved_targets.get(t, {})
-        if info.get("is_chembl"):
-            name = info.get("pref_name") or info.get("gene_symbol") or info.get("chembl_id")
-            gene_sym = info.get("gene_symbol") or info.get("chembl_id")
-            if gene_sym:
-                display_str = f"{t} -> {name} ({gene_sym})"
-            else:
-                display_str = f"{t} -> {name}"
-        else:
-            display_str = f"{t}"
-        formatted_targets.append(display_str)
+    formatted_compounds = [_format_compound_display(c, all_resolved_compounds.get(c)) for c in unique_compounds]
+    formatted_targets = [_format_target_display(t, all_resolved_targets.get(t)) for t in unique_targets]
 
     aff_state["df"] = combined_df
     aff_state["resolved_compounds"] = all_resolved_compounds
@@ -539,14 +489,6 @@ def _recompute_affinity_state(aff_state):
 def _recompute_price_state(price_state):
     """Recompute combined dataframe, price_map, and formatted_compounds across all uploaded files."""
     files_dict = price_state.get("files", {})
-    if not files_dict:
-        price_state["df"] = None
-        price_state["resolved_compounds"] = {}
-        price_state["formatted_compounds"] = []
-        price_state["price_map"] = {}
-        price_state["filename"] = ""
-        price_state["count"] = 0
-        return
 
     all_dfs = []
     all_resolved = {}
@@ -591,20 +533,7 @@ def _recompute_price_state(price_state):
             if res.get("pref_name"):
                 price_map[res["pref_name"].lower()] = price_val
 
-    formatted_compounds = []
-    for c in unique_cmpds:
-        info = all_resolved.get(c, {})
-        ik = info.get("inchi_key") or ""
-        cid = info.get("chembl_id") or ""
-        if ik and cid:
-            display_str = f"{c} -> {ik} ({cid})"
-        elif ik:
-            display_str = f"{c} -> {ik}"
-        elif cid:
-            display_str = f"{c} -> ({cid})"
-        else:
-            display_str = f"{c}"
-        formatted_compounds.append(display_str)
+    formatted_compounds = [_format_compound_display(c, all_resolved.get(c)) for c in unique_cmpds]
 
     price_state["df"] = combined_df
     price_state["resolved_compounds"] = all_resolved
@@ -717,9 +646,8 @@ def _resolve_compounds(compound_ids):
                 "is_chembl": True,
             }
         else:
-            # Guess if raw string is InChIKey or SMILES
-            ik_guess = raw_str if (len(raw_str) == 27 and raw_str[14] == '-' and raw_str[25] == '-') else ""
-            smi_guess = raw_str if ('=' in raw_str or '#' in raw_str or '(' in raw_str or 'c1' in raw_str) else ""
+            ik_guess = raw_str if _looks_like_inchikey(raw_str) else ""
+            smi_guess = raw_str if _looks_like_smiles(raw_str) else ""
             resolved[raw_id] = {
                 "raw_id": raw_id,
                 "chembl_id": "",
@@ -734,16 +662,9 @@ def _resolve_compounds(compound_ids):
 
 def _format_target_col(pref_name, gene_symbol, fallback=""):
     """Format target column header as 'Target Name (Gene Symbol)' if distinct, otherwise fallback."""
-    p_name = str(pref_name).strip() if pd.notna(pref_name) and pref_name is not None else ""
-    g_sym = str(gene_symbol).strip() if pd.notna(gene_symbol) and gene_symbol is not None else ""
-    fb = str(fallback).strip() if pd.notna(fallback) and fallback is not None else ""
-
-    if p_name in ("nan", "None", "Unknown"):
-        p_name = ""
-    if g_sym in ("nan", "None", "Unknown"):
-        g_sym = ""
-    if fb in ("nan", "None", "Unknown"):
-        fb = ""
+    p_name = _clean_str(pref_name)
+    g_sym = _clean_str(gene_symbol)
+    fb = _clean_str(fallback)
 
     if p_name and g_sym and p_name.lower() != g_sym.lower():
         return f"{p_name} ({g_sym})"
@@ -878,6 +799,141 @@ def _lookup_custom_price(compound_raw, resolved_info=None, price_state=None):
     return None
 
 
+# Sentinel strings to treat as empty
+_SENTINEL_STRINGS = frozenset({"nan", "None", "Unknown", ""})
+
+
+def _clean_str(val):
+    """Normalise a value to a clean string, returning '' for NaN/None/sentinel values."""
+    s = str(val).strip() if pd.notna(val) else ""
+    return "" if s in _SENTINEL_STRINGS else s
+
+
+def _format_compound_display(raw_id, resolved_info):
+    """Format a resolved compound identifier for display."""
+    ik = (resolved_info or {}).get("inchi_key") or ""
+    cid = (resolved_info or {}).get("chembl_id") or ""
+    if ik and cid:
+        return f"{raw_id} -> {ik} ({cid})"
+    elif ik:
+        return f"{raw_id} -> {ik}"
+    elif cid:
+        return f"{raw_id} -> ({cid})"
+    return str(raw_id)
+
+
+def _format_target_display(raw_id, resolved_info):
+    """Format a resolved target identifier for display."""
+    info = resolved_info or {}
+    if info.get("is_chembl"):
+        name = info.get("pref_name") or info.get("gene_symbol") or info.get("chembl_id")
+        gene_sym = info.get("gene_symbol") or info.get("chembl_id")
+        if gene_sym:
+            return f"{raw_id} -> {name} ({gene_sym})"
+        return f"{raw_id} -> {name}"
+    return str(raw_id)
+
+
+def _looks_like_inchikey(s):
+    """Heuristic check whether a string looks like an InChIKey."""
+    return len(s) == 27 and s[14] == '-' and s[25] == '-'
+
+
+def _looks_like_smiles(s):
+    """Heuristic check whether a string looks like a SMILES string."""
+    return bool('=' in s or '#' in s or '(' in s or 'c1' in s)
+
+
+def _build_affinity_files_list(files_dict):
+    """Build the per-file summary list for affinity API responses."""
+    return [
+        {
+            "name": fname,
+            "num_datapoints": len(fdata["df"]),
+            "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
+            "num_targets": len(fdata["df"]["Target_Raw"].unique()),
+            "compounds": fdata["formatted_compounds"],
+            "targets": fdata["formatted_targets"],
+        }
+        for fname, fdata in files_dict.items()
+    ]
+
+
+def _build_affinity_response(aff_state, extra=None):
+    """Build the standard JSON response dict for affinity endpoints."""
+    resp = {
+        "num_compounds": aff_state["num_compounds"],
+        "num_targets": aff_state["num_targets"],
+        "num_datapoints": aff_state["num_datapoints"],
+        "compounds": aff_state["formatted_compounds"],
+        "targets": aff_state["formatted_targets"],
+    }
+    if extra:
+        resp.update(extra)
+    return resp
+
+
+def _build_price_files_list(files_dict):
+    """Build the per-file summary list for price API responses."""
+    return [
+        {
+            "name": fname,
+            "num_prices": len(fdata["df"]),
+            "compounds": fdata["formatted_compounds"],
+        }
+        for fname, fdata in files_dict.items()
+    ]
+
+
+def _build_price_response(price_state, extra=None):
+    """Build the standard JSON response dict for price endpoints."""
+    combined_df = price_state.get("df")
+    resp = {
+        "num_prices": len(combined_df) if combined_df is not None else 0,
+        "filename": price_state.get("filename", ""),
+        "compounds": price_state.get("formatted_compounds", []),
+    }
+    if extra:
+        resp.update(extra)
+    return resp
+
+
+def _lookup_molport_prices(inchikeys):
+    """Look up prices from the MolPort database for a list of InChIKeys.
+
+    Returns:
+        (price_dict, source_dict): Mappings from InChIKey to median price and MolPort ID.
+    """
+    price_dict = {}
+    source_dict = {}
+    if not inchikeys:
+        return price_dict, source_dict
+    molport_db = str(DATABASE_DIR / "molport.db")
+    try:
+        with sqlite3.connect(molport_db) as conn:
+            mp_chunk_size = 30000
+            all_rows = []
+            for i in range(0, len(inchikeys), mp_chunk_size):
+                chunk = inchikeys[i:i + mp_chunk_size]
+                ph = ",".join(["?"] * len(chunk))
+                query = f"SELECT INCHIKEY, PRICE_1MG, MOLPORTID FROM compounds WHERE INCHIKEY IN ({ph})"
+                all_rows.extend(conn.execute(query, chunk).fetchall())
+
+            if all_rows:
+                mp_df = pd.DataFrame(all_rows, columns=["INCHIKEY", "PRICE_1MG", "MOLPORTID"])
+                # Source: first-seen MolPort ID per InChIKey
+                source_df = mp_df.drop_duplicates(subset=["INCHIKEY"])
+                source_dict = dict(zip(
+                    source_df["INCHIKEY"],
+                    source_df["MOLPORTID"].apply(lambda x: str(x) if x else ""),
+                ))
+                # Price: median per InChIKey
+                price_dict = mp_df.groupby("INCHIKEY")["PRICE_1MG"].median().to_dict()
+    except Exception as e:
+        logger.warning(f"MolPort DB lookup warning: {e}")
+    return price_dict, source_dict
+
+
 # ═══════════════════════════════════════════════════════════════
 #  ROUTES — Pages & Health Checks
 # ═══════════════════════════════════════════════════════════════
@@ -975,68 +1031,29 @@ def upload_targets():
     if not input_targets:
         return jsonify({"error": "No targets found in the files"}), 400
 
-    db_path = str(get_chembl_db_path())
-    matched_chembl_ids = set()
+    resolved = _resolve_targets(input_targets)
+
     matched = []
     unmatched = []
+    matched_chembl_ids = set()
     chembl_map = {}
 
-    try:
-        with sqlite3.connect(db_path) as conn:
-            placeholders = ",".join(["?"] * len(input_targets))
-            query = f"""
-                SELECT DISTINCT td.chembl_id, td.pref_name, 
-                       (SELECT csy2.component_synonym 
-                        FROM target_components tc2 
-                        JOIN component_synonyms csy2 ON tc2.component_id = csy2.component_id 
-                        WHERE tc2.tid = td.tid AND csy2.syn_type = 'GENE_SYMBOL' 
-                        LIMIT 1) AS gene_symbol,
-                       cs.accession, csy.component_synonym
-                FROM target_dictionary td
-                LEFT JOIN target_components tc ON td.tid = tc.tid
-                LEFT JOIN component_sequences cs ON tc.component_id = cs.component_id
-                LEFT JOIN component_synonyms csy ON cs.component_id = csy.component_id
-                WHERE (
-                    td.chembl_id COLLATE NOCASE IN ({placeholders}) OR
-                    td.pref_name COLLATE NOCASE IN ({placeholders}) OR
-                    cs.accession COLLATE NOCASE IN ({placeholders}) OR
-                    (csy.component_synonym COLLATE NOCASE IN ({placeholders}) 
-                     AND csy.syn_type IN ('GENE_SYMBOL', 'UNIPROT', 'EC_NUMBER'))
-                )
-                AND td.target_type = 'SINGLE PROTEIN'
-                AND td.organism = 'Homo sapiens'
-            """
-            params = input_targets * 4
-            rows = conn.execute(query, params).fetchall()
-            
-            # Map input to canonical ChEMBL IDs and Names with Gene Symbol in brackets
-            for target_in in input_targets:
-                target_in_lower = str(target_in).lower()
-                found = False
-                for r in rows:
-                    cid, name, gene_sym, acc, syn = r
-                    if (target_in_lower == str(cid).lower() or 
-                        (name and target_in_lower == str(name).lower()) or
-                        (gene_sym and target_in_lower == str(gene_sym).lower()) or
-                        (acc and target_in_lower == str(acc).lower()) or
-                        (syn and target_in_lower == str(syn).lower())):
-                        found = True
-                        if cid not in matched_chembl_ids:
-                            matched_chembl_ids.add(cid)
-                            display_name = name or gene_sym or cid
-                            bracket_symbol = gene_sym or cid
-                            if bracket_symbol:
-                                match_str = f"{target_in} -> {display_name} ({bracket_symbol})"
-                            else:
-                                match_str = f"{target_in} -> {display_name}"
-                            matched.append(match_str)
-                            chembl_map[match_str] = cid
-                        break
-                if not found:
-                    unmatched.append(target_in)
-
-    except Exception as e:
-        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    for target_in in input_targets:
+        info = resolved.get(target_in, {})
+        if info.get("is_chembl"):
+            cid = info["chembl_id"]
+            if cid and cid not in matched_chembl_ids:
+                matched_chembl_ids.add(cid)
+                display_name = info.get("pref_name") or info.get("gene_symbol") or cid
+                bracket_symbol = info.get("gene_symbol") or cid
+                if bracket_symbol:
+                    match_str = f"{target_in} -> {display_name} ({bracket_symbol})"
+                else:
+                    match_str = f"{target_in} -> {display_name}"
+                matched.append(match_str)
+                chembl_map[match_str] = cid
+        else:
+            unmatched.append(target_in)
 
     chembl_ids = list(matched_chembl_ids)
 
@@ -1132,32 +1149,8 @@ def upload_affinity():
         res_compounds = _resolve_compounds(file_compounds)
         res_targets = _resolve_targets(file_targets)
 
-        formatted_c = []
-        for c in file_compounds:
-            info = res_compounds.get(c, {})
-            ik = info.get("inchi_key") or ""
-            cid = info.get("chembl_id") or ""
-            if ik and cid:
-                formatted_c.append(f"{c} -> {ik} ({cid})")
-            elif ik:
-                formatted_c.append(f"{c} -> {ik}")
-            elif cid:
-                formatted_c.append(f"{c} -> ({cid})")
-            else:
-                formatted_c.append(f"{c}")
-
-        formatted_t = []
-        for t in file_targets:
-            info = res_targets.get(t, {})
-            if info.get("is_chembl"):
-                name = info.get("pref_name") or info.get("gene_symbol") or info.get("chembl_id")
-                gene_sym = info.get("gene_symbol") or info.get("chembl_id")
-                if gene_sym:
-                    formatted_t.append(f"{t} -> {name} ({gene_sym})")
-                else:
-                    formatted_t.append(f"{t} -> {name}")
-            else:
-                formatted_t.append(f"{t}")
+        formatted_c = [_format_compound_display(c, res_compounds.get(c)) for c in file_compounds]
+        formatted_t = [_format_target_display(t, res_targets.get(t)) for t in file_targets]
 
         with _lock:
             if "files" not in aff_state:
@@ -1184,26 +1177,12 @@ def upload_affinity():
 
     with _lock:
         _recompute_affinity_state(aff_state)
-        all_files_list = [
-            {
-                "name": fname,
-                "num_datapoints": len(fdata["df"]),
-                "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
-                "num_targets": len(fdata["df"]["Target_Raw"].unique()),
-                "compounds": fdata["formatted_compounds"],
-                "targets": fdata["formatted_targets"],
-            }
-            for fname, fdata in aff_state["files"].items()
-        ]
+        all_files_list = _build_affinity_files_list(aff_state["files"])
 
     return jsonify({
         "uploaded_files": uploaded_files_summary,
         "all_files": all_files_list,
-        "num_compounds": aff_state["num_compounds"],
-        "num_targets": aff_state["num_targets"],
-        "num_datapoints": aff_state["num_datapoints"],
-        "compounds": aff_state["formatted_compounds"],
-        "targets": aff_state["formatted_targets"],
+        **_build_affinity_response(aff_state),
     })
 
 
@@ -1271,20 +1250,7 @@ def upload_prices():
         unique_cmpds = clean_df["Compound"].unique().tolist()
         resolved_cmpds = _resolve_compounds(unique_cmpds)
 
-        file_formatted = []
-        for c in unique_cmpds:
-            info = resolved_cmpds.get(c, {})
-            ik = info.get("inchi_key") or ""
-            cid = info.get("chembl_id") or ""
-            if ik and cid:
-                display_str = f"{c} -> {ik} ({cid})"
-            elif ik:
-                display_str = f"{c} -> {ik}"
-            elif cid:
-                display_str = f"{c} -> ({cid})"
-            else:
-                display_str = f"{c}"
-            file_formatted.append(display_str)
+        file_formatted = [_format_compound_display(c, resolved_cmpds.get(c)) for c in unique_cmpds]
 
         with _lock:
             if "files" not in price_state:
@@ -1306,24 +1272,12 @@ def upload_prices():
 
     with _lock:
         _recompute_price_state(price_state)
-        combined_df = price_state.get("df")
-        formatted_compounds = price_state.get("formatted_compounds", [])
-        total_unique = len(combined_df) if combined_df is not None else 0
-        all_files_list = [
-            {
-                "name": fname,
-                "num_prices": len(fdata["df"]),
-                "compounds": fdata["formatted_compounds"]
-            }
-            for fname, fdata in price_state["files"].items()
-        ]
+        all_files_list = _build_price_files_list(price_state["files"])
 
     return jsonify({
         "uploaded_files": uploaded_files_summary,
         "all_files": all_files_list,
-        "num_prices": total_unique,
-        "filename": price_state.get("filename", ""),
-        "compounds": formatted_compounds,
+        **_build_price_response(price_state),
     })
 
 
@@ -1344,26 +1298,11 @@ def remove_affinity_file():
         if filename in files_dict:
             del files_dict[filename]
         _recompute_affinity_state(aff_state)
-
-        all_files_list = [
-            {
-                "name": fname,
-                "num_datapoints": len(fdata["df"]),
-                "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
-                "num_targets": len(fdata["df"]["Target_Raw"].unique()),
-                "compounds": fdata["formatted_compounds"],
-                "targets": fdata["formatted_targets"],
-            }
-            for fname, fdata in files_dict.items()
-        ]
+        all_files_list = _build_affinity_files_list(files_dict)
 
     return jsonify({
         "all_files": all_files_list,
-        "num_compounds": aff_state["num_compounds"],
-        "num_targets": aff_state["num_targets"],
-        "num_datapoints": aff_state["num_datapoints"],
-        "compounds": aff_state["formatted_compounds"],
-        "targets": aff_state["formatted_targets"],
+        **_build_affinity_response(aff_state),
     })
 
 
@@ -1406,26 +1345,11 @@ def remove_affinity_target():
                     ]
 
         _recompute_affinity_state(aff_state)
-
-        all_files_list = [
-            {
-                "name": fname,
-                "num_datapoints": len(fdata["df"]),
-                "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
-                "num_targets": len(fdata["df"]["Target_Raw"].unique()),
-                "compounds": fdata["formatted_compounds"],
-                "targets": fdata["formatted_targets"],
-            }
-            for fname, fdata in files_dict.items()
-        ]
+        all_files_list = _build_affinity_files_list(files_dict)
 
     return jsonify({
         "all_files": all_files_list,
-        "num_compounds": aff_state["num_compounds"],
-        "num_targets": aff_state["num_targets"],
-        "num_datapoints": aff_state["num_datapoints"],
-        "compounds": aff_state["formatted_compounds"],
-        "targets": aff_state["formatted_targets"],
+        **_build_affinity_response(aff_state),
     })
 
 
@@ -1468,26 +1392,11 @@ def remove_affinity_compound():
                     ]
 
         _recompute_affinity_state(aff_state)
-
-        all_files_list = [
-            {
-                "name": fname,
-                "num_datapoints": len(fdata["df"]),
-                "num_compounds": len(fdata["df"]["Compound_Raw"].unique()),
-                "num_targets": len(fdata["df"]["Target_Raw"].unique()),
-                "compounds": fdata["formatted_compounds"],
-                "targets": fdata["formatted_targets"],
-            }
-            for fname, fdata in files_dict.items()
-        ]
+        all_files_list = _build_affinity_files_list(files_dict)
 
     return jsonify({
         "all_files": all_files_list,
-        "num_compounds": aff_state["num_compounds"],
-        "num_targets": aff_state["num_targets"],
-        "num_datapoints": aff_state["num_datapoints"],
-        "compounds": aff_state["formatted_compounds"],
-        "targets": aff_state["formatted_targets"],
+        **_build_affinity_response(aff_state),
     })
 
 
@@ -1519,24 +1428,11 @@ def remove_price_file():
         if filename in files_dict:
             del files_dict[filename]
         _recompute_price_state(price_state)
-
-        combined_df = price_state.get("df")
-        formatted_compounds = price_state.get("formatted_compounds", [])
-        total_unique = len(combined_df) if combined_df is not None else 0
-        all_files_list = [
-            {
-                "name": fname,
-                "num_prices": len(fdata["df"]),
-                "compounds": fdata["formatted_compounds"]
-            }
-            for fname, fdata in files_dict.items()
-        ]
+        all_files_list = _build_price_files_list(files_dict)
 
     return jsonify({
         "all_files": all_files_list,
-        "num_prices": total_unique,
-        "filename": price_state.get("filename", ""),
-        "compounds": formatted_compounds,
+        **_build_price_response(price_state),
     })
 
 
@@ -1571,24 +1467,11 @@ def remove_price_compound():
                 ]
 
         _recompute_price_state(price_state)
-
-        combined_df = price_state.get("df")
-        formatted_compounds = price_state.get("formatted_compounds", [])
-        total_unique = len(combined_df) if combined_df is not None else 0
-        all_files_list = [
-            {
-                "name": fname,
-                "num_prices": len(fdata["df"]),
-                "compounds": fdata["formatted_compounds"]
-            }
-            for fname, fdata in files_dict.items()
-        ]
+        all_files_list = _build_price_files_list(files_dict)
 
     return jsonify({
         "all_files": all_files_list,
-        "num_prices": total_unique,
-        "filename": price_state.get("filename", ""),
-        "compounds": formatted_compounds,
+        **_build_price_response(price_state),
     })
 
 
@@ -1961,30 +1844,7 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         _update_pipeline(sid, 2, "Getting price data...", "Querying database for prices")
 
         inchikeys = final_export_df["InChIKey"].dropna().unique().tolist()
-        molport_dict = {}
-        molport_source_dict = {}
-        if inchikeys:
-            molport_db = str(DATABASE_DIR / "molport.db")
-            try:
-                with sqlite3.connect(molport_db) as conn:
-                    molport_dfs = []
-                    mp_chunk_size = 30000
-                    for i in range(0, len(inchikeys), mp_chunk_size):
-                        chunk = inchikeys[i:i + mp_chunk_size]
-                        placeholders = ",".join(["?"] * len(chunk))
-                        molport_query = f"SELECT INCHIKEY, PRICE_1MG, MOLPORTID FROM compounds WHERE INCHIKEY IN ({placeholders})"
-                        molport_dfs.append(pd.read_sql_query(molport_query, conn, params=chunk))
-                    
-                    if molport_dfs:
-                        molport_df = pd.concat(molport_dfs, ignore_index=True)
-                        
-                        molport_source_df = molport_df.drop_duplicates(subset=["INCHIKEY"])
-                        molport_source_dict = dict(zip(molport_source_df["INCHIKEY"], molport_source_df["MOLPORTID"]))
-
-                        molport_df = molport_df.groupby("INCHIKEY")["PRICE_1MG"].median().reset_index()
-                        molport_dict = dict(zip(molport_df["INCHIKEY"], molport_df["PRICE_1MG"]))
-            except Exception as e:
-                _update_pipeline(sid, 2, "Getting price data...", f"MolPort query warning: {e}")
+        molport_dict, molport_source_dict = _lookup_molport_prices(inchikeys)
 
         # Check custom uploaded prices first
         custom_price_dict = {}
@@ -2071,14 +1931,7 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         # Drop rows with NaN prices
         final_export_df = final_export_df.dropna(subset=["Price_USD_per_mg"])
 
-        # Reorder columns
-        cols = final_export_df.columns.tolist()
-        meta_cols = []
-        for mc in ["Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"]:
-            if mc in cols:
-                cols.remove(mc)
-                meta_cols.append(mc)
-        final_export_df = final_export_df[meta_cols + cols]
+        final_export_df = reorder_meta_columns(final_export_df)
 
         # Save matrix as CSV (fast) — Excel generated lazily on download
         _update_pipeline(sid, 3, "Saving matrix...", "Saving matrix...")
@@ -2205,9 +2058,9 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
             smiles = res_info.get("smiles", "")
 
             # If compound string itself is InChIKey or SMILES
-            if not inchi_key and len(str(cmpd)) == 27 and str(cmpd)[14] == '-' and str(cmpd)[25] == '-':
+            if not inchi_key and _looks_like_inchikey(str(cmpd)):
                 inchi_key = str(cmpd)
-            if not smiles and ('=' in str(cmpd) or '#' in str(cmpd) or '(' in str(cmpd) or 'c1' in str(cmpd)):
+            if not smiles and _looks_like_smiles(str(cmpd)):
                 smiles = str(cmpd)
 
             meta_records.append({
@@ -2224,26 +2077,7 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
 
         # MolPort lookup cache
         inchikeys = [r["InChIKey"] for r in meta_records if r["InChIKey"]]
-        molport_dict = {}
-        molport_source_dict = {}
-        if inchikeys:
-            molport_db = str(DATABASE_DIR / "molport.db")
-            try:
-                with sqlite3.connect(molport_db) as conn:
-                    mp_chunk_size = 30000
-                    for i in range(0, len(inchikeys), mp_chunk_size):
-                        chunk = inchikeys[i:i + mp_chunk_size]
-                        ph = ",".join(["?"] * len(chunk))
-                        query = f"SELECT INCHIKEY, PRICE_1MG, MOLPORTID FROM compounds WHERE INCHIKEY IN ({ph})"
-                        for row in conn.execute(query, chunk).fetchall():
-                            ik_val = row[0]
-                            price_val = float(row[1])
-                            molport_id_val = str(row[2]) if row[2] else ""
-                            if ik_val not in molport_dict:
-                                molport_dict[ik_val] = price_val
-                                molport_source_dict[ik_val] = molport_id_val
-            except Exception as e:
-                logger.warning(f"MolPort DB lookup warning: {e}")
+        molport_dict, molport_source_dict = _lookup_molport_prices(inchikeys)
 
         molprice_model = None
         prices = []
@@ -2647,42 +2481,6 @@ def _process_stopped_results(sid, cb, problem, max_price=None):
         opt_st["status"] = "complete"
 
 
-def _find_knee_point(front):
-    """Find the knee point (elbow) on a 2D Pareto front using the chord method.
-
-    Uses the Maximum Perpendicular Distance to the Secant Line connecting
-    the two extreme points on the front, in normalized space.
-
-    Args:
-        front: 2D array of shape (N, 2) with real-world [selectivity, cost].
-
-    Returns:
-        best_idx: Index of the knee point in the front array.
-    """
-    if len(front) <= 1:
-        return 0
-
-    # Normalize to [0, 1]
-    min_vals = np.min(front, axis=0)
-    max_vals = np.max(front, axis=0)
-    range_vals = max_vals - min_vals
-    range_vals[range_vals == 0] = 1.0
-    norm_front = (front - min_vals) / range_vals
-
-    # Extreme endpoints
-    idx_min_sel = np.argmin(norm_front[:, 0])
-    idx_max_sel = np.argmax(norm_front[:, 0])
-    p1 = norm_front[idx_min_sel]
-    p2 = norm_front[idx_max_sel]
-
-    line_vec = p2 - p1
-    line_len = np.linalg.norm(line_vec)
-
-    if line_len > 1e-9:
-        cross_product = (line_vec[0] * (norm_front[:, 1] - p1[1])) - (line_vec[1] * (norm_front[:, 0] - p1[0]))
-        distances = np.abs(cross_product) / line_len
-        return int(np.argmax(distances))
-    return 0
 
 
 def _process_and_store_results(sid, res_X, res_F, best_idx, front, problem, max_price=None):
@@ -2707,7 +2505,7 @@ def _process_and_store_results(sid, res_X, res_F, best_idx, front, problem, max_
         res_F = res_F[price_mask]
         front = front[price_mask]
         # Re-select the knee point from the filtered front
-        best_idx = _find_knee_point(front)
+        best_idx = find_knee_point(front)
 
     # Load matrix from CSV on demand (avoids keeping large DataFrame resident)
     with _lock:
@@ -2792,22 +2590,10 @@ def _build_comparison(winning_matrix_df, problem, has_custom_affinity=False):
 
     compounds_list = []
     for idx, row in winning_matrix_df.iterrows():
-        name = row.get("Compound_Name", "")
-        inchikey = row.get("InChIKey", "")
-        chembl_id = row.get("Molecule_ChEMBL_ID", "")
+        name_str = _clean_str(row.get("Compound_Name", ""))
+        inchikey_str = _clean_str(row.get("InChIKey", ""))
+        chembl_str = _clean_str(row.get("Molecule_ChEMBL_ID", ""))
         price = row.get("Price_USD_per_mg", 0.0)
-
-        name_str = str(name).strip() if pd.notna(name) else ""
-        if name_str in ("nan", "None", "Unknown"):
-            name_str = ""
-
-        inchikey_str = str(inchikey).strip() if pd.notna(inchikey) else ""
-        if inchikey_str in ("nan", "None", "Unknown"):
-            inchikey_str = ""
-
-        chembl_str = str(chembl_id).strip() if pd.notna(chembl_id) else ""
-        if chembl_str in ("nan", "None", "Unknown"):
-            chembl_str = ""
 
         compounds_list.append({
             "name": name_str,
@@ -3048,31 +2834,26 @@ def _get_target_info(target_list):
     return symbols, names
 
 
-def _map_targets_to_gene_symbols(target_list):
-    """Map a list of target names/IDs/pref_names to their gene symbols if available."""
-    symbols, _ = _get_target_info(target_list)
-    return symbols
-
 
 def _extract_compound_labels(df):
     """Extract preferred compound labels for heatmap (Molecule_ChEMBL_ID -> InChIKey -> Compound_Name -> Index)."""
     if "Molecule_ChEMBL_ID" in df.columns:
         labels = []
         for i, val in enumerate(df["Molecule_ChEMBL_ID"]):
-            val_str = str(val).strip() if pd.notna(val) else ""
-            if val_str and val_str not in ("nan", "None", "Unknown"):
+            val_str = _clean_str(val)
+            if val_str:
                 labels.append(val_str)
-            elif "InChIKey" in df.columns and pd.notna(df["InChIKey"].iloc[i]) and str(df["InChIKey"].iloc[i]).strip() not in ("nan", "None", "Unknown"):
-                labels.append(str(df["InChIKey"].iloc[i]).strip())
-            elif "Compound_Name" in df.columns and pd.notna(df["Compound_Name"].iloc[i]) and str(df["Compound_Name"].iloc[i]).strip() not in ("nan", "None", "Unknown"):
-                labels.append(str(df["Compound_Name"].iloc[i]).strip())
+            elif "InChIKey" in df.columns and _clean_str(df["InChIKey"].iloc[i]):
+                labels.append(_clean_str(df["InChIKey"].iloc[i]))
+            elif "Compound_Name" in df.columns and _clean_str(df["Compound_Name"].iloc[i]):
+                labels.append(_clean_str(df["Compound_Name"].iloc[i]))
             else:
                 labels.append(f"Compound {i+1}")
         return labels
     elif "InChIKey" in df.columns:
-        return [str(x).strip() if pd.notna(x) and str(x).strip() not in ("nan", "None", "Unknown") else f"Compound {i+1}" for i, x in enumerate(df["InChIKey"])]
+        return [_clean_str(x) or f"Compound {i+1}" for i, x in enumerate(df["InChIKey"])]
     elif "Compound_Name" in df.columns:
-        return [str(x).strip() if pd.notna(x) and str(x).strip() not in ("nan", "None", "Unknown") else f"Compound {i+1}" for i, x in enumerate(df["Compound_Name"])]
+        return [_clean_str(x) or f"Compound {i+1}" for i, x in enumerate(df["Compound_Name"])]
     else:
         return [str(x) for x in df.index.tolist()]
 
