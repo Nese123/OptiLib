@@ -1467,7 +1467,7 @@ buildMatrixBtn.addEventListener('click', async () => {
 
     const body = {
         chembl_ids: uploadedChemblIds,
-        selectivity_threshold: parseFloat(selectivityThreshold.value) || 0.5,
+        selectivity_threshold: Number.isNaN(parseFloat(selectivityThreshold.value)) ? 0.5 : parseFloat(selectivityThreshold.value),
         remove_targets: removeTargets,
         matched_count: uploadedMatchedCount
     };
@@ -1633,9 +1633,11 @@ $('#goToConfigBtn').addEventListener('click', async () => {
 // Back to Uploads button
 $('#backToStep1From2Btn').addEventListener('click', async () => {
     try {
-        await fetch('/api/reset', { method: 'POST' });
+        const response = await fetch('/api/reset', { method: 'POST' });
+        if (!response.ok) throw new Error((await response.json()).error || 'Reset failed');
     } catch (err) {
-        console.error('Failed to reset backend state', err);
+        showError(currentStep === 2 ? $('#pipelineError') : optError, err.message);
+        return;
     }
 
     if (pipelinePollTimer) {
@@ -2204,9 +2206,11 @@ $('#runAgainBtn').addEventListener('click', async () => {
 
 async function resetAllState() {
     try {
-        await fetch('/api/reset', { method: 'POST' });
+        const response = await fetch('/api/reset', { method: 'POST' });
+        if (!response.ok) throw new Error((await response.json()).error || 'Reset failed');
     } catch (err) {
-        console.error('Failed to reset backend state', err);
+        showError(currentStep === 2 ? $('#pipelineError') : optError, err.message);
+        return;
     }
 
     if (optPollTimer) {
@@ -2404,20 +2408,15 @@ async function loadComparison() {
                 const inchikeyVal = (c.inchikey && c.inchikey !== 'Unknown') ? c.inchikey : '—';
                 const priceVal = `$${Number(c.price || 0).toFixed(2)}`;
 
-                if (hasCustomAffinity) {
-                    tr.innerHTML = `
-                        <td class="metric-name" style="font-weight: 600; color: #fff;">${compoundIdVal}</td>
-                        <td class="metric-name" style="color: #a8a8b3; font-size: 0.9em;">${chemblVal}</td>
-                        <td class="metric-name" style="color: #a8a8b3; font-size: 0.85em; font-family: 'JetBrains Mono', monospace;">${inchikeyVal}</td>
-                        <td class="value">${priceVal}</td>
-                    `;
-                } else {
-                    tr.innerHTML = `
-                        <td class="metric-name" style="font-weight: 600; color: #fff;">${chemblVal}</td>
-                        <td class="metric-name" style="color: #a8a8b3; font-size: 0.95em; font-family: 'JetBrains Mono', monospace;">${inchikeyVal}</td>
-                        <td class="value">${priceVal}</td>
-                    `;
-                }
+                const values = hasCustomAffinity
+                    ? [compoundIdVal, chemblVal, inchikeyVal, priceVal]
+                    : [chemblVal, inchikeyVal, priceVal];
+                values.forEach((value, index) => {
+                    const cell = document.createElement('td');
+                    cell.className = index === values.length - 1 ? 'value' : 'metric-name';
+                    cell.textContent = value;
+                    tr.appendChild(cell);
+                });
                 compoundsBody.appendChild(tr);
             });
         }

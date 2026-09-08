@@ -34,7 +34,8 @@ OptiLib provides two flexible pipelines to generate and optimize candidate compo
   * `app.py` - Flask web server, API routes, rate limiting, and session state management.
   * `core/` - Core computational modules:
     * `algorithm.py` - NSGA-II optimization problem definition (`pymoo`), smart initialization, and Pareto analysis.
-    * `selectivity.py` - Selectivity matrix construction and ChEMBL SQL extraction.
+    * `selectivity.py` - Selectivity matrix construction from affinity measurements.
+    * `state.py` - Session defaults and reset logic.
   * `templates/` & `static/` - Modern UI interface, styles, charts, and interactive dashboards.
   * `output/` - Session-scoped directory for generated matrices and export files.
 * `MolPrice/` - Machine learning module for compound price prediction from chemical structures.
@@ -51,3 +52,14 @@ OptiLib provides two flexible pipelines to generate and optimize candidate compo
 * **Data Processing & ML:** `numpy`, `pandas`, `scikit-learn`
 * **Security & Scalability:** `flask-limiter`, SQLite (WAL mode), Docker & Docker Compose
 
+## Development checks
+
+Run the regression suite after installing `requirements.txt`:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The tests cover optimizer initialization and mutation, selectivity calculations,
+and session resets, including a small NSGA-II run. They do not require the local
+ChEMBL or MolPort databases.

@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 from flask import Flask, render_template, request, jsonify, send_file, session
 from pymoo.core.callback import Callback
+from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 from flask_limiter import Limiter
@@ -56,13 +57,13 @@ sys.path.insert(0, str(MOLPRICE_DIR))
 
 from bin.numpy_predict import NumpyFingerprints
 from core.selectivity import generate_selectivity_matrix
+from core.state import make_session_state
 from core.algorithm import (
     DrugLibraryProblem,
     build_smart_init,
     run_optimization,
     select_best_solution,
     save_results,
-    save_progress_history_plot,
     find_knee_point,
     reorder_meta_columns,
 )
@@ -185,78 +186,6 @@ _lock = threading.Lock()
 _sessions = {}
 
 
-def _make_fresh_state():
-    """Create a fresh set of state dicts for a new user session."""
-    return {
-        "last_activity": time.time(),
-        "pipeline_state": {
-            "status": "idle",           # idle | running | complete | error
-            "current_step": 0,
-            "total_steps": 3,
-            "step_label": "",
-            "detail": "",
-            "error": "",
-            "step_summaries": {},
-            "matched_targets": [],
-            "unmatched_targets": [],
-        },
-        "dataset": {
-            "selectivities": None,      # NumPy array (compounds × targets)
-            "prices": None,             # NumPy array (prices)
-            "smiles": None,             # NumPy array (SMILES)
-            "num_drugs": 0,
-            "num_targets": 0,
-            "total_cost": 0.0,
-            "matrix_file": None,        # Path to saved CSV
-            "ready": False,             # True once matrix is built
-            "has_custom_affinity": False, # True if built from custom affinity data
-        },
-        "opt_state": {
-            "status": "idle",           # idle | running | complete | error
-            "generation": 0,
-            "max_gen": 0,
-            "error": "",
-            "stop_requested": False,
-            "history": [],
-        },
-        "opt_results": {
-            "pareto_front": None,       # 2D array [[selectivity, cost], ...]
-            "best_idx": None,
-            "selected_idx": None,       # Currently selected solution index
-            "comparison": None,         # dict with all comparison metrics
-            "winning_matrix_df": None,
-            "winning_file": None,       # Path to saved Excel
-            "res_X": None,              # Solution matrix (pop × drugs) — no pymoo history
-            "res_F": None,              # Objective values (pop × 2)
-            "problem": None,            # DrugLibraryProblem instance
-            "heatmap_cache": None,      # Cached JSON-ready heatmap dict
-            "weight_mean": None,
-            "weight_min": None,
-        },
-        "affinity_upload_state": {
-            "files": {},                # filename -> { "df": df, "resolved_compounds": dict, "resolved_targets": dict, "formatted_compounds": list, "formatted_targets": list }
-            "df": None,                 # Parsed DataFrame with columns [Compound_Raw, Target_Raw, Affinity]
-            "resolved_compounds": {},   # raw_id -> dict(chembl_id, pref_name, inchi_key, smiles)
-            "resolved_targets": {},     # raw_id -> dict(chembl_id, pref_name, gene_symbol, canonical_name)
-            "num_compounds": 0,
-            "num_targets": 0,
-            "num_datapoints": 0,
-            "unique_targets": [],
-            "formatted_targets": [],
-            "formatted_compounds": [],
-        },
-        "price_upload_state": {
-            "files": {},                # filename -> { "df": df, "resolved_compounds": dict, "formatted_compounds": list }
-            "df": None,
-            "resolved_compounds": {},
-            "formatted_compounds": [],
-            "price_map": {},            # key (normalized identifier) -> price (float)
-            "filename": "",
-            "count": 0,
-        },
-    }
-
-
 def _get_session():
     """Get or create session-scoped state for the current request.
 
@@ -269,7 +198,7 @@ def _get_session():
         session["sid"] = sid
     with _lock:
         if sid not in _sessions:
-            _sessions[sid] = _make_fresh_state()
+            _sessions[sid] = make_session_state()
         else:
             _sessions[sid]["last_activity"] = time.time()
         return sid, _sessions[sid]
@@ -279,7 +208,7 @@ def _get_session_by_sid(sid):
     """Get session state by ID (for use in background threads where Flask context is unavailable)."""
     with _lock:
         if sid not in _sessions:
-            _sessions[sid] = _make_fresh_state()
+            _sessions[sid] = make_session_state()
         else:
             _sessions[sid]["last_activity"] = time.time()
         return _sessions[sid]
@@ -1482,12 +1411,7 @@ def clear_prices():
     price_state = s["price_upload_state"]
     with _lock:
         price_state["files"] = {}
-        price_state["df"] = None
-        price_state["resolved_compounds"] = {}
-        price_state["formatted_compounds"] = []
-        price_state["price_map"] = {}
-        price_state["filename"] = ""
-        price_state["count"] = 0
+        _recompute_price_state(price_state)
     return jsonify({"status": "cleared"})
 
 
@@ -1503,10 +1427,6 @@ def build_matrix():
     pipeline_st = s["pipeline_state"]
     opt_st = s["opt_state"]
 
-    with _lock:
-        if pipeline_st["status"] == "running":
-            return jsonify({"error": "Pipeline is already running"}), 409
-
     data = request.get_json(force=True)
     chembl_ids = data.get("chembl_ids", [])
     selectivity_threshold = float(data.get("selectivity_threshold", 0.5))
@@ -1516,8 +1436,13 @@ def build_matrix():
     if not chembl_ids:
         return jsonify({"error": "No matched targets provided"}), 400
 
-    # Reset states
+    # Admit one computation per session atomically.
     with _lock:
+        if pipeline_st["status"] == "running" or opt_st["status"] == "running":
+            return jsonify({"error": "A computation is already running"}), 409
+        s["dataset"]["ready"] = False
+        s["opt_results"].clear()
+        s["opt_results"].update(make_session_state()["opt_results"])
         pipeline_st.update({
             "status": "running",
             "current_step": 0,
@@ -1547,18 +1472,19 @@ def build_matrix_from_affinity():
     opt_st = s["opt_state"]
     aff_state = s["affinity_upload_state"]
 
-    with _lock:
-        if pipeline_st["status"] == "running":
-            return jsonify({"error": "Pipeline is already running"}), 409
-        if aff_state["df"] is None or aff_state["df"].empty:
-            return jsonify({"error": "No affinity data uploaded. Please upload an affinity file first."}), 400
-
     data = request.get_json(force=True) or {}
     selectivity_threshold = float(data.get("selectivity_threshold", 0.5))
     remove_targets = bool(data.get("remove_targets", True))
 
-    # Reset states
+    # Admit one computation per session atomically.
     with _lock:
+        if pipeline_st["status"] == "running" or opt_st["status"] == "running":
+            return jsonify({"error": "A computation is already running"}), 409
+        if aff_state["df"] is None or aff_state["df"].empty:
+            return jsonify({"error": "No affinity data uploaded. Please upload an affinity file first."}), 400
+        s["dataset"]["ready"] = False
+        s["opt_results"].clear()
+        s["opt_results"].update(make_session_state()["opt_results"])
         pipeline_st.update({
             "status": "running",
             "current_step": 0,
@@ -1606,14 +1532,17 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
     s = _get_session_by_sid(sid)
     pipeline_st = s["pipeline_state"]
     ds = s["dataset"]
-    price_state = s["price_upload_state"]
+    with _lock:
+        price_state = {**s["price_upload_state"],
+                       "price_map": dict(s["price_upload_state"]["price_map"])}
 
     try:
         output_dir = PROJECT_ROOT / "webapp" / "output" / sid
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate cache key based on inputs
-        cache_str = f"v3_{sorted(chembl_ids)}_{selectivity_threshold}_{remove_targets}_{matched_count}"
+        price_key = json.dumps(price_state["price_map"], sort_keys=True)
+        cache_str = f"v4_{sorted(chembl_ids)}_{selectivity_threshold}_{remove_targets}_{matched_count}_{price_key}"
         cache_key = hashlib.md5(cache_str.encode('utf-8')).hexdigest()
         matrix_file = str(output_dir / f"selectivity_matrix_{cache_key}.csv")
         
@@ -1970,7 +1899,9 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
     pipeline_st = s["pipeline_state"]
     ds = s["dataset"]
     aff_state = s["affinity_upload_state"]
-    price_state = s["price_upload_state"]
+    with _lock:
+        price_state = {**s["price_upload_state"],
+                       "price_map": dict(s["price_upload_state"]["price_map"])}
 
     try:
         output_dir = PROJECT_ROOT / "webapp" / "output" / sid
@@ -2213,16 +2144,10 @@ def run_optimization_route():
     opt_st = s["opt_state"]
     ds = s["dataset"]
 
-    with _lock:
-        if opt_st["status"] == "running":
-            return jsonify({"error": "Optimization is already running"}), 409
-        if not ds["ready"]:
-            return jsonify({"error": "No dataset loaded. Build the matrix first."}), 400
-
     data = request.get_json(force=True)
     weight_mean = float(data.get("weight_mean", 0.5))
     allowed_miss_pct = float(data.get("allowed_miss_pct", 0.04))
-    mutation_multiplier = float(data.get("mutation_multiplier", 4.0))
+    mutation_multiplier = float(data.get("mutation_multiplier", 1.0))
     pop_size = int(data.get("pop_size", 100))
     max_gen = int(data.get("max_gen", 1000))
     ftol = float(data.get("ftol", 0.0025))
@@ -2237,6 +2162,12 @@ def run_optimization_route():
     term_period = max(term_period, 5)
 
     with _lock:
+        if opt_st["status"] == "running" or s["pipeline_state"]["status"] == "running":
+            return jsonify({"error": "A computation is already running"}), 409
+        if not ds["ready"]:
+            return jsonify({"error": "No dataset loaded. Build the matrix first."}), 400
+        s["opt_results"].clear()
+        s["opt_results"].update(make_session_state()["opt_results"])
         opt_st.update({
             "status": "running",
             "generation": 0,
@@ -2269,74 +2200,14 @@ def optimization_status():
 @limiter.limit("60 per minute")
 def reset_state():
     sid, s = _get_session()
+    # A new session ID isolates the reset from every in-flight request/job.
+    # Let pipeline work finish in the retired session; stop NSGA-II at its
+    # next callback. The cleaner removes retired outputs after completion.
     with _lock:
-        s["pipeline_state"].update({
-            "status": "idle",
-            "current_step": 0,
-            "step_label": "",
-            "detail": "",
-            "error": "",
-            "step_summaries": {},
-            "matched_targets": [],
-            "unmatched_targets": [],
-        })
-        s["dataset"].update({
-            "selectivities": None,
-            "prices": None,
-            "smiles": None,
-            "num_drugs": 0,
-            "num_targets": 0,
-            "total_cost": 0.0,
-            "matrix_file": None,
-            "ready": False,
-        })
-        s["opt_state"].update({
-            "status": "idle",
-            "generation": 0,
-            "max_gen": 0,
-            "error": "",
-            "stop_requested": False,
-            "history": [],
-        })
-        s["opt_results"].update({
-            "pareto_front": None,
-            "best_idx": None,
-            "selected_idx": None,
-            "comparison": None,
-            "winning_matrix_df": None,
-            "winning_file": None,
-            "res_X": None,
-            "res_F": None,
-            "problem": None,
-            "heatmap_cache": None,
-            "weight_mean": None,
-            "weight_min": None,
-        })
-        s["affinity_upload_state"].update({
-            "files": {},
-            "df": None,
-            "resolved_compounds": {},
-            "resolved_targets": {},
-            "num_compounds": 0,
-            "num_targets": 0,
-            "num_datapoints": 0,
-            "unique_targets": [],
-            "formatted_targets": [],
-            "formatted_compounds": [],
-        })
-        s["price_upload_state"].update({
-            "files": {},
-            "df": None,
-            "resolved_compounds": {},
-            "formatted_compounds": [],
-            "price_map": {},
-            "filename": "",
-            "count": 0,
-        })
-    # Clean up per-session output directory on reset
-    session_output_dir = PROJECT_ROOT / "webapp" / "output" / sid
-    if session_output_dir.exists():
-        shutil.rmtree(session_output_dir, ignore_errors=True)
+        s["opt_state"]["stop_requested"] = True
+        new_sid = str(uuid.uuid4())
+        _sessions[new_sid] = make_session_state()
+        session["sid"] = new_sid
     return jsonify({"status": "reset"})
 
 
@@ -2346,6 +2217,10 @@ def reset_opt_state():
     sid, s = _get_session()
     opt_st = s["opt_state"]
     with _lock:
+        if opt_st["status"] == "running" or s["pipeline_state"]["status"] == "running":
+            return jsonify({"error": "Stop the active computation before resetting optimization"}), 409
+        s["opt_results"].clear()
+        s["opt_results"].update(make_session_state()["opt_results"])
         opt_st.update({
             "status": "idle",
             "generation": 0,
@@ -2401,7 +2276,6 @@ def _run_nsga2(sid, weight_mean, allowed_miss_pct, mutation_multiplier, pop_size
             max_gen=max_gen, ftol=ftol,
             period=term_period,
             mutation_multiplier=mutation_multiplier,
-            crossover_type="hux",
             callback=cb
         )
         del X_init  # Free init population memory
@@ -2417,12 +2291,6 @@ def _run_nsga2(sid, weight_mean, allowed_miss_pct, mutation_multiplier, pop_size
 
         _process_and_store_results(sid, res_X, res_F, best_idx, front, problem, max_price=max_price)
 
-        # Save a clean matplotlib progress history plot (white background PNG)
-        with _lock:
-            history_snapshot = list(opt_st["history"])
-        session_output_dir = PROJECT_ROOT / "webapp" / "output" / sid
-        save_progress_history_plot(history_snapshot, output_dir=session_output_dir)
-
         with _lock:
             opt_st["status"] = "complete"
 
@@ -2431,11 +2299,6 @@ def _run_nsga2(sid, weight_mean, allowed_miss_pct, mutation_multiplier, pop_size
         if cb is not None and cb.last_pop_X is not None and problem is not None:
             try:
                 _process_stopped_results(sid, cb, problem, max_price=max_price)
-                # Save progress history plot even on early stop
-                with _lock:
-                    history_snapshot = list(opt_st["history"])
-                session_output_dir = PROJECT_ROOT / "webapp" / "output" / sid
-                save_progress_history_plot(history_snapshot, output_dir=session_output_dir)
             except Exception as inner_e:
                 with _lock:
                     opt_st["status"] = "error"
@@ -2463,13 +2326,13 @@ def _process_stopped_results(sid, cb, problem, max_price=None):
     X = cb.last_pop_X
 
     feasible_mask = (G <= 0).all(axis=1) if G.ndim > 1 else (G <= 0).ravel()
-    if np.any(feasible_mask):
-        res_X = X[feasible_mask]
-        res_F = F[feasible_mask]
-    else:
-        # No feasible solutions — use entire population
-        res_X = X
-        res_F = F
+    if not np.any(feasible_mask):
+        raise ValueError("Stopped before any solution met the coverage constraint. Try relaxing the allowed missed targets or running longer.")
+    res_X = X[feasible_mask]
+    res_F = F[feasible_mask]
+    front_indices = NonDominatedSorting().do(res_F, only_non_dominated_front=True)
+    res_X = res_X[front_indices]
+    res_F = res_F[front_indices]
 
     # Build a lightweight result and select the best solution
     res_light = _LightResult(res_X, res_F)
@@ -2927,19 +2790,6 @@ def download_matrix():
         pd.read_csv(csv_path).to_excel(xlsx_path, index=False, engine='xlsxwriter')
 
     return send_file(xlsx_path, as_attachment=True, download_name="selectivity_matrix.xlsx")
-
-
-@app.route("/api/download/progress-plot")
-@limiter.limit("60 per minute")
-def download_progress_plot():
-    sid, s = _get_session()
-    session_output_dir = PROJECT_ROOT / "webapp" / "output" / sid
-    plot_path = session_output_dir / "optimization_progress_history.png"
-    if not plot_path.exists():
-        plot_path = PROJECT_ROOT / "webapp" / "output" / "optimization_progress_history.png"
-    if plot_path.exists():
-        return send_file(plot_path, as_attachment=True, download_name="optimization_progress_history.png")
-    return jsonify({"error": "No progress history plot available"}), 404
 
 
 # ═══════════════════════════════════════════════════════════════

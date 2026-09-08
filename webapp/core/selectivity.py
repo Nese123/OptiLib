@@ -12,6 +12,11 @@ def generate_selectivity_matrix(affinities, target_indices=None, h=5):
     Returns a matrix of the same shape with selectivity scores.
     Entries not in target_indices will be NaN.
     """
+    affinities = np.asarray(affinities, dtype=float)
+    if affinities.ndim != 2:
+        raise ValueError("affinities must be a 2D matrix")
+    if not isinstance(h, (int, np.integer)) or isinstance(h, bool) or h < 1:
+        raise ValueError("h must be a positive integer")
     num_compounds, num_targets = affinities.shape
 
     if num_targets < 2:

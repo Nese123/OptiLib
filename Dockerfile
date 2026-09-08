@@ -40,4 +40,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # --workers 1    : single process so in-memory session state is shared
 # --threads 4    : handle concurrent requests (polling, uploads, etc.)
 # --timeout 300  : 5-min timeout for long pipeline/optimization requests
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "300", "--preload", "webapp.app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "300", "webapp.app:app"]

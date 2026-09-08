@@ -7,11 +7,6 @@ from pymoo.operators.crossover.hux import HalfUniformCrossover
 from pymoo.operators.mutation.bitflip import BitflipMutation
 from pymoo.optimize import minimize
 from pymoo.termination.default import DefaultMultiObjectiveTermination
-from pymoo.visualization.scatter import Scatter
-from pymoo.operators.crossover.pntx import SinglePointCrossover
-from pymoo.operators.crossover.pntx import TwoPointCrossover
-from pathlib import Path
-from pymoo.operators.crossover.ux import UniformCrossover
 import warnings
 
 
@@ -31,13 +26,12 @@ class DrugLibraryProblem(ElementwiseProblem):
     """
 
     def __init__(self, selectivity_matrix, price_array,
-                 weight_mean=0.004, allowed_miss_pct=0.049, use_median=False):
+                 weight_mean=0.5, allowed_miss_pct=0.5):
         self.matrix = selectivity_matrix
         self.prices = price_array
         self.weight_mean = weight_mean
         self.weight_min = 1.0 - weight_mean
         self.allowed_miss_pct = allowed_miss_pct
-        self.use_median = use_median
 
         self.num_drugs, self.num_targets = self.matrix.shape
         self.max_allowed_misses = int(self.num_targets * self.allowed_miss_pct)
@@ -53,18 +47,9 @@ class DrugLibraryProblem(ElementwiseProblem):
         
         self.pool_mean_sel = float(np.mean(positive_pool_scores)) if len(positive_pool_scores) > 0 else 0.0
         self.pool_min_sel = float(np.min(positive_pool_scores)) if len(positive_pool_scores) > 0 else 0.0
-        if self.use_median:
-            self.pool_baseline_score = float(np.median(positive_pool_scores)) if len(positive_pool_scores) > 0 else 0.0
-        else:
-            self.pool_baseline_score = self.weight_mean * self.pool_mean_sel + self.weight_min * self.pool_min_sel
+        self.pool_baseline_score = self.weight_mean * self.pool_mean_sel + self.weight_min * self.pool_min_sel
         self.pool_num_targets = self.num_targets
         self.pool_num_drugs = self.num_drugs
-
-        # Precompute cheapest drug per target for the smart repair mutation
-        coverage_mask = self.matrix > 0
-        masked_prices = np.where(coverage_mask, self.prices[:, np.newaxis], np.inf)
-        self.cheapest_per_target = np.argmin(masked_prices, axis=0)
-        self.has_coverage = np.any(coverage_mask, axis=0)
 
         super().__init__(
             n_var=self.num_drugs,
@@ -105,19 +90,16 @@ class DrugLibraryProblem(ElementwiseProblem):
 
         # Calculate biological score across ALL targets (uncovered = 0)
         if len(covered_scores) > 0:
-            if self.use_median:
-                biological_score = np.median(all_scores)
-            else:
-                biological_score = self.weight_mean * np.mean(all_scores) + self.weight_min * np.min(covered_scores)
+            biological_score = self.weight_mean * np.mean(all_scores) + self.weight_min * np.min(covered_scores)
         else:
             biological_score = 0.0  # Fallback if all targets are missed
 
-        # Normalize selectivity: 0 = pool baseline, negative = better than baseline
-        obj_1 = -biological_score / self.pool_baseline_score
+        # Normalize selectivity: -1 = pool baseline; lower is better.
+        obj_1 = -biological_score / (self.pool_baseline_score or 1.0)
 
         # Normalize cost: 0 = free, 1 = buying the entire pool
         raw_total_cost = self.prices[mask].sum()
-        obj_2 = raw_total_cost / self.pool_total_cost
+        obj_2 = raw_total_cost / (self.pool_total_cost or 1.0)
 
         out["F"] = [obj_1, obj_2]
 
@@ -138,9 +120,10 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
     Returns:
         X_init: 2D binary array of shape (pop_size, num_drugs).
     """
-    np.random.seed(seed)
-    
-    X_init = np.random.randint(0, 2, size=(pop_size, selectivities.shape[0]))
+    if pop_size < 5:
+        raise ValueError("pop_size must be at least 5 to include all smart seeds")
+    rng = np.random.default_rng(seed)
+    X_init = rng.integers(0, 2, size=(pop_size, selectivities.shape[0])).astype(bool)
 
     # Precompute coverage mask
     coverage_mask = selectivities > 0
@@ -157,7 +140,7 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
 
     # -------------------------------------------------------------
     # Smart Guess 2: "Maximum Efficacy" (Highest selectivity drug for each target)
-    best_per_target = np.argmax(selectivities, axis=0)
+    best_per_target = np.argmax(np.where(coverage_mask, selectivities, -np.inf), axis=0)
     best_scores = selectivities[best_per_target, np.arange(selectivities.shape[1])]
     max_sel_drugs = np.unique(best_per_target[best_scores > 0])
 
@@ -202,26 +185,23 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
 #  OPTIMIZATION
 # ═══════════════════════════════════════════════════════════════
 
-def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0.0025, period=30, mutation_multiplier=1.098, crossover_type="hux", callback=None):
-    """Configure and run the NSGA-II optimizer.
+def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0.0025, period=30, mutation_multiplier=1.0, callback=None):
+    """Configure and run the NSGA-II optimizer with half-uniform crossover.
 
     Returns:
-        res: pymoo Result object containing the Pareto-optimal solutions.
+        (res, elapsed_time): pymoo Result and elapsed runtime in seconds.
     """
-    crossover_map = {
-        "spx": SinglePointCrossover(),
-        "tpx": TwoPointCrossover(),
-        "ux": UniformCrossover(),
-        "hux": HalfUniformCrossover(),
-    }
-    crossover_op = crossover_map[crossover_type]
-    print(f"Using crossover operator: {crossover_op.__class__.__name__}")
+    if not np.isfinite(mutation_multiplier) or mutation_multiplier < 0:
+        raise ValueError("mutation_multiplier must be finite and non-negative")
 
     algorithm = NSGA2(
         pop_size=pop_size,
-        sampling=X_init,
-        crossover=crossover_op,
-        mutation=BitflipMutation(prob=1.0 / problem.num_drugs),
+        sampling=np.asarray(X_init, dtype=bool),
+        crossover=HalfUniformCrossover(),
+        mutation=BitflipMutation(
+            prob=1.0,
+            prob_var=min(1.0, mutation_multiplier / problem.num_drugs),
+        ),
         eliminate_duplicates=True
     )
 
@@ -322,7 +302,7 @@ def select_best_solution(res, problem):
     """Pick the best-compromise knee point solution from the Pareto front.
 
     Converts the optimizer's internal objective values back to real-world units,
-    plots the Pareto front, and identifies the knee point (elbow) using the
+    and identifies the knee point (elbow) using the
     Maximum Perpendicular Distance to the Secant Line (Chord method) in normalized space.
 
     Returns:
@@ -330,120 +310,16 @@ def select_best_solution(res, problem):
         front: 2D array of real-world [selectivity, cost] for each Pareto solution.
     """
     # Convert optimizer's normalized values back to real-world units
-    if res.F is None:
+    if res.F is None or len(res.F) == 0:
         raise ValueError("Optimization failed to find any feasible solutions. Try relaxing the constraints (e.g., increase the maximum amount of missed targets %).")
         
     front = res.F.copy()
     front[:, 0] *= -problem.pool_baseline_score   # Undo negation + normalization → real selectivity
     front[:, 1] *= problem.pool_total_cost  # Undo normalization → real cost (USD)
 
-    # Initialize the Scatter plot
-    w_mean = round(float(problem.weight_mean), 4) if hasattr(problem, "weight_mean") else 0.5
-    w_min = round(float(problem.weight_min), 4) if hasattr(problem, "weight_min") else 0.5
-    plot = Scatter(
-        title="Pareto Front",
-        labels=[f"Selectivity Score ({w_mean} * Mean Selectivity + {w_min} * Min Selectivity)", "Total Library Cost"]
-    )
-    plot.add(front, color="green", facecolor="none", s=40)
-
-    # Format the cost axis (Y) with comma separators for readability
-    import matplotlib.ticker as mticker
-    plot.do()  # Render first so plot.ax exists
-    plot.ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:,.0f}'))
-
-    output_dir = Path(__file__).resolve().parent.parent / "output"
-    output_dir.mkdir(exist_ok=True)
-    img_path = output_dir / "final_constrained_pareto_front.png"
-    
-    plot.fig.savefig(str(img_path), dpi=200, bbox_inches="tight")
-    print(f"Plot successfully saved as '{img_path.name}' in {output_dir}!")
-
     best_idx = find_knee_point(front)
 
     return best_idx, front
-
-
-# ═══════════════════════════════════════════════════════════════
-#  PROGRESS HISTORY PLOT
-# ═══════════════════════════════════════════════════════════════
-
-def save_progress_history_plot(history, output_dir=None):
-    """Save a clean, white-background matplotlib plot of the optimization progress history.
-
-    Generates a single combined plot with dual y-axes (left: Selectivity, right: Cost)
-    over generations, matching the webpage progress history chart.
-
-    Args:
-        history: List of dicts with keys 'generation', 'best_selectivity', 'best_cost'.
-        output_dir: Path to save the image. Defaults to webapp/output/.
-    """
-    if not history or len(history) == 0:
-        return
-
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.ticker as mticker
-
-    generations = [h["generation"] for h in history]
-    selectivities = [h["best_selectivity"] for h in history]
-    costs = [h["best_cost"] for h in history]
-
-    fig, ax1 = plt.subplots(figsize=(9, 6))
-    fig.patch.set_facecolor("white")
-    ax1.set_facecolor("white")
-
-    color_sel = "#d93025"   # Red (Selectivity)
-    color_cost = "#1a73e8"  # Blue (Cost)
-
-    # ── Left Y-axis: Selectivity ──
-    line1 = ax1.plot(
-        generations, selectivities,
-        color=color_sel, linewidth=2,
-        marker="o", markersize=4, markerfacecolor="white", markeredgecolor=color_sel, markeredgewidth=1.5,
-        label="Selectivity"
-    )
-    ax1.set_xlabel("Generation", fontsize=12, labelpad=8)
-    ax1.set_ylabel("Best Selectivity Score", color=color_sel, fontsize=12, labelpad=8)
-    ax1.tick_params(axis="y", labelcolor=color_sel, labelsize=10)
-    ax1.tick_params(axis="x", labelsize=10)
-    ax1.grid(True, linestyle="--", alpha=0.4, color="#cccccc")
-
-    # ── Right Y-axis: Cost (Twin Axis) ──
-    ax2 = ax1.twinx()
-    line2 = ax2.plot(
-        generations, costs,
-        color=color_cost, linewidth=2,
-        marker="o", markersize=4, markerfacecolor="white", markeredgecolor=color_cost, markeredgewidth=1.5,
-        label="Cost"
-    )
-    ax2.set_ylabel("Lowest Cost (USD)", color=color_cost, fontsize=12, labelpad=8)
-    ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
-    ax2.tick_params(axis="y", labelcolor=color_cost, labelsize=10)
-    ax2.grid(False)  # Avoid overlapping gridlines
-
-    # ── Title & Combined Legend ──
-    plt.title("Optimization Progress History", fontsize=14, fontweight="bold", pad=15)
-    
-    lines = line1 + line2
-    labels = [l.get_label() for l in lines]
-    ax1.legend(lines, labels, loc="upper center", bbox_to_anchor=(0.5, -0.12),
-               ncol=2, frameon=True, facecolor="#f8f9fa", edgecolor="#dee2e6", fontsize=10)
-
-    fig.tight_layout()
-
-    if output_dir is None:
-        output_dir = Path(__file__).resolve().parent.parent / "output"
-    else:
-        output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    img_path = output_dir / "optimization_progress_history.png"
-    fig.savefig(str(img_path), dpi=200, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    print(f"Progress history plot saved as '{img_path.name}' in {output_dir}!")
-
-    return str(img_path)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -466,7 +342,7 @@ def save_results(res, best_idx, full_df, output_file='optimized_library.xlsx'):
     print("\nBuilding the isolated selectivity matrix for the winning library...")
 
     # Slice the rows: Keep only the drugs that won
-    winning_matrix_df = full_df.loc[winning_smiles].copy()
+    winning_matrix_df = full_df.iloc[selected_drug_indices].copy()
 
     # Drop any targets that do not have at least one selectivity measurement > 0
     target_cols = [c for c in winning_matrix_df.columns if c not in ['Compound_Name', 'Molecule_ChEMBL_ID', 'InChIKey', 'SMILES', 'Price_USD_per_mg']]
