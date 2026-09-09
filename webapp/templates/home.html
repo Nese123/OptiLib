@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="/static/style.css?v=1.6">
+    <link rel="stylesheet" href="/static/style.css?v=1.8">
     <script src="https://cdn.plot.ly/plotly-cartesian-2.35.0.min.js" charset="utf-8" defer></script>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <meta name="csrf-token" content="{{ csrf_token() }}">
@@ -849,15 +849,7 @@
 
     <script src="/static/navigation.js?v=1.0"></script>
     <script>
-        // ─── Navbar scroll effect ───
         const navbar = document.getElementById('navbar');
-        window.addEventListener('scroll', () => {
-            if (window.scrollY > 40) {
-                navbar.classList.add('scrolled');
-            } else {
-                navbar.classList.remove('scrolled');
-            }
-        }, { passive: true });
 
         // ─── Scroll-triggered animations ───
         const observerOptions = {
@@ -928,21 +920,30 @@
             });
         }
 
-        // ─── Scroll-spy: highlight active nav link ───
+        // ─── Navbar appearance and active section ───
         const spySections = [
             { id: 'set-up', href: '#set-up' },
             { id: 'optimization', href: '#optimization' },
             { id: 'visualizations', href: '#visualizations' },
             { id: 'references', href: '#references' },
-        ];
+        ].map(section => ({ ...section, element: document.getElementById(section.id) }));
 
-        const allNavLinks = document.querySelectorAll('.navbar-links .nav-link:not(.nav-cta), .navbar-mobile-menu .nav-link:not(.nav-cta)');
+        const allNavLinks = Array.from(document.querySelectorAll('.navbar-links .nav-link:not(.nav-cta), .navbar-mobile-menu .nav-link:not(.nav-cta)'), element => ({
+            element,
+            href: element.getAttribute('href'),
+        }));
+        let navUpdatePending = false;
+        let navbarScrolled = navbar.classList.contains('scrolled');
+        let lastActiveHref = null;
 
-        function updateActiveNav() {
+        function updateNavigation() {
+            navUpdatePending = false;
+            // Finish geometry reads before updating either navigation state.
             const scrollY = window.scrollY;
             const navHeight = navbar.offsetHeight;
             const scrollOffset = navHeight + 80;
-            const isBottom = (window.innerHeight + window.scrollY) >= (document.documentElement.scrollHeight - 50);
+            const isBottom = (window.innerHeight + scrollY) >= (document.documentElement.scrollHeight - 50);
+            const scrolled = scrollY > 40;
 
             let activeHref = '#'; // default to Home
 
@@ -950,9 +951,8 @@
                 activeHref = '#references';
             } else {
                 for (const sec of spySections) {
-                    const el = document.getElementById(sec.id);
-                    if (el) {
-                        const top = el.offsetTop - scrollOffset;
+                    if (sec.element) {
+                        const top = sec.element.offsetTop - scrollOffset;
                         if (scrollY >= top) {
                             activeHref = sec.href;
                         }
@@ -960,18 +960,31 @@
                 }
             }
 
-            allNavLinks.forEach(link => {
-                const href = link.getAttribute('href');
-                if (href === activeHref) {
-                    link.classList.add('active');
-                } else {
-                    link.classList.remove('active');
-                }
-            });
+            if (scrolled !== navbarScrolled) {
+                navbar.classList.toggle('scrolled', scrolled);
+                navbarScrolled = scrolled;
+            }
+            if (activeHref !== lastActiveHref) {
+                allNavLinks.forEach(({ element, href }) => {
+                    const active = href === activeHref;
+                    if (element.classList.contains('active') !== active) {
+                        element.classList.toggle('active', active);
+                    }
+                });
+                lastActiveHref = activeHref;
+            }
         }
 
-        window.addEventListener('scroll', updateActiveNav, { passive: true });
-        updateActiveNav();
+        function scheduleNavigationUpdate() {
+            if (navUpdatePending) return;
+            navUpdatePending = true;
+            requestAnimationFrame(updateNavigation);
+        }
+
+        window.addEventListener('scroll', scheduleNavigationUpdate, { passive: true });
+        window.addEventListener('resize', scheduleNavigationUpdate);
+        window.addEventListener('pageshow', scheduleNavigationUpdate);
+        updateNavigation();
 
         // ─── Floating particles background ───
         function createParticles() {
@@ -991,6 +1004,22 @@
             }
         }
         createParticles();
+
+        const heroSection = document.querySelector('.hero-section');
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+        let heroVisible = false;
+
+        function updateHeroMotion() {
+            heroSection.classList.toggle('hero-motion-active', heroVisible && !document.hidden && !reducedMotion.matches);
+        }
+
+        const heroObserver = new IntersectionObserver(entries => {
+            heroVisible = entries[entries.length - 1].isIntersecting;
+            updateHeroMotion();
+        });
+        heroObserver.observe(heroSection);
+        document.addEventListener('visibilitychange', updateHeroMotion);
+        reducedMotion.addEventListener('change', updateHeroMotion);
 
         // ─── Demo Visualization Charts ───
         function initDemoParetoChart() {
