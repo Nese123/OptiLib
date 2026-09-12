@@ -11,8 +11,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="/static/style.css?v=1.8">
-    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js" charset="utf-8"></script>
+    <link rel="stylesheet" href="/static/style.css?v=1.9">
+    <script defer src="https://cdn.plot.ly/plotly-cartesian-2.35.0.min.js" charset="utf-8"></script>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
@@ -717,26 +717,7 @@
     </footer>
 
     <script src="/static/navigation.js?v=1.0"></script>
-    <script>
-        // ─── Advanced Settings Toggle ───
-        const advancedSettingsToggle = document.getElementById('advancedSettingsToggle');
-        const advancedSettingsContainer = document.getElementById('advancedSettingsContainer');
-        if (advancedSettingsToggle && advancedSettingsContainer) {
-            advancedSettingsToggle.addEventListener('change', (e) => {
-                advancedSettingsContainer.style.display = e.target.checked ? 'block' : 'none';
-            });
-        }
-
-        // ─── Maximum Price Limit Toggle ───
-        const maxPriceToggle = document.getElementById('maxPriceToggle');
-        const maxPriceInputContainer = document.getElementById('maxPriceInputContainer');
-        if (maxPriceToggle && maxPriceInputContainer) {
-            maxPriceToggle.addEventListener('change', (e) => {
-                maxPriceInputContainer.style.display = e.target.checked ? 'block' : 'none';
-            });
-        }
-    </script>
-    <script src="/static/app.js?v=5.2"></script>
+    <script defer src="/static/app.js?v=6.0"></script>
 
 </body>
 

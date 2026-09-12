@@ -1,13 +1,17 @@
+import os
+import tempfile
 import time
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.core.duplicate import DuplicateElimination
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.operators.crossover.hux import HalfUniformCrossover
 from pymoo.operators.mutation.bitflip import BitflipMutation
 from pymoo.optimize import minimize
 from pymoo.termination.default import DefaultMultiObjectiveTermination
-import warnings
+from .records import METADATA_COLUMNS, target_columns
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -26,7 +30,8 @@ class DrugLibraryProblem(ElementwiseProblem):
     """
 
     def __init__(self, selectivity_matrix, price_array,
-                 weight_mean=0.5, allowed_miss_pct=0.5):
+                 weight_mean=0.5, allowed_miss_pct=0.5, *,
+                 prepared_score_budget=128 * 1024 * 1024):
         self.matrix = selectivity_matrix
         self.prices = price_array
         self.weight_mean = weight_mean
@@ -38,9 +43,7 @@ class DrugLibraryProblem(ElementwiseProblem):
 
         # Compute pool-level baselines for normalization and reporting
         self.pool_total_cost = float(np.sum(self.prices))
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            pool_max_scores = np.nanmax(self.matrix, axis=0)
+        pool_max_scores = np.fmax.reduce(self.matrix, axis=0)
         pool_max_scores = np.nan_to_num(pool_max_scores, nan=-1.0)
 
         positive_pool_scores = pool_max_scores[pool_max_scores > 0]
@@ -50,6 +53,17 @@ class DrugLibraryProblem(ElementwiseProblem):
         self.pool_baseline_score = self.weight_mean * self.pool_mean_sel + self.weight_min * self.pool_min_sel
         self.pool_num_targets = self.num_targets
         self.pool_num_drugs = self.num_drugs
+
+        # Keep the original matrix for reporting. Cap the additional score
+        # buffer per job; large matrices use the equivalent reduction fallback.
+        self._scores = None
+        if self.matrix.nbytes <= prepared_score_budget:
+            self._scores = self.matrix.copy()
+            rows_per_batch = max(1, (1024 * 1024) // max(1, self.matrix.shape[1] * self.matrix.dtype.itemsize))
+            for start in range(0, self.num_drugs, rows_per_batch):
+                block = self._scores[start:start + rows_per_batch]
+                np.nan_to_num(block, copy=False, nan=0.0, neginf=0.0)
+                np.maximum(block, 0, out=block)
 
         super().__init__(
             n_var=self.num_drugs,
@@ -68,22 +82,15 @@ class DrugLibraryProblem(ElementwiseProblem):
             out["G"] = [self.num_targets]
             return
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            target_max_scores = np.nanmax(self.matrix[mask, :], axis=0)
-        target_max_scores = np.nan_to_num(target_max_scores, nan=-1.0)
-
-        # Constraint 1: The Allowance
-        missed_targets = np.sum(target_max_scores <= 0)
-
-        # pymoo passes constraints if G <= 0.
-        # If we miss 2 targets, and 2 are allowed: 2 - 2 = 0 (Pass)
-        # If we miss 3 targets, and 2 are allowed: 3 - 2 = 1 (Fail)
+        if self._scores is not None:
+            all_scores = np.max(self._scores[mask, :], axis=0)
+        else:
+            target_max_scores = np.fmax.reduce(self.matrix[mask, :], axis=0)
+            target_max_scores = np.nan_to_num(target_max_scores, nan=-1.0)
+            all_scores = np.maximum(target_max_scores, 0)
+        missed_targets = np.sum(all_scores <= 0)
         coverage_violation = missed_targets - self.max_allowed_misses
 
-        # Score all targets: covered targets get their max score, uncovered get 0.
-        # This penalizes dropping targets even when the constraint allows it.
-        all_scores = np.maximum(target_max_scores, 0)
         covered_scores = all_scores[all_scores > 0]
 
         out["G"] = [coverage_violation]
@@ -117,13 +124,16 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
     Smart Guess 4 ("The Union"): Bargain Bin + Max Efficacy combined.
     Smart Guess 5 ("Second Cheapest"): second cheapest drug for each target.
 
+    Random rows use direct Boolean sampling. Seeds remain reproducible, but
+    differ from the former integer-then-cast sampling sequence.
+
     Returns:
         X_init: 2D binary array of shape (pop_size, num_drugs).
     """
     if pop_size < 5:
         raise ValueError("pop_size must be at least 5 to include all smart seeds")
     rng = np.random.default_rng(seed)
-    X_init = rng.integers(0, 2, size=(pop_size, selectivities.shape[0])).astype(bool)
+    X_init = rng.integers(0, 2, size=(pop_size, selectivities.shape[0]), dtype=bool)
 
     # Precompute coverage mask
     coverage_mask = selectivities > 0
@@ -137,6 +147,19 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
 
     X_init[0, :] = 0
     X_init[0, cheapest_drugs] = 1
+
+    # -------------------------------------------------------------
+    # Smart Guess 5: "Second Cheapest" (modify in-place, no copy needed)
+    for t, d in enumerate(cheapest_per_target):
+        if has_coverage[t]:
+            masked_prices[d, t] = np.inf
+    has_second_coverage = np.any(masked_prices != np.inf, axis=0)
+    second_cheapest_per_target = np.argmin(masked_prices, axis=0)
+    del masked_prices  # Free memory
+    second_cheapest_drugs = np.unique(second_cheapest_per_target[has_second_coverage])
+
+    X_init[4, :] = 0
+    X_init[4, second_cheapest_drugs] = 1
 
     # -------------------------------------------------------------
     # Smart Guess 2: "Maximum Efficacy" (Highest selectivity drug for each target)
@@ -161,22 +184,7 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
 
     # -------------------------------------------------------------
     # Smart Guess 4: "The Union" (Bargain Bin + Max Efficacy)
-    union_drugs = np.unique(np.concatenate([cheapest_drugs, max_sel_drugs]))
-    X_init[3, :] = 0
-    X_init[3, union_drugs] = 1
-
-    # -------------------------------------------------------------
-    # Smart Guess 5: "Second Cheapest" (modify in-place, no copy needed)
-    for t, d in enumerate(cheapest_per_target):
-        if has_coverage[t]:
-            masked_prices[d, t] = np.inf
-    has_second_coverage = np.any(masked_prices != np.inf, axis=0)
-    second_cheapest_per_target = np.argmin(masked_prices, axis=0)
-    del masked_prices  # Free memory
-    second_cheapest_drugs = np.unique(second_cheapest_per_target[has_second_coverage])
-
-    X_init[4, :] = 0
-    X_init[4, second_cheapest_drugs] = 1
+    X_init[3, :] = X_init[0] | X_init[1]
 
     return X_init
 
@@ -184,6 +192,30 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
 # ═══════════════════════════════════════════════════════════════
 #  OPTIMIZATION
 # ═══════════════════════════════════════════════════════════════
+
+class PackedBinaryDuplicateElimination(DuplicateElimination):
+    """Compare binary libraries exactly, retaining the first duplicate row."""
+
+    def _do(self, pop, other, is_duplicate):
+        keys = np.packbits(self.func(pop), axis=1)
+        seen = set()
+        if other is not None:
+            seen.update(
+                row.tobytes()
+                for row in np.packbits(self.func(other), axis=1)
+            )
+
+        for index, row in enumerate(keys):
+            key = row.tobytes()
+            if key in seen:
+                is_duplicate[index] = True
+            # External comparisons must preserve duplicates within pop when
+            # pymoo calls do(..., to_itself=False).
+            if other is None:
+                seen.add(key)
+
+        return is_duplicate
+
 
 def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0.0025, period=30, mutation_multiplier=1.0, callback=None):
     """Configure and run the NSGA-II optimizer with half-uniform crossover.
@@ -202,7 +234,7 @@ def run_optimization(problem, X_init, pop_size=100, seed=1, max_gen=1000, ftol=0
             prob=1.0,
             prob_var=min(1.0, mutation_multiplier / problem.num_drugs),
         ),
-        eliminate_duplicates=True
+        eliminate_duplicates=PackedBinaryDuplicateElimination()
     )
 
     # Stop the algorithm when the Pareto front stops significantly improving
@@ -287,7 +319,7 @@ def reorder_meta_columns(df):
     """Move metadata columns to the front of a DataFrame, preserving the rest."""
     cols = df.columns.tolist()
     meta_cols = []
-    for mc in ["Compound_Name", "Molecule_ChEMBL_ID", "InChIKey", "SMILES", "Price_USD_per_mg"]:
+    for mc in METADATA_COLUMNS:
         if mc in cols:
             cols.remove(mc)
             meta_cols.append(mc)
@@ -326,17 +358,8 @@ def select_best_solution(res, problem):
 #  RESULT EXTRACTION & SAVING
 # ═══════════════════════════════════════════════════════════════
 
-def save_results(res, best_idx, full_df, output_file='optimized_library.xlsx'):
-    """Extract the winning library from the optimizer result and save it to Excel.
-
-    Returns:
-        winning_smiles: List of SMILES in the winning library.
-        selected_drug_indices: NumPy array of row indices for winning compounds.
-        winning_matrix_df: DataFrame of the winning library's selectivity sub-matrix.
-    """
-    # Extract the binary decision array for the winning library
-    winning_binary_array = res.X[best_idx]
-    selected_drug_indices = np.where(winning_binary_array > 0.5)[0]
+def extract_selected_library(full_df, selected_drug_indices):
+    """Extract and format selected rows without generating a spreadsheet."""
     winning_smiles = full_df.index[selected_drug_indices].tolist()
 
     print("\nBuilding the isolated selectivity matrix for the winning library...")
@@ -345,7 +368,7 @@ def save_results(res, best_idx, full_df, output_file='optimized_library.xlsx'):
     winning_matrix_df = full_df.iloc[selected_drug_indices].copy()
 
     # Drop any targets that do not have at least one selectivity measurement > 0
-    target_cols = [c for c in winning_matrix_df.columns if c not in ['Compound_Name', 'Molecule_ChEMBL_ID', 'InChIKey', 'SMILES', 'Price_USD_per_mg']]
+    target_cols = target_columns(winning_matrix_df)
     missed_targets = [
         c for c in target_cols
         if not pd.to_numeric(winning_matrix_df[c], errors='coerce').gt(0).any()
@@ -357,8 +380,35 @@ def save_results(res, best_idx, full_df, output_file='optimized_library.xlsx'):
 
     winning_matrix_df = reorder_meta_columns(winning_matrix_df)
 
-    winning_matrix_df.to_excel(output_file, index=False, engine='xlsxwriter')
+    return winning_smiles, selected_drug_indices, winning_matrix_df
+
+
+def save_results(res, best_idx, full_df, output_file='optimized_library.xlsx'):
+    """Extract the selected library and publish its spreadsheet atomically."""
+    selected_drug_indices = np.flatnonzero(res.X[best_idx] > 0.5)
+    result = extract_selected_library(full_df, selected_drug_indices)
+    write_library_excel(result[2], output_file)
+    return result
+
+
+def write_library_excel(winning_matrix_df, output_file):
+    """Publish an already extracted library without repeating selection work."""
+    output_path = Path(output_file)
+    temporary_path = None
+    try:
+        # Keep the temporary file on the same filesystem so readers see either
+        # the previous complete workbook or the new complete workbook.
+        with tempfile.NamedTemporaryFile(
+            dir=output_path.parent, prefix=f'.{output_path.stem}-',
+            suffix='.xlsx', delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+        winning_matrix_df.to_excel(temporary_path, index=False, engine='xlsxwriter')
+        os.replace(temporary_path, output_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
     print(f"Success! The clean sub-matrix with pricing has been saved to: {output_file}")
 
-    return winning_smiles, selected_drug_indices, winning_matrix_df
+    return str(output_path)

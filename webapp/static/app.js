@@ -35,6 +35,8 @@ let uploadedFilesData = [];
 let uploadedAffinityFilesData = [];
 let uploadedAffinityData = null;
 let uploadedPriceFilesData = [];
+let affinityAggregate = null;
+let priceAggregate = null;
 
 try {
     const stored = sessionStorage.getItem('uploadedFilesData');
@@ -90,6 +92,52 @@ try {
     }
 } catch (e) {
     console.error('Failed to restore price data', e);
+}
+
+function normalizeUploadState(stored) {
+    if (!Array.isArray(stored)) return stored;
+    const first = stored[0];
+    const aggregate = first ? Object.fromEntries(
+        ['allCompounds', 'allTargets', 'totalCompounds', 'totalTargets', 'totalDatapoints', 'totalUnique']
+            .filter(key => key in first).map(key => [key, first[key]])
+    ) : null;
+    return {files: stored.map(({name, data}) => ({name, data})), aggregate};
+}
+
+const restoredAffinity = normalizeUploadState(uploadedAffinityFilesData);
+uploadedAffinityFilesData = restoredAffinity.files;
+affinityAggregate = restoredAffinity.aggregate;
+const restoredPrices = normalizeUploadState(uploadedPriceFilesData);
+uploadedPriceFilesData = restoredPrices.files;
+priceAggregate = restoredPrices.aggregate;
+
+function applyUploadResponse(kind, data) {
+    const files = data.all_files.map(af => ({name: af.name, data: af}));
+    if (kind === 'affinity') {
+        uploadedAffinityFilesData = files;
+        affinityAggregate = {
+            allCompounds: data.compounds || [], allTargets: data.targets || [],
+            totalCompounds: data.num_compounds, totalTargets: data.num_targets,
+            totalDatapoints: data.num_datapoints,
+        };
+    } else {
+        uploadedPriceFilesData = files;
+        priceAggregate = {allCompounds: data.compounds || [], totalUnique: data.num_prices};
+    }
+}
+
+// Leave headroom for multipart headers under Flask's 16 MiB body limit.
+function* uploadBatches(files, maxBytes = 15 * 1024 * 1024, maxFiles = 20) {
+    let batch = [], bytes = 0;
+    for (const file of files) {
+        if (file.size > maxBytes) throw new Error(`${file.name} exceeds the 15 MiB upload limit.`);
+        if (batch.length && (batch.length >= maxFiles || bytes + file.size > maxBytes)) {
+            yield batch;
+            batch = []; bytes = 0;
+        }
+        batch.push(file); bytes += file.size;
+    }
+    if (batch.length) yield batch;
 }
 
 let pipelinePollTimer = null;
@@ -415,53 +463,27 @@ async function parseJsonResponse(res) {
     return {};
 }
 
-async function handlePriceFileUpload(files) {
-    const fileList = Array.isArray(files) ? files : (files instanceof FileList ? Array.from(files) : [files]);
-    if (!fileList.length) return;
-
-    for (let f of fileList) {
-        const formData = new FormData();
-        formData.append('files[]', f);
-
-        try {
-            const res = await fetch('/api/upload-prices', { method: 'POST', body: formData });
+async function uploadFileBatches(files, endpoint, accept) {
+    let changed = false;
+    try {
+        for (const batch of uploadBatches(Array.from(files))) {
+            const formData = new FormData();
+            batch.forEach(file => formData.append('files[]', file));
+            const res = await fetch(endpoint, {method: 'POST', body: formData});
             const data = await parseJsonResponse(res);
-
-            if (res.ok) {
-                if (Array.isArray(data.all_files)) {
-                    uploadedPriceFilesData = data.all_files.map(af => ({
-                        name: af.name,
-                        data: af,
-                        allCompounds: data.compounds || [],
-                        totalUnique: data.num_prices
-                    }));
-                } else {
-                    const existingIdx = uploadedPriceFilesData.findIndex(item => item.name === f.name);
-                    const fileSummary = (data.uploaded_files && data.uploaded_files[0]) || {
-                        name: f.name,
-                        num_prices: data.num_prices,
-                        compounds: data.compounds || []
-                    };
-                    const fileEntry = {
-                        name: f.name,
-                        data: fileSummary,
-                        allCompounds: data.compounds || [],
-                        totalUnique: data.num_prices
-                    };
-                    if (existingIdx >= 0) {
-                        uploadedPriceFilesData[existingIdx] = fileEntry;
-                    } else {
-                        uploadedPriceFilesData.push(fileEntry);
-                    }
-                }
-            } else {
-                showError(uploadError, data.error || `Failed to process price file: ${f.name}`);
-            }
-        } catch (err) {
-            showError(uploadError, `Price upload error: ${err.message}`);
+            if (!res.ok) throw new Error(data.error || 'Upload failed');
+            accept(data);
+            changed = true;
         }
+    } catch (err) {
+        showError(uploadError, err.message);
     }
+    return changed;
+}
 
+async function handlePriceFileUpload(files) {
+    const fileList = files instanceof File ? [files] : files;
+    await uploadFileBatches(fileList, '/api/upload-prices', data => applyUploadResponse('price', data));
     resetOptSettingsToDefault();
     renderPriceFiles();
 }
@@ -489,7 +511,7 @@ function renderPriceFiles() {
         return;
     }
 
-    sessionStorage.setItem('uploadedPriceFilesData', JSON.stringify(uploadedPriceFilesData));
+    sessionStorage.setItem('uploadedPriceFilesData', JSON.stringify({files: uploadedPriceFilesData, aggregate: priceAggregate}));
 
     priceFileInfo.style.display = 'flex';
     if (priceRemoveAllBtnContainer) {
@@ -553,17 +575,12 @@ function renderPriceFiles() {
                     });
                     const resData = await parseJsonResponse(res);
                     if (res.ok && Array.isArray(resData.all_files)) {
-                        uploadedPriceFilesData = resData.all_files.map(af => ({
-                            name: af.name,
-                            data: af,
-                            allCompounds: resData.compounds || [],
-                            totalUnique: resData.num_prices
-                        }));
+                        applyUploadResponse('price', resData);
                     } else {
-                        uploadedPriceFilesData = uploadedPriceFilesData.filter(d => d.name !== fileData.name);
+                        showError(uploadError, 'Could not remove the file. Please try again.');
                     }
                 } catch (e) {
-                    uploadedPriceFilesData = uploadedPriceFilesData.filter(d => d.name !== fileData.name);
+                    showError(uploadError, 'Could not remove the file. Please try again.');
                 }
                 renderPriceFiles();
             };
@@ -592,9 +609,9 @@ function renderPriceFiles() {
     // Compute unique compounds across all files
     let allCompounds = [];
     let totalUnique = 0;
-    if (uploadedPriceFilesData.length > 0 && uploadedPriceFilesData[0].allCompounds && uploadedPriceFilesData[0].allCompounds.length > 0) {
-        allCompounds = uploadedPriceFilesData[0].allCompounds;
-        totalUnique = uploadedPriceFilesData[0].totalUnique || allCompounds.length;
+    if (uploadedPriceFilesData.length > 0 && priceAggregate && priceAggregate.allCompounds && priceAggregate.allCompounds.length > 0) {
+        allCompounds = priceAggregate.allCompounds;
+        totalUnique = priceAggregate.totalUnique || allCompounds.length;
     } else {
         uploadedPriceFilesData.forEach(f => {
             if (f.data && Array.isArray(f.data.compounds)) {
@@ -652,12 +669,7 @@ function renderPriceFiles() {
                             const resData = await parseJsonResponse(res);
                             if (res.ok) {
                                 if (Array.isArray(resData.all_files)) {
-                                    uploadedPriceFilesData = resData.all_files.map(af => ({
-                                        name: af.name,
-                                        data: af,
-                                        allCompounds: resData.compounds || [],
-                                        totalUnique: resData.num_prices
-                                    }));
+                                    applyUploadResponse('price', resData);
                                 }
                                 if (resData.num_prices === 0 || !resData.compounds || resData.compounds.length === 0) {
                                     uploadedPriceFilesData = [];
@@ -773,93 +785,22 @@ thresholdValue.addEventListener('change', () => {
 
 async function handleFileUpload(files) {
     uploadError.style.display = 'none';
-
+    const fileList = files instanceof File ? [files] : Array.from(files);
     if (uploadMode === 'affinity') {
-        const fileList = Array.isArray(files) ? files : (files instanceof FileList ? Array.from(files) : [files]);
-        if (!fileList.length) return;
-
-        for (let f of fileList) {
-            const formData = new FormData();
-            formData.append('files[]', f);
-
-            try {
-                const res = await fetch('/api/upload-affinity', { method: 'POST', body: formData });
-                const data = await parseJsonResponse(res);
-
-                if (res.ok) {
-                    if (Array.isArray(data.all_files)) {
-                        uploadedAffinityFilesData = data.all_files.map(af => ({
-                            name: af.name,
-                            data: af,
-                            allCompounds: data.compounds || [],
-                            allTargets: data.targets || [],
-                            totalCompounds: data.num_compounds,
-                            totalTargets: data.num_targets,
-                            totalDatapoints: data.num_datapoints
-                        }));
-                    } else {
-                        const existingIdx = uploadedAffinityFilesData.findIndex(item => item.name === f.name);
-                        const fileSummary = (data.uploaded_files && data.uploaded_files[0]) || {
-                            name: f.name,
-                            num_compounds: data.num_compounds,
-                            num_targets: data.num_targets,
-                            num_datapoints: data.num_datapoints,
-                            compounds: data.compounds || [],
-                            targets: data.targets || []
-                        };
-                        const fileEntry = {
-                            name: f.name,
-                            data: fileSummary,
-                            allCompounds: data.compounds || [],
-                            allTargets: data.targets || [],
-                            totalCompounds: data.num_compounds,
-                            totalTargets: data.num_targets,
-                            totalDatapoints: data.num_datapoints
-                        };
-                        if (existingIdx >= 0) {
-                            uploadedAffinityFilesData[existingIdx] = fileEntry;
-                        } else {
-                            uploadedAffinityFilesData.push(fileEntry);
-                        }
-                    }
-                } else {
-                    showError(uploadError, data.error || `Failed to process affinity file: ${f.name}`);
-                }
-            } catch (err) {
-                showError(uploadError, `Affinity upload error: ${err.message}`);
-            }
-        }
-
+        await uploadFileBatches(fileList, '/api/upload-affinity', data => applyUploadResponse('affinity', data));
         resetOptSettingsToDefault();
         renderAffinityFiles();
         return;
     }
-
-    // Target mode upload
     validationSummary.style.display = 'none';
     buildMatrixBtn.disabled = true;
     thresholdControl.style.display = 'none';
-
-    for (let f of files) {
-        if (uploadedFilesData.some(d => d.name === f.name)) continue;
-
-        const formData = new FormData();
-        formData.append('files[]', f);
-
-        try {
-            const res = await fetch('/api/upload-targets', { method: 'POST', body: formData });
-            const data = await parseJsonResponse(res);
-
-            if (res.ok) {
-                uploadedFilesData.push({ name: f.name, data: data });
-            } else {
-                showError(uploadError, data.error || `Upload failed for ${f.name}`);
-            }
-        } catch (err) {
-            showError(uploadError, `Network error: ${err.message}`);
+    const pending = fileList.filter(f => !uploadedFilesData.some(d => d.name === f.name));
+    await uploadFileBatches(pending, '/api/upload-targets', data => {
+        for (const file of data.uploaded_files) {
+            uploadedFilesData.push({name: file.name, data: file});
         }
-    }
-
+    });
     resetOptSettingsToDefault();
     renderFiles();
 }
@@ -1109,7 +1050,7 @@ function renderAffinityFiles() {
         return;
     }
 
-    sessionStorage.setItem('uploadedAffinityFilesData', JSON.stringify(uploadedAffinityFilesData));
+    sessionStorage.setItem('uploadedAffinityFilesData', JSON.stringify({files: uploadedAffinityFilesData, aggregate: affinityAggregate}));
 
     fileInfo.innerHTML = '';
     fileInfo.style.display = 'flex';
@@ -1175,20 +1116,12 @@ function renderAffinityFiles() {
                     });
                     const resData = await parseJsonResponse(res);
                     if (res.ok && Array.isArray(resData.all_files)) {
-                        uploadedAffinityFilesData = resData.all_files.map(af => ({
-                            name: af.name,
-                            data: af,
-                            allCompounds: resData.compounds || [],
-                            allTargets: resData.targets || [],
-                            totalCompounds: resData.num_compounds,
-                            totalTargets: resData.num_targets,
-                            totalDatapoints: resData.num_datapoints
-                        }));
+                        applyUploadResponse('affinity', resData);
                     } else {
-                        uploadedAffinityFilesData = uploadedAffinityFilesData.filter(d => d.name !== fileData.name);
+                        showError(uploadError, 'Could not remove the file. Please try again.');
                     }
                 } catch (e) {
-                    uploadedAffinityFilesData = uploadedAffinityFilesData.filter(d => d.name !== fileData.name);
+                    showError(uploadError, 'Could not remove the file. Please try again.');
                 }
                 resetOptSettingsToDefault();
                 renderAffinityFiles();
@@ -1222,12 +1155,12 @@ function renderAffinityFiles() {
     let totalTargets = 0;
     let totalDatapoints = 0;
 
-    if (uploadedAffinityFilesData.length > 0 && uploadedAffinityFilesData[0].allCompounds) {
-        allCompounds = uploadedAffinityFilesData[0].allCompounds || [];
-        allTargets = uploadedAffinityFilesData[0].allTargets || [];
-        totalCompounds = uploadedAffinityFilesData[0].totalCompounds !== undefined ? uploadedAffinityFilesData[0].totalCompounds : allCompounds.length;
-        totalTargets = uploadedAffinityFilesData[0].totalTargets !== undefined ? uploadedAffinityFilesData[0].totalTargets : allTargets.length;
-        totalDatapoints = uploadedAffinityFilesData[0].totalDatapoints || 0;
+    if (uploadedAffinityFilesData.length > 0 && affinityAggregate && affinityAggregate.allCompounds) {
+        allCompounds = affinityAggregate.allCompounds || [];
+        allTargets = affinityAggregate.allTargets || [];
+        totalCompounds = affinityAggregate.totalCompounds !== undefined ? affinityAggregate.totalCompounds : allCompounds.length;
+        totalTargets = affinityAggregate.totalTargets !== undefined ? affinityAggregate.totalTargets : allTargets.length;
+        totalDatapoints = affinityAggregate.totalDatapoints || 0;
     } else {
         uploadedAffinityFilesData.forEach(f => {
             if (f.data) {
@@ -1303,15 +1236,7 @@ function renderAffinityFiles() {
                             });
                             const resData = await parseJsonResponse(res);
                             if (res.ok && Array.isArray(resData.all_files)) {
-                                uploadedAffinityFilesData = resData.all_files.map(af => ({
-                                    name: af.name,
-                                    data: af,
-                                    allCompounds: resData.compounds || [],
-                                    allTargets: resData.targets || [],
-                                    totalCompounds: resData.num_compounds,
-                                    totalTargets: resData.num_targets,
-                                    totalDatapoints: resData.num_datapoints
-                                }));
+                                applyUploadResponse('affinity', resData);
                                 if (resData.num_compounds === 0 || resData.num_targets === 0) {
                                     uploadedAffinityFilesData = [];
                                     sessionStorage.removeItem('uploadedAffinityFilesData');
@@ -1384,15 +1309,7 @@ function renderAffinityFiles() {
                             });
                             const resData = await parseJsonResponse(res);
                             if (res.ok && Array.isArray(resData.all_files)) {
-                                uploadedAffinityFilesData = resData.all_files.map(af => ({
-                                    name: af.name,
-                                    data: af,
-                                    allCompounds: resData.compounds || [],
-                                    allTargets: resData.targets || [],
-                                    totalCompounds: resData.num_compounds,
-                                    totalTargets: resData.num_targets,
-                                    totalDatapoints: resData.num_datapoints
-                                }));
+                                applyUploadResponse('affinity', resData);
                                 if (resData.num_compounds === 0 || resData.num_targets === 0) {
                                     uploadedAffinityFilesData = [];
                                     sessionStorage.removeItem('uploadedAffinityFilesData');
@@ -1437,7 +1354,6 @@ function renderAffinityFiles() {
 // Build Matrix button
 buildMatrixBtn.addEventListener('click', async () => {
     buildMatrixBtn.disabled = true;
-    resetOptSettingsToDefault();
     const removeTargets = document.getElementById('removeTargets')?.checked ?? true;
 
     if (uploadMode === 'affinity') {
@@ -1460,6 +1376,7 @@ buildMatrixBtn.addEventListener('click', async () => {
                 return;
             }
 
+            resetOptSettingsToDefault();
             goToStep(2);
             startPipelinePolling();
         } catch (err) {
@@ -1490,6 +1407,7 @@ buildMatrixBtn.addEventListener('click', async () => {
             return;
         }
 
+        resetOptSettingsToDefault();
         goToStep(2);
         startPipelinePolling();
 
@@ -1504,24 +1422,36 @@ buildMatrixBtn.addEventListener('click', async () => {
 //  STEP 2: PIPELINE PROGRESS
 // ═══════════════════════════════════════════════════════════════
 
-function startPipelinePolling() {
-    // Reset pipeline UI
-    resetPipelineUI();
-
-    pipelinePollTimer = setInterval(async () => {
+function createPoller(url, interval, onData) {
+    let active = true, timer;
+    const controller = new AbortController();
+    const poll = async () => {
         try {
-            const res = await fetch('/api/pipeline-status');
+            const res = await fetch(typeof url === 'function' ? url() : url,
+                                    {signal: controller.signal});
+            if (!res.ok) throw new Error(`Status request failed (${res.status})`);
             const data = await res.json();
-            updatePipelineUI(data);
-
-            if (data.status === 'complete' || data.status === 'error') {
-                clearInterval(pipelinePollTimer);
-                pipelinePollTimer = null;
-            }
+            if (active) await onData(data);
         } catch (err) {
-            // Silent retry
+            // A later poll may recover; cancellation never schedules another one.
+        } finally {
+            if (active) timer = setTimeout(poll, interval);
         }
-    }, 2000);
+    };
+    timer = setTimeout(poll, interval);
+    return {cancel() { active = false; clearTimeout(timer); controller.abort(); }};
+}
+
+function startPipelinePolling() {
+    if (pipelinePollTimer) pipelinePollTimer.cancel();
+    resetPipelineUI();
+    pipelinePollTimer = createPoller('/api/pipeline-status', 2000, data => {
+        updatePipelineUI(data);
+        if (data.status === 'complete' || data.status === 'error') {
+            pipelinePollTimer.cancel();
+            pipelinePollTimer = null;
+        }
+    });
 }
 
 function resetPipelineUI() {
@@ -1645,7 +1575,7 @@ $('#backToStep1From2Btn').addEventListener('click', async () => {
     }
 
     if (pipelinePollTimer) {
-        clearInterval(pipelinePollTimer);
+        pipelinePollTimer.cancel();
         pipelinePollTimer = null;
     }
 
@@ -2070,15 +2000,10 @@ $('#stopOptBtn').addEventListener('click', async () => {
 
 // Run Optimization
 runOptBtn.addEventListener('click', async () => {
-    saveOptSettings();
     runOptBtn.disabled = true;
-    runOptBtn.style.display = 'none';
-    $('#stopOptBtn').style.display = 'inline-flex';
-    $('#stopOptBtn').disabled = false;
+    $('#runAgainBtn').disabled = true;
 
     optError.style.display = 'none';
-
-    initHistoryChart();
 
     const maxPriceEnabled = $('#maxPriceToggle') && $('#maxPriceToggle').checked;
     const body = {
@@ -2103,67 +2028,71 @@ runOptBtn.addEventListener('click', async () => {
         if (!res.ok) {
             showError(optError, data.error || 'Failed to start optimization');
             runOptBtn.disabled = false;
-            runOptBtn.style.display = 'inline-flex';
-            $('#stopOptBtn').style.display = 'none';
-            optStatusIndicator.style.visibility = 'hidden';
+            $('#runAgainBtn').disabled = false;
             return;
         }
 
+        saveOptSettings();
+        initHistoryChart();
+        $('#optCompleteBanner').style.display = 'none';
+        $('#optCompleteBanner').classList.remove('visible');
+        $('#runAgainBtn').style.display = 'none';
+        $('#seeResultsBtn').style.display = 'none';
+        runOptBtn.style.display = 'none';
+        $('#stopOptBtn').style.display = 'inline-flex';
+        $('#stopOptBtn').disabled = false;
         startOptPolling(body.max_gen);
 
     } catch (err) {
         showError(optError, `Network error: ${err.message}`);
         runOptBtn.disabled = false;
-        runOptBtn.style.display = 'inline-flex';
-        $('#stopOptBtn').style.display = 'none';
-        optStatusIndicator.style.visibility = 'hidden';
+        $('#runAgainBtn').disabled = false;
     }
 });
 
-function startOptPolling(maxGen) {
-    const optStartTime = Date.now();
-    optPollTimer = setInterval(async () => {
-        try {
-            const res = await fetch('/api/status');
-            const data = await res.json();
-
-            if (data.history && data.history.length > 0) {
-                updateHistoryChart(data.history);
-            }
-
-            // Update status indicator
-            if (data.status === 'running') {
-                optStatusIndicator.style.visibility = 'visible';
-                const currentGen = data.generation || 0;
-                $('#optStatusText').textContent = `Optimizing... Generation ${currentGen}`;
-            }
-
-            if (data.status === 'complete') {
-                clearInterval(optPollTimer);
-                optPollTimer = null;
-                optStatusIndicator.style.visibility = 'hidden';
-                $('#stopOptBtn').style.display = 'none';
-                runOptBtn.style.display = 'none';
-
-                // Show the completion banner instead of auto-navigating
-                const finalGen = data.generation || '?';
-                showOptCompleteBanner(finalGen);
-            }
-
-            if (data.status === 'error') {
-                clearInterval(optPollTimer);
-                optPollTimer = null;
-                showError(optError, data.error || 'Optimization failed');
-                optStatusIndicator.style.visibility = 'hidden';
-                $('#stopOptBtn').style.display = 'none';
-                runOptBtn.style.display = 'inline-flex';
-                runOptBtn.disabled = false;
-            }
-
-        } catch (err) {
-            // Silent retry
+function startOptPolling() {
+    if (optPollTimer) optPollTimer.cancel();
+    let runRevision = null;
+    optPollTimer = createPoller(() => {
+        const cursor = `since_generation=${lastRenderedGen}`;
+        return `/api/status?${cursor}${runRevision === null ? '' : `&run_revision=${runRevision}`}`;
+    }, 500, data => {
+        if (runRevision !== null && runRevision !== data.run_revision) initHistoryChart();
+        runRevision = data.run_revision;
+        if (data.history && data.history.length > 0) {
+            updateHistoryChart(data.history);
         }
-    }, 500);
+
+        // Update status indicator
+        if (data.status === 'running') {
+            optStatusIndicator.style.visibility = 'visible';
+            const currentGen = data.generation || 0;
+            $('#optStatusText').textContent = `Optimizing... Generation ${currentGen}`;
+        }
+
+        if (data.status === 'complete') {
+            optPollTimer.cancel();
+            optPollTimer = null;
+            optStatusIndicator.style.visibility = 'hidden';
+            $('#stopOptBtn').style.display = 'none';
+            runOptBtn.style.display = 'none';
+
+            // Show the completion banner instead of auto-navigating
+            const finalGen = data.generation || '?';
+            showOptCompleteBanner(finalGen);
+        }
+
+        if (data.status === 'error') {
+            optPollTimer.cancel();
+            optPollTimer = null;
+            showError(optError, data.error || 'Optimization failed');
+            optStatusIndicator.style.visibility = 'hidden';
+            $('#stopOptBtn').style.display = 'none';
+            runOptBtn.style.display = 'inline-flex';
+            runOptBtn.disabled = false;
+        }
+
+    });
 }
 
 function showOptCompleteBanner(generations) {
@@ -2178,6 +2107,7 @@ function showOptCompleteBanner(generations) {
     // Hide the Run Optimization button since we're done, show Run Again & See Results
     runOptBtn.style.display = 'none';
     $('#runAgainBtn').style.display = 'inline-flex';
+    $('#runAgainBtn').disabled = false;
     $('#seeResultsBtn').style.display = 'inline-flex';
 }
 
@@ -2188,22 +2118,8 @@ $('#seeResultsBtn').addEventListener('click', async () => {
 });
 
 // Run Again button
-$('#runAgainBtn').addEventListener('click', async () => {
-    // Hide the completion banner and buttons
-    $('#optCompleteBanner').style.display = 'none';
-    $('#optCompleteBanner').classList.remove('visible');
-    $('#runAgainBtn').style.display = 'none';
-    $('#seeResultsBtn').style.display = 'none';
-
-    // Reset backend optimization state
-    try {
-        await fetch('/api/reset-opt', { method: 'POST' });
-    } catch (err) {
-        console.error('Failed to reset opt state', err);
-    }
-
-    // Trigger the optimization as if the user clicked "Run Optimization"
-    runOptBtn.style.display = 'inline-flex';
+$('#runAgainBtn').addEventListener('click', () => {
+    // The run endpoint resets results only after it accepts the new job.
     runOptBtn.disabled = false;
     runOptBtn.click();
 });
@@ -2218,11 +2134,11 @@ async function resetAllState() {
     }
 
     if (optPollTimer) {
-        clearInterval(optPollTimer);
+        optPollTimer.cancel();
         optPollTimer = null;
     }
     if (pipelinePollTimer) {
-        clearInterval(pipelinePollTimer);
+        pipelinePollTimer.cancel();
         pipelinePollTimer = null;
     }
 
@@ -2606,11 +2522,14 @@ async function loadParetoChart() {
                     return;
                 }
 
-                // Refresh comparison table, heatmap, and distribution
+                // Both charts use the same selected library payload.
+                const heatmapResponse = await fetch('/api/heatmap-data');
+                if (!heatmapResponse.ok) throw new Error('Could not load the selected library');
+                const heatmapData = await heatmapResponse.json();
                 await Promise.all([
                     loadComparison(),
-                    loadHeatmap(),
-                    loadDistributionChart(),
+                    loadHeatmap(heatmapData),
+                    loadDistributionChart(heatmapData),
                 ]);
             } catch (err) {
                 console.error('Error selecting solution:', err);
@@ -2620,6 +2539,17 @@ async function loadParetoChart() {
     } catch (err) {
         console.error('Failed to load Pareto chart:', err);
     }
+}
+
+function heatmapWindow(data, targetNames, compounds, targetStart = 0, compoundStart = 0) {
+    const x = Array.from({length: Math.min(40, data.targets.length - targetStart)}, (_, j) => j + targetStart);
+    const y = Array.from({length: Math.min(20, data.compounds.length - compoundStart)}, (_, i) => i + compoundStart);
+    const z = y.map(i => data.matrix[i].slice(targetStart, targetStart + 40));
+    return {
+        x, y, z,
+        text: z.map(row => row.map(value => value === null ? 'No Data' : value.toFixed(2))),
+        customdata: y.map(i => x.map(j => [compounds[i], targetNames[j]])),
+    };
 }
 
 async function loadHeatmap(prefetchedData) {
@@ -2636,24 +2566,23 @@ async function loadHeatmap(prefetchedData) {
             return (name && name !== symbol) ? `${name} (${symbol})` : symbol;
         });
 
-        const hoverText = data.matrix.map(row =>
-            row.map(val => val === null ? "No Data" : val.toFixed(2))
-        );
-
         const truncCompounds = data.compounds.map((s) => (s && s.length > 30) ? s.substring(0, 27) + '...' : (s || 'Unknown'));
-        const customData = data.matrix.map((row, i) =>
-            row.map((_, j) => [truncCompounds[i], targetNames[j]])
-        );
-
-        const xIndices = data.targets.map((_, j) => j);
-        const yIndices = data.compounds.map((_, i) => i);
+        const initialWindow = heatmapWindow(data, targetNames, truncCompounds);
+        const xIndices = initialWindow.x;
+        const yIndices = initialWindow.y;
+        // Scan numeric values once without allocating per-cell display metadata.
+        let zmin = Infinity, zmax = -Infinity;
+        for (const row of data.matrix) {
+            for (const value of row) {
+                if (Number.isFinite(value)) { zmin = Math.min(zmin, value); zmax = Math.max(zmax, value); }
+            }
+        }
+        if (!Number.isFinite(zmin)) { zmin = 0; zmax = 1; }
+        else if (zmin === zmax) { zmin -= 0.5; zmax += 0.5; }
 
         const trace = {
-            z: data.matrix,
-            x: xIndices,
-            y: yIndices,
-            text: hoverText,
-            customdata: customData,
+            ...initialWindow,
+            zmin, zmax, zauto: false,
             type: 'heatmap',
             colorscale: 'Viridis',
             showscale: true,
@@ -2740,7 +2669,7 @@ async function loadHeatmap(prefetchedData) {
                 automargin: false,
                 tickmode: 'array',
                 tickvals: xIndices,
-                ticktext: data.targets,
+                ticktext: data.targets.slice(0, 40),
                 tickfont: { color: '#9898b8', size: 10 },
                 tickangle: -90,
                 range: [-0.5, initialTargetCount - 0.5],
@@ -2753,7 +2682,7 @@ async function loadHeatmap(prefetchedData) {
                 showline: false,
                 tickmode: 'array',
                 tickvals: yIndices,
-                ticktext: truncCompounds,
+                ticktext: truncCompounds.slice(0, 20),
                 range: [initialCompoundCount - 0.5, -0.5],
                 title: false,
                 automargin: false,
@@ -2779,7 +2708,7 @@ async function loadHeatmap(prefetchedData) {
             ],
         };
 
-        Plotly.newPlot('heatmapChart', [trace], layout, {
+        await Plotly.newPlot('heatmapChart', [trace], layout, {
             responsive: true,
             displayModeBar: false,
             scrollZoom: false,
@@ -2801,6 +2730,24 @@ async function loadHeatmap(prefetchedData) {
             ro.observe(heatmapEl);
         }
 
+        let targetStart = 0, compoundStart = 0, pendingFrame = null;
+        const renderWindow = () => {
+            if (pendingFrame !== null) cancelAnimationFrame(pendingFrame);
+            pendingFrame = requestAnimationFrame(() => {
+                pendingFrame = null;
+                const view = heatmapWindow(data, targetNames, truncCompounds, targetStart, compoundStart);
+                Plotly.update('heatmapChart', {
+                    z: [view.z], x: [view.x], y: [view.y],
+                    text: [view.text], customdata: [view.customdata],
+                }, {
+                    'xaxis.tickvals': view.x, 'xaxis.ticktext': view.x.map(j => data.targets[j]),
+                    'yaxis.tickvals': view.y, 'yaxis.ticktext': view.y.map(i => truncCompounds[i]),
+                    'xaxis.range': [targetStart - 0.5, targetStart + view.x.length - 0.5],
+                    'yaxis.range': [compoundStart + view.y.length - 0.5, compoundStart - 0.5],
+                });
+            });
+        };
+
         // Setup 40-target window slider interactions
         if (targetSliderWrapper && targetRangeSlider && hasManyTargets) {
             const updateTargetSliderView = (startIdx) => {
@@ -2815,9 +2762,8 @@ async function loadHeatmap(prefetchedData) {
                 const startIdx = parseInt(e.target.value, 10);
                 const endIdx = Math.min(startIdx + TARGET_WINDOW, numTargets);
                 updateTargetSliderView(startIdx);
-                Plotly.relayout('heatmapChart', {
-                    'xaxis.range': [startIdx - 0.5, endIdx - 0.5]
-                });
+                targetStart = startIdx;
+                renderWindow();
             };
         }
 
@@ -2860,9 +2806,8 @@ async function loadHeatmap(prefetchedData) {
                 const startIdx = parseInt(e.target.value, 10);
                 const endIdx = Math.min(startIdx + COMPOUND_WINDOW, numCompounds);
                 updateCompoundSliderView(startIdx);
-                Plotly.relayout('heatmapChart', {
-                    'yaxis.range': [endIdx - 0.5, startIdx - 0.5]
-                });
+                compoundStart = startIdx;
+                renderWindow();
             };
         }
 
@@ -3116,14 +3061,9 @@ async function loadDistributionChart(prefetchedData) {
 
 // Navigation buttons on step 4
 $('#backToStep3Btn').addEventListener('click', async () => {
-    try {
-        await fetch('/api/reset-opt', { method: 'POST' });
-    } catch (err) { }
-
-    $('#historyCard').style.display = 'none';
-    $('#optCompleteBanner').style.display = 'none';
-    $('#optCompleteBanner').classList.remove('visible');
+    // Reconfiguration keeps the current result available until a run is admitted.
     runOptBtn.disabled = false;
+    $('#seeResultsBtn').style.display = 'inline-flex';
     optStatusIndicator.style.visibility = 'hidden';
     goToStep(3);
     await loadDatasetInfo();

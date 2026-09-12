@@ -5,6 +5,7 @@ Run with: python -m unittest discover -s tests -v
 
 import unittest
 import tempfile
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -21,7 +22,7 @@ from webapp.core.algorithm import (
     save_results,
 )
 from webapp.core.selectivity import generate_selectivity_matrix
-from webapp.core.state import make_session_state, reset_session_state
+from webapp.core.state import make_session_state
 
 
 class OptimizationTests(unittest.TestCase):
@@ -36,6 +37,13 @@ class OptimizationTests(unittest.TestCase):
         np.testing.assert_array_equal(
             seeds, build_smart_init(self.matrix, self.prices, pop_size=10)
         )
+        np.testing.assert_array_equal(seeds[3], seeds[0] | seeds[1])
+        # Deliberately pin the new direct-Boolean PCG64 sequence, rather than
+        # the former integer-then-cast sequence. The first five rows are smart seeds.
+        np.testing.assert_array_equal(seeds[5:], [
+            [True, False, True], [False, False, False], [True, False, False],
+            [True, False, False], [True, True, True],
+        ])
 
     def test_initialization_preserves_global_random_state(self):
         before = np.random.get_state()
@@ -57,6 +65,19 @@ class OptimizationTests(unittest.TestCase):
                 problem._evaluate(np.ones(3, dtype=bool), out)
                 self.assertTrue(np.isfinite(out['F']).all())
                 self.assertEqual(out['F'][1], 0.)
+
+    def test_missing_and_negative_targets_preserve_objectives_without_warnings(self):
+        matrix = np.array([[3., np.nan, -2.], [1., np.nan, -1.]])
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', RuntimeWarning)
+            problem = DrugLibraryProblem(matrix, np.array([2., 3.]),
+                                         allowed_miss_pct=0.5)
+            out = {}
+            problem._evaluate(np.array([True, False]), out)
+        # One of three targets is covered; two missed minus one allowed.
+        # Biological score = 0.5 * (3 / 3) + 0.5 * 3 = 2; baseline = 3.
+        np.testing.assert_array_equal(out['F'], [-2. / 3., 2. / 5.])
+        self.assertEqual(out['G'], [1])
 
     def test_mutation_multiplier_controls_bit_probability(self):
         problem = DrugLibraryProblem(self.matrix, self.prices)
@@ -156,19 +177,6 @@ class SessionStateTests(unittest.TestCase):
         self.assertEqual(second['opt_state']['history'], [])
         self.assertEqual(second['price_upload_state']['files'], {})
 
-    def test_reset_clears_custom_affinity_and_runtime_fields(self):
-        state = make_session_state()
-        dataset = state['dataset']
-        dataset['has_custom_affinity'] = True
-        dataset['ready'] = True
-        dataset['temporary_field'] = 'stale'
-        state['opt_state']['history'].append({'generation': 1})
-        reset_session_state(state)
-        self.assertIs(state['dataset'], dataset)
-        expected = make_session_state()
-        for key in expected:
-            if key != 'last_activity':
-                self.assertEqual(state[key], expected[key])
 
 
 if __name__ == '__main__':

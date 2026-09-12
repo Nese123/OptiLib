@@ -63,6 +63,9 @@ LOG_LEVEL=INFO
 # Default rate limiting
 RATE_LIMIT_DEFAULT=120 per minute
 
+# Maximum simultaneous pipelines and optimizations across all sessions
+MAX_CONCURRENT_JOBS=2
+
 # Optional: MolPort FTP credentials for automatic monthly database updates
 # (Leave empty if not using automated FTP downloads)
 MOLPORT_FTP_USER=your_molport_ftp_user
@@ -70,6 +73,12 @@ MOLPORT_FTP_PASS=your_molport_ftp_password
 MOLPORT_FTP_HOST=ftp.molport.com
 MOLPORT_FTP_PORT=21
 ```
+
+`MAX_CONCURRENT_JOBS` defaults to `2`. When both computation slots are occupied,
+new pipeline or optimization requests receive HTTP `503` with a busy message;
+their existing results remain available. Increase this limit only after checking
+the memory and CPU available for concurrent jobs. Gunicorn must still use one
+worker because sessions and job admission are held in process memory.
 
 ---
 
@@ -127,10 +136,13 @@ sudo certbot certonly --nginx -d optilib.aittokallio.group
 Copy the production Nginx config template:
 
 ```bash
-sudo cp nginx/nginx.conf /etc/nginx/sites-available/optilib.conf
+# This template includes the top-level events/http blocks.
+sudo cp nginx/nginx.conf /etc/nginx/nginx.conf
+sudo install -d -m 755 /var/www/optilib/static
+sudo cp -a webapp/static/. /var/www/optilib/static/
 ```
 
-Edit `/etc/nginx/sites-available/optilib.conf` to replace `optilib.aittokallio.group` with your actual domain and point upstream to `127.0.0.1:5000`:
+Edit `/etc/nginx/nginx.conf` to replace `optilib.aittokallio.group` with your actual domain and point upstream to `127.0.0.1:5000`:
 
 ```nginx
 upstream optilib_app {
@@ -138,10 +150,9 @@ upstream optilib_app {
 }
 ```
 
-Enable the site and restart Nginx:
+Validate the configuration and reload Nginx:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/optilib.conf /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -180,3 +191,103 @@ docker compose exec optilib python scripts/update_molport_db.py
 # Or on the host (if running in virtual environment):
 MOLPORT_FTP_USER="user" MOLPORT_FTP_PASS="pass" python scripts/update_molport_db.py
 ```
+
+## 8. Versioned ChEMBL Selectivity Maintenance
+
+The application requires the active ChEMBL selectivity table to use
+`blended_boundary_average_v2`. This version averages equally distant neighbors
+at the local-potency cutoff. The builder records the scoring version and a unique
+build ID in `optilib_selectivity_metadata`; both identify cached matrices. A table
+without this metadata is treated as legacy and must be rebuilt before the current
+application can run a ChEMBL pipeline. Do not label old scores as the new version
+by editing metadata alone.
+
+Rebuilds are explicit maintenance commands; the web server never runs a migration
+at startup. Run one maintenance job at a time. The current ChEMBL 37 installation
+has **2,251,098 compound-target rows**, so its rebuild command is:
+
+```bash
+.venv/bin/python -u scripts/build_selectivity_table.py \
+  --db-path database/chembl_37.db \
+  --expected-row-count 2251098 \
+  --batch-size 25000 \
+  > database/selectivity-rebuild.log 2>&1
+```
+
+For a container installation, replace `.venv/bin/python` with
+`docker compose exec -T optilib python`. The database and log paths above are
+relative to the repository root. Monitor progress with:
+
+```bash
+tail -f database/selectivity-rebuild.log
+```
+
+The builder creates a separate staging SQLite database under `database/`, streams
+activities in bounded chunks, and calculates exact medians on disk. It adds
+indexes for target/assay and active-activity lookups; source activity, assay, and
+target rows remain unchanged. Leave space for the staging file, replacement
+selectivity table, indexes, and retained previous table. The log records the
+staging path, row counts, query plans, score changes, peak memory, and duration.
+
+The existing selectivity table remains active during the build. Before publication,
+the builder checks the row count and compares every compound-target key in both
+directions. A failure leaves the active table and its provenance intact. Successful
+publication swaps the table and metadata in one transaction and retains the old
+table under the rollback name printed in the log. The count/key checks target a
+scoring migration of the same source dataset; a changed ChEMBL release requires
+its own validated database preparation.
+
+The successful staging file is retained for verification and can be removed after
+the new build is accepted. Keep the retained rollback table until that recovery
+option is no longer needed. Both staging files and maintenance logs belong in the
+ignored `database/` directory.
+
+Restore the most recently retained table and its matching provenance with:
+
+```bash
+.venv/bin/python scripts/build_selectivity_table.py \
+  --db-path database/chembl_37.db --rollback
+```
+
+To select a particular retained table, add its name from the migration log. For
+example, the 2026-09-09 local migration retained:
+
+```bash
+.venv/bin/python scripts/build_selectivity_table.py \
+  --db-path database/chembl_37.db --rollback \
+  --backup-table compound_target_selectivity_backup_0bc527c792ce
+```
+
+Rollback also retains the replaced build. Restoring a legacy scoring table restores
+legacy provenance: deploy its compatible application version, or rebuild current
+scores before starting new ChEMBL pipelines with the current application.
+
+### Performance and static assets
+
+Nginx serves `/static/` from `/var/www/optilib/static/` with a one-hour browser cache;
+copy the public `webapp/static/` contents there on each deployment. Do not copy
+session exports into that directory. For containerized Nginx, mount the static
+directory read-only at the same path. JSON API responses use normal proxy buffering.
+The optimizer page defers the pinned Plotly Cartesian bundle and app script in order.
+
+Fitness evaluation prepares an additional score matrix only when it fits within
+128 MiB per job (`DrugLibraryProblem(prepared_score_budget=...)` can override this
+byte budget; zero disables it). With the default two admitted jobs this adds at
+most 256 MiB, plus bounded preprocessing temporaries. Larger matrices use the
+same objective calculation without the additional matrix. The prepared buffer
+is released when optimization and result preparation finish.
+
+Pareto selection retains only selected rows in memory and creates Excel on the
+first download of that selection. Concurrent downloads share its atomic export.
+Uploads are sent in batches of at most 20 files and 15 MiB. Progress requests use
+`since_generation` and `run_revision`; clients omitting these still receive full
+history. No database migration is needed for these medium-priority changes.
+
+### Optimizer initialization reproducibility
+
+Initial random population rows now use NumPy's direct Boolean sampling, and the
+union seed is the Boolean OR of the cheapest and highest-selectivity seeds.
+The same seed and inputs remain repeatable with the same NumPy version, but
+random rows (and potentially the final Pareto front) differ from releases that
+generated integer rows before casting them to Boolean. The five smart-seed
+definitions, objective functions, mutation, and termination rules are unchanged.

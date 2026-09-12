@@ -1,11 +1,25 @@
-"""Session defaults and reset logic shared by Flask endpoints."""
+"""Session defaults and synchronization shared by Flask endpoints."""
 
 import time
+import threading
+
+
+class SessionState(dict):
+    """Session data with synchronization kept out of its JSON-facing values."""
+
+    def __init__(self, values):
+        super().__init__(values)
+        self.lock = threading.RLock()
+        self.upload_lock = threading.Lock()
+        self.export_lock = threading.Lock()
+        self.dataset_revision = 0
+        self.run_revision = 0
+        self.selection_revision = 0
 
 
 def make_session_state():
     """Create a fresh set of state dicts for a new user session."""
-    return {
+    return SessionState({
         "last_activity": time.time(),
         "pipeline_state": {
             "status": "idle",           # idle | running | complete | error
@@ -21,10 +35,11 @@ def make_session_state():
         "dataset": {
             "selectivities": None,      # NumPy array (compounds × targets)
             "prices": None,             # NumPy array (prices)
-            "smiles": None,             # NumPy array (SMILES)
             "num_drugs": 0,
             "num_targets": 0,
             "total_cost": 0.0,
+            "matrix_metadata": None,
+            "target_columns": [],
             "matrix_file": None,        # Path to saved CSV
             "ready": False,             # True once matrix is built
             "has_custom_affinity": False, # True if built from custom affinity data
@@ -72,14 +87,4 @@ def make_session_state():
             "filename": "",
             "count": 0,
         },
-    }
-
-
-def reset_session_state(state):
-    """Restore defaults while preserving references to each state dictionary."""
-    for key, value in make_session_state().items():
-        if isinstance(value, dict):
-            state[key].clear()
-            state[key].update(value)
-        else:
-            state[key] = value
+    })

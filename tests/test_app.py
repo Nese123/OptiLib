@@ -2,6 +2,8 @@
 import importlib
 import json
 import hashlib
+import sqlite3
+import threading
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +29,9 @@ class AppTests(unittest.TestCase):
         self.addCleanup(root.stop)
         app_module.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
         app_module.limiter.enabled = False
+        slots = patch.object(app_module, '_job_slots', threading.BoundedSemaphore(2))
+        slots.start()
+        self.addCleanup(slots.stop)
         app_module._sessions.clear()
         self.client = app_module.app.test_client()
         self.client.get('/api/status')
@@ -91,13 +96,18 @@ class AppTests(unittest.TestCase):
     def test_cache_tracks_custom_price_changes_and_removal(self):
         output = Path(self.tmp.name) / 'webapp/output' / self.sid
         output.mkdir(parents=True)
+        database = Path(self.tmp.name) / 'chembl.db'
+        sqlite3.connect(database).close()
+        provenance = {'scoring_version': app_module.SELECTIVITY_SCORING_VERSION, 'build_id': 'test-build'}
         for price_map, price in (({}, 10.), ({'a': 999.}, 999.)):
-            key = hashlib.md5(f"v4_['CHEMBL1']_0.5_True_1_{json.dumps(price_map, sort_keys=True)}".encode()).hexdigest()
+            key = app_module._matrix_cache_key(['CHEMBL1'], .5, True, 1, price_map, provenance)
             pd.DataFrame({'SMILES': ['CC'], 'Price_USD_per_mg': [price], 'T': [2.]}).to_csv(
                 output / f'selectivity_matrix_{key}.csv', index=False)
         for price_map, expected in (({}, 10.), ({'a': 999.}, 999.), ({}, 10.)):
             self.state['price_upload_state']['price_map'] = price_map
-            app_module._run_pipeline(self.sid, ['CHEMBL1'], .5, True, 1)
+            with patch.object(app_module, 'get_chembl_db_path', return_value=database), \
+                    patch.object(app_module, 'get_selectivity_provenance', return_value=provenance):
+                app_module._run_pipeline(self.sid, ['CHEMBL1'], .5, True, 1)
             self.assertEqual(self.state['dataset']['prices'].tolist(), [expected])
 
     def test_cleaner_preserves_running_session_and_expires_idle_session(self):

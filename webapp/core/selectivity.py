@@ -1,76 +1,83 @@
+"""Shared selectivity calculation for uploaded affinities and ChEMBL builds."""
+
 import numpy as np
 
 
-def generate_selectivity_matrix(affinities, target_indices=None, h=5):
+SELECTIVITY_SCORING_VERSION = "blended_boundary_average_v2"
+
+
+def _validate_h(h):
+    if not isinstance(h, (int, np.integer)) or isinstance(h, bool) or h < 1:
+        raise ValueError("h must be a positive integer")
+
+
+def score_measured_affinities(values, h=5, target_positions=None):
+    """Score one compound, averaging equally near neighbors at the cutoff.
+
+    The tied group fills the remaining neighbor slots with equal fractional
+    weights. This averages all valid choices of h nearest neighbors and is
+    independent of target order. Unrequested positions are NaN.
     """
-    Calculate a blended selectivity score matrix from pKd affinities.
+    _validate_h(h)
+    values = np.asarray(values, dtype=float)
+    if values.ndim != 1 or not np.isfinite(values).all():
+        raise ValueError("measured affinities must be a finite 1D array")
+    positions = (np.arange(len(values)) if target_positions is None
+                 else np.asarray(target_positions, dtype=int))
+    scores = np.full(values.shape, np.nan)
+    if len(values) <= 1:
+        scores[positions] = 0.0
+        return scores
 
-    affinities: 2D NumPy array of pk_d values (may contain NaN). Shape: (num_compounds, num_targets)
-    target_indices: List of target column indices to compute selectivity for. If None, computes for all.
-    h: Number of nearest neighbors to use for local relative potency (default is 5)
+    # Canonical summation order also prevents floating-point changes when
+    # identical affinities arrive in a different target order.
+    order = np.argsort(values, kind="stable")
+    sorted_values = values[order]
+    inverse_order = np.empty(len(values), dtype=int)
+    inverse_order[order] = np.arange(len(values))
+    global_diffs = values - (sorted_values.sum() - values) / (len(values) - 1)
+    if len(values) <= h + 1:
+        scores[positions] = global_diffs[positions]
+        return scores
 
-    Returns a matrix of the same shape with selectivity scores.
-    Entries not in target_indices will be NaN.
+    for position in positions:
+        value = values[position]
+        distances = np.abs(sorted_values - value)
+        distances[inverse_order[position]] = np.inf
+        cutoff = np.partition(distances, h - 1)[h - 1]
+        closer = distances < cutoff
+        tied = distances == cutoff
+        remaining = h - np.count_nonzero(closer)
+        local_mean = (sorted_values[closer].sum()
+                      + remaining * sorted_values[tied].mean()) / h
+        scores[position] = 0.5 * (global_diffs[position] + value - local_mean)
+    return scores
+
+
+def generate_selectivity_matrix(affinities, target_indices=None, h=5):
+    """Return blended scores in the input shape, preserving missing values.
+
+    Only requested target columns are populated. Local comparisons use measured
+    affinities only, so sparse uploads do not partition full matrix rows.
     """
     affinities = np.asarray(affinities, dtype=float)
     if affinities.ndim != 2:
         raise ValueError("affinities must be a 2D matrix")
-    if not isinstance(h, (int, np.integer)) or isinstance(h, bool) or h < 1:
-        raise ValueError("h must be a positive integer")
-    num_compounds, num_targets = affinities.shape
-
+    _validate_h(h)
+    num_targets = affinities.shape[1]
     if num_targets < 2:
         raise ValueError(f"Need at least 2 targets to compute selectivity, got {num_targets}")
-        
-    if target_indices is None:
-        target_indices = list(range(num_targets))
+    requested = np.ones(num_targets, dtype=bool)
+    if target_indices is not None:
+        requested[:] = False
+        requested[list(target_indices)] = True
 
-    # Pre-compute some sums and counts to speed things up
-    measured_mask = ~np.isnan(affinities)
-    measured_sum = np.nansum(affinities, axis=1)
-    measured_count = np.sum(measured_mask, axis=1)
-
-    global_matrix = np.full_like(affinities, np.nan)
-    local_matrix = np.full_like(affinities, np.nan)
-
-    for i in range(num_compounds):
-        row = affinities[i]
-        mask = measured_mask[i]
-        sum_i = measured_sum[i]
-        count_i = measured_count[i]
-
-        for j in target_indices:
-            if not mask[j]:
-                continue  # no data → no score
-
-            target_val = row[j]
-
-            # 1. Global Potency
-            other_count = count_i - 1
-            if other_count < 1:
-                global_matrix[i, j] = 0.0
-            else:
-                mean_other = (sum_i - target_val) / other_count
-                global_matrix[i, j] = target_val - mean_other
-
-            # 2. Local Potency
-            # Vectorized difference computation
-            diffs = np.abs(row - target_val)
-            # Ignore self
-            diffs[j] = np.inf
-            
-            # Find the h nearest measured neighbors using partition for performance
-            effective_h = min(h, other_count)
-            if effective_h == 0:
-                local_matrix[i, j] = 0.0
-                continue
-                
-            nearest_indices = np.argpartition(diffs, effective_h - 1)[:effective_h]
-            mean_hnn = np.mean(row[nearest_indices])
-            local_matrix[i, j] = target_val - mean_hnn
-
-    # 3. Blend the Matrices (50/50 Split)
-    alpha = 0.5
-    final_scores_matrix = (alpha * local_matrix) + ((1 - alpha) * global_matrix)
-
-    return final_scores_matrix
+    scores = np.full_like(affinities, np.nan)
+    for row_index, row in enumerate(affinities):
+        measured = np.flatnonzero(~np.isnan(row))
+        positions = np.flatnonzero(requested[measured])
+        if len(positions):
+            scores[row_index, measured] = score_measured_affinities(
+                row[measured], h=h, target_positions=positions,
+            )
+    return scores
