@@ -1,0 +1,26 @@
+# data files
+data/features/*
+!data/features/std.bin
+data/databases
+data/**.txt
+data/vocab/**
+datasets.txt
+!data/vocab/example**
+# directories
+figs/
+logs/
+# models
+models/**/**txt
+models/**/**.ckpt
+# system dir
+.vscode/
+**.pyc
+**.csv
+# hpc outpou
+scripts/train_model.sh.o**
+scripts/run**
+
+# testing
+models/**/**.png 
+testing/**
+misc/** 

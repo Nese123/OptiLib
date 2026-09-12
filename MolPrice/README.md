@@ -1,0 +1,90 @@
+<div style="float:right; margin-left:20px; margin-top: -30px;">
+    <img src="https://avatars.githubusercontent.com/u/81195336?s=200&v=4" alt="Optimal PSE logo" title="OptiMLPSE" height="150" align="right"/>
+</div>
+<br>
+<br>
+
+# MolPrice
+[![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-3100/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
+A deep learning model for synthetic accessibility prediction based on molecular prices - [Journal of Chemoinformatics](https://link.springer.com/article/10.1186/s13321-025-01076-3).
+
+## Installation
+Clone the repository and create a virtual environment with conda:
+```bash
+# Get the code
+git clone https://github.com/fredhastedt/MolPrice.git
+cd MolPrice
+
+# Create environment
+conda env create -f molprice.yml
+conda activate molprice
+
+```
+## Model Usage
+There is two ways to use MolPrice model described below:
+
+### Standalone Numpy Model
+We now provide MolPrice as a **lightweight**, standalone numpy implementation for the Morgan fingerprint. The pickled model is provided as part of the repo.
+> [!NOTE]
+> This implementation does not need a GPU, and calculates the price in less than **0.1 ms** given a molecule!
+
+### PyTorch Models
+We provide model checkpoints for MolPrice via [Figshare](https://figshare.com/articles/journal_contribution/MolPrice_-_Model_Checkpoints/28628009) . One can choose from the following models: 
+<br>
+1. SECFP fingerprint (with or w/o 2D features)
+2. Morgan Fingerprint (with or w/o 2D features)
+
+Once the model is downloaded, place in **./models** directory.
+<br>These models take about 1.3 ms per molecule.
+
+## Predicting Molecular Prices
+One can run the code per molecule or using batch prediction. In case of batch prediction, please first save all molecules in a .csv file.
+
+```bash
+# Single molecule prediction
+# Using NumPy model:
+python -m bin.numpy_predict --mol "CC(=O)OC1=CC=CC=C1C(=O)O"
+
+# Using PyTorch model
+python -m bin.predict --mol "CC(=O)OC1=CC=CC=C1C(=O)O" --cn MP_SECFP_hybrid
+
+# Batch prediction
+# Using NumPy model
+python -m bin.numpy_predict --mol molecules.csv --smiles-col SMILES_COLUMN
+
+# Using PyTorch model
+python -m bin.predict --mol molecules.csv --cn MP_SECFP_hybrid --smiles-col SMILES_COLUMN
+```
+
+## Reproducing SA Test Results
+The test datasets for SA comparison can be obtained from Figshare via [test files](https://figshare.com/articles/journal_contribution/MolPrice_-_Test_Files/28632449). Once the files are downloaded, place within **./testing** directory.
+<br>
+The results for each test dataset can be obtained by running: 
+```bash
+python -m bin.test main_ood --model Fingerprint --cn MODEL_CHECKPOINT --test_name TEST_FILE1,TEST_FILE2 --combined
+```
+For example, if one downloaded the MP_SECFP_hybrid model and saved the test files 3 as follows: TS3_hs.csv and TS3_es.csv, one can run: 
+```bash
+python -m bin.test main_ood --model Fingerprint --cn MP_SECFP_hybrid/best.ckpt --test_name TS3_hs.csv,TS3_es.csv --combined
+```
+
+## Model Training
+If one has access to a database containing molecules along with their prices, one can run the following script to train their own model (given that prices are in log(USD)/mmol): 
+
+```bash
+python -m bin.train --model MODEL_TYPE --fp FINGERPRINT_TYPE
+```
+
+Within the script, the following arguments can be adjusted: 
+<br>
+    - **model**: Choose between [Fingerprint, RoBERTa, Transformer, LSTM_EFG] <br>
+    - **fp**: Choose between [atom, rdkit, morgan, mhfp] (mhfp is the SECFP fingerprint encoder)
+    
+In one has a pre-trained Fingerprint model, one can train the model on the contrastive loss by calling: 
+```bash
+python -m bin.train --model Fingerprint --fp FINGERPRINT_TYPE --combined --cn MODEL_CHECKPOINT
+```
+
