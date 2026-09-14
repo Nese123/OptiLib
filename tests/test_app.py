@@ -1,5 +1,6 @@
 """Route and pipeline regressions without local databases or running workers."""
 import importlib
+import os
 import json
 import hashlib
 import sqlite3
@@ -15,7 +16,8 @@ import pandas as pd
 
 # Importing the app normally initializes databases, removes output, and starts
 # its cleaner. Suppress those process side effects in the test runner.
-with patch('sqlite3.connect'), patch('shutil.rmtree'), patch.object(Path, 'unlink'), \
+with patch.dict(os.environ, {'OPTILIB_ENV':'development','SESSION_COOKIE_SECURE':'false'}), \
+        patch('sqlite3.connect'), patch('shutil.rmtree'), patch.object(Path, 'unlink'), \
         patch('threading.Thread.start'), patch('atexit.register'):
     app_module = importlib.import_module('webapp.app')
 

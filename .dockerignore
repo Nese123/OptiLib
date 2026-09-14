@@ -94,3 +94,7 @@ MolPrice/models/**/*.txt
 **/Thumbs.db
 **/Desktop.ini
 **/*:Zone.Identifier
+
+# Temporary public sessions, job database, artifacts and local operational logs
+runtime/
+logs/

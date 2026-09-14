@@ -38,8 +38,45 @@ def ensure_matrix_excel(csv_path):
     os.close(fd)
     temporary = Path(name)
     try:
-        pd.read_csv(csv_path).to_excel(temporary, index=False, engine="xlsxwriter")
+        import csv
+        with open(csv_path, newline="") as source:
+            reader = csv.reader(source)
+            columns = next(reader)
+            def rows():
+                for row in reader:
+                    yield [float(v) if column not in ('Compound_Name','Molecule_ChEMBL_ID','InChIKey','SMILES') and _numeric(v) else v for column,v in zip(columns,row)]
+            write_rows_excel(columns, rows(), temporary)
         os.replace(temporary, destination)
         return str(destination)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def write_rows_excel(columns, rows, destination):
+    """Write rows directly: pandas writes by column and cannot stream XLSX."""
+    import math
+    import numbers
+    import xlsxwriter
+    with xlsxwriter.Workbook(str(destination), {
+        'constant_memory': True, 'strings_to_formulas': False,
+        'strings_to_urls': False, 'tmpdir': str(Path(destination).parent),
+    }) as book:
+        sheet = book.add_worksheet()
+        sheet.write_row(0, 0, list(columns))
+        for index, values in enumerate(rows, 1):
+            sheet.write_row(index, 0, [
+                None if value is None or (isinstance(value, numbers.Real) and not math.isfinite(value)) else value
+                for value in values
+            ])
+
+
+def write_frame_excel(frame, destination):
+    write_rows_excel(frame.columns, frame.itertuples(index=False, name=None), destination)
+
+
+def _numeric(value):
+    try:
+        float(value)
+        return True
+    except (ValueError, TypeError):
+        return False

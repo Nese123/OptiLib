@@ -11,10 +11,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="/static/style.css?v=1.9">
+    <link rel="stylesheet" href="/static/style.css?v=2.0">
     <script defer src="https://cdn.plot.ly/plotly-cartesian-2.35.0.min.js" charset="utf-8"></script>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    {% if public_mode %}
+    <meta name="optilib-session" content="{{ session_id }}">
+    {% endif %}
 </head>
 
 <body class="tool-page">
@@ -48,6 +51,9 @@
         <header class="workspace-header">
             <h1>Build your optimized library</h1>
             <p>Upload your data, configure the optimization, and explore the balance between selectivity and cost.</p>
+            {% if public_mode %}
+            <p class="session-notice">Sessions expire after two hours of inactivity or a server restart. Download results you want to keep. Optimization can run for up to four hours.</p>
+            {% endif %}
         </header>
 
         <!-- ═══ Step Indicator ═══ -->
@@ -84,7 +90,7 @@
                     <div class="upload-hint" id="dropZoneHint">CSV or Excel (.xlsx) with a "Target" column · Accepts
                         target names, ChEMBL
                         IDs, Gene Symbols, or UniProt Accessions</div>
-                    <input type="file" id="fileInput" aria-labelledby="step1Title" aria-describedby="dropZoneHint" accept=".csv,.xlsx,.xls" multiple>
+                    <input type="file" id="fileInput" aria-labelledby="step1Title" aria-describedby="dropZoneHint" accept=".csv,.xlsx" multiple>
                 </div>
 
                 <div style="margin-top: 1.5rem; text-align: center;">
@@ -168,7 +174,7 @@
                         <div class="price-drop-hint">CSV or Excel (.xlsx) with "Compound" and "Price" (USD/mg) column
                             · Accepts compound names,
                             ChEMBL IDs, SMILES Strings, or InChIKeys for compound IDs</div>
-                        <input type="file" id="priceFileInput" aria-label="Upload custom compound prices" accept=".csv,.xlsx,.xls" multiple>
+                        <input type="file" id="priceFileInput" aria-label="Upload custom compound prices" accept=".csv,.xlsx" multiple>
                     </div>
 
                     <div style="margin-top: 1rem; text-align: center;">
@@ -717,7 +723,8 @@
     </footer>
 
     <script src="/static/navigation.js?v=1.0"></script>
-    <script defer src="/static/app.js?v=6.0"></script>
+    <script defer src="/static/app.js?v=7.0"></script>
+    {% if public_mode %}<script defer src="/static/public.js?v=1"></script>{% endif %}
 
 </body>
 

@@ -70,3 +70,9 @@ optimized_library.xlsx
 Thumbs.db
 Desktop.ini
 *:Zone.Identifier
+# Temporary public sessions, job database, artifacts and local operational logs
+runtime/
+logs/
+
+AGENTS.md
+PUBLIC_LAUCH

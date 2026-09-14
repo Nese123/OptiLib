@@ -56,6 +56,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("optilib")
 
+# Direct script execution also needs the root for package imports (webapp.public).
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "webapp"))
 sys.path.insert(0, str(MOLPRICE_DIR))
 
@@ -95,21 +97,10 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 # ═══════════════════════════════════════════════════════════════
 
 app = Flask(__name__)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
-
-# Security and session settings
-app.config["TEMPLATES_AUTO_RELOAD"] = True
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB upload limit
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
-app.config["WTF_CSRF_TIME_LIMIT"] = int(os.environ.get("WTF_CSRF_TIME_LIMIT", 7200))  # 2 hours (7200 seconds)
-
-secret_key = os.environ.get("SECRET_KEY")
-if not secret_key:
-    logger.warning("SECRET_KEY environment variable is not set! Using ephemeral key.")
-    secret_key = os.urandom(32).hex()
-app.secret_key = secret_key
+# The legacy in-process application remains available for local development
+# and numerical regression fixtures. Public deployments use webapp.wsgi:app.
+from webapp.public.config import configure_security
+configure_security(app)
 
 # CSRF protection (double-submit cookie pattern for AJAX)
 csrf = CSRFProtect(app)
@@ -152,13 +143,15 @@ def set_security_headers(response):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.plot.ly; "
+        "script-src 'self' https://cdn.plot.ly; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: blob:; "
         "connect-src 'self'; "
         "frame-ancestors 'self'"
     )
+    if request.path.startswith('/api/') or request.path == '/optimize':
+        response.headers['Cache-Control'] = 'private, no-store'
     return response
 
 
@@ -175,20 +168,6 @@ def get_chembl_db_path() -> Path:
             return p
     return DATABASE_DIR / "chembl_37.db"
 
-
-def _init_sqlite_wal():
-    """Ensure SQLite databases use WAL mode for non-blocking concurrent reads and writes."""
-    for db_name in ["molport.db", "chembl_37.db", "chembl_36.db"]:
-        db_file = DATABASE_DIR / db_name
-        if db_file.exists():
-            try:
-                with closing(sqlite3.connect(str(db_file), timeout=10.0)) as conn:
-                    conn.execute("PRAGMA journal_mode=WAL;")
-                logger.info(f"SQLite WAL mode active on {db_name}")
-            except Exception as e:
-                logger.warning(f"Could not activate WAL mode on {db_name}: {e}")
-
-_init_sqlite_wal()
 
 # ═══════════════════════════════════════════════════════════════
 #  SESSION-SCOPED STATE & INACTIVITY CLEANER
@@ -363,7 +342,7 @@ def _cleanup_stale_sessions():
         try:
             for item in output_base.iterdir():
                 # Subdirectories (session folders)
-                if item.is_dir():
+                if item.is_dir() and (item / ".optilib-session").is_file():
                     dir_sid = item.name
                     with _sessions_lock:
                         is_active_session = dir_sid in _sessions
@@ -374,31 +353,8 @@ def _cleanup_stale_sessions():
                                 shutil.rmtree(item, ignore_errors=True)
                         except OSError:
                             pass
-                # Loose files in output root (e.g. legacy/cached files)
-                elif item.is_file():
-                    try:
-                        mtime = item.stat().st_mtime
-                        if now - mtime > SESSION_TTL_SECONDS:
-                            item.unlink(missing_ok=True)
-                    except OSError:
-                        pass
         except OSError:
             pass
-
-
-def _wipe_output_dir():
-    """Remove all files and directories from the output folder."""
-    output_base = PROJECT_ROOT / "webapp" / "output"
-    if not output_base.exists():
-        return
-    try:
-        for item in output_base.iterdir():
-            if item.is_dir():
-                shutil.rmtree(item, ignore_errors=True)
-            elif item.is_file():
-                item.unlink(missing_ok=True)
-    except Exception as e:
-        logger.warning(f"Output cleanup error: {e}")
 
 
 def _cleanup_worker():
@@ -411,15 +367,8 @@ def _cleanup_worker():
             logger.error(f"Error in output cleanup worker: {e}")
 
 
-# Run startup cleanup of stale generated files
-_wipe_output_dir()
-
-# Start background cleanup thread as daemon
-_cleanup_thread = threading.Thread(target=_cleanup_worker, name="OutputCleanupWorker", daemon=True)
-_cleanup_thread.start()
-
-# Register shutdown hook
-atexit.register(_wipe_output_dir)
+# Cleanup is explicit in development. The public supervisor owns session
+# expiry; importing this module never modifies databases or removes exports.
 
 
 class StopOptimization(Exception):
@@ -2215,8 +2164,13 @@ def download_matrix():
 #  MAIN
 # ═══════════════════════════════════════════════════════════════
 
+if os.environ.get('OPTILIB_ENV') == 'production':
+    from webapp.public.server import create_app
+    app = create_app()
+
+
 if __name__ == "__main__":
     logger.info(f"Project root: {PROJECT_ROOT}")
     logger.info(f"ChEMBL database: {get_chembl_db_path()}")
     logger.info(f"MolPort database: {DATABASE_DIR / 'molport.db'}")
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    app.run(debug=False, host="127.0.0.1", port=5000)

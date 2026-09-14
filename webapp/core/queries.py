@@ -3,7 +3,7 @@
 import pandas as pd
 
 
-def read_chembl_candidates(conn, chembl_ids, threshold, progress=None):
+def read_chembl_candidates(conn, chembl_ids, threshold, progress=None, *, sink=None):
     conn.execute("CREATE TEMP TABLE requested_ids (chembl_id TEXT PRIMARY KEY)")
     conn.executemany("INSERT OR IGNORE INTO requested_ids VALUES (?)",
                      ((cid.upper(),) for cid in chembl_ids))
@@ -64,7 +64,10 @@ def read_chembl_candidates(conn, chembl_ids, threshold, progress=None):
     chunks = []
     compounds = set()
     for chunk in pd.read_sql_query(query, conn, params=(threshold,), chunksize=1000):
-        chunks.append(chunk)
+        if sink is None:
+            chunks.append(chunk)
+        else:
+            sink(chunk)
         if progress is not None:
             compounds.update(chunk["Clean_Molregno"])
             progress(len(compounds))

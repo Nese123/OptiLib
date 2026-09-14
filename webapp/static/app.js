@@ -456,9 +456,9 @@ async function parseJsonResponse(res) {
     const text = await res.text();
     if (!res.ok) {
         if (res.status === 404) {
-            throw new Error('Endpoint not found (404). Please restart the Flask server (`python webapp/app.py`) so it registers newly added routes.');
+            throw new Error('This page is out of date. Refresh it and try again.');
         }
-        throw new Error(`Server error (${res.status}): ${text.slice(0, 100)}`);
+        throw new Error(`The server could not complete the request (${res.status}). Please try again.`);
     }
     return {};
 }
@@ -2519,6 +2519,7 @@ async function loadParetoChart() {
                 const selData = await selRes.json();
                 if (!selRes.ok) {
                     console.error('Failed to select solution:', selData.error);
+                    await loadParetoChart();
                     return;
                 }
 
@@ -2835,6 +2836,12 @@ async function loadDistributionChart(prefetchedData) {
         const targetNames = data.target_names || data.targets;
 
         let stats = [];
+        if (data.distribution) {
+            stats = data.distribution.map(item => ({...item,
+                fullName: item.target, displayName: item.target,
+            }));
+        } else {
+
         for (let j = 0; j < numTargets; j++) {
             let col = [];
             for (let i = 0; i < numCompounds; i++) {
@@ -2870,6 +2877,8 @@ async function loadDistributionChart(prefetchedData) {
                 median: median,
                 min: min
             });
+        }
+
         }
 
         stats.sort((a, b) => b.max - a.max);

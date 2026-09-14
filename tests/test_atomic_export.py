@@ -43,11 +43,11 @@ class AtomicExportTests(unittest.TestCase):
         self.assertEqual(list(self.output.parent.iterdir()), [self.output])
 
     def test_writer_failure_preserves_previous_export_and_removes_partial_file(self):
-        def fail_after_partial_write(path, **kwargs):
+        def fail_after_partial_write(frame, path):
             Path(path).write_bytes(b'partial workbook')
             raise OSError('write failed')
 
-        with patch.object(pd.DataFrame, 'to_excel', side_effect=fail_after_partial_write):
+        with patch('webapp.core.storage.write_frame_excel', side_effect=fail_after_partial_write):
             with self.assertRaisesRegex(OSError, 'write failed'):
                 save_results(self.result, 0, self.frame, self.output)
         self.assertEqual(self.output.read_bytes(), self.previous)

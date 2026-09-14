@@ -1,64 +1,65 @@
+x-app: &app
+  build: .
+  restart: unless-stopped
+  user: "10001:10001"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+  env_file:
+    - path: .env
+      required: true
+  environment: &environment
+    OPTILIB_ENV: production
+    OPTILIB_RUNTIME: /app/runtime
+    OPTILIB_DATABASE: /app/database
+    SECRET_KEY: ${SECRET_KEY:?Set a strong SECRET_KEY in .env}
+    SESSION_COOKIE_SECURE: "true"
+    TRUSTED_HOSTS: ${TRUSTED_HOSTS:?Set the public hostname in .env}
+    OPTILIB_ACCEL_REDIRECT: "true"
+    OPENBLAS_NUM_THREADS: "1"
+    OMP_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+    NUMEXPR_NUM_THREADS: "1"
+  volumes:
+    - ./database:/app/database:ro
+    - ${RUNTIME_HOST_PATH:-/var/lib/optilib/runtime}:/app/runtime
+
 services:
   optilib:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: optilib
-    restart: unless-stopped
+    <<: *app
     ports:
-      - "5000:5000"
-    volumes:
-      # Mount the local database directory containing chembl_37.db and molport.db (~32GB)
-      - ./database:/app/database
-      # Persist generated outputs (Excel files, Pareto plots, etc.) on host
-      - ./webapp/output:/app/webapp/output
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - PYTHONUNBUFFERED=1
-      - SECRET_KEY=${SECRET_KEY}
-      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - RATE_LIMIT_DEFAULT=${RATE_LIMIT_DEFAULT:-120 per minute}
-    deploy:
-      resources:
-        limits:
-          memory: 8G
-          cpus: "4.0"
-        reservations:
-          memory: 2G
+      - "127.0.0.1:5000:5000"
+    depends_on:
+      - computation
+    mem_limit: 768m
+    cpus: "1.0"
+    pids_limit: 64
+
+  computation:
+    <<: *app
+    command: ["python", "-m", "webapp.public.worker"]
+    mem_limit: 5g
+    cpus: "3.0"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-m", "webapp.public.check_worker"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
   molport-updater:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: optilib_molport_updater
-    restart: unless-stopped
+    build: .
+    profiles: [maintenance]
+    restart: "no"
+    user: "10001:10001"
+    env_file: .env
+    command: ["python", "scripts/update_molport_db.py"]
     volumes:
       - ./database:/app/database
-      - ./webapp/output:/app/webapp/output
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - PYTHONUNBUFFERED=1
-      - MOLPORT_FTP_USER=${MOLPORT_FTP_USER:-}
-      - MOLPORT_FTP_PASS=${MOLPORT_FTP_PASS:-}
-      - MOLPORT_FTP_HOST=${MOLPORT_FTP_HOST:-ftp.molport.com}
-      - MOLPORT_FTP_PORT=${MOLPORT_FTP_PORT:-21}
-    # Sets up a monthly cron job (1st of every month at 03:00 AM UTC) and keeps cron running in foreground
-    entrypoint: >
-      bash -c '
-      echo "Setting up MolPort automated monthly updater cron job...";
-      echo "0 3 1 * * cd /app && python scripts/update_molport_db.py >> /app/webapp/output/molport_update.log 2>&1" > /etc/cron.d/molport-update;
-      chmod 0644 /etc/cron.d/molport-update;
-      crontab /etc/cron.d/molport-update;
-      echo "Cron scheduler started. MolPort updates will run automatically on the 1st of each month at 03:00 AM UTC.";
-      cron -f -L 15
-      '
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-          cpus: "2.0"
+    mem_limit: 4g
+    cpus: "2.0"
+    healthcheck:
+      disable: true

@@ -3924,3 +3924,21 @@ input[type="range"]::-moz-range-thumb {
         animation: none !important;
     }
 }
+
+/* Public session policy and bounded-list navigation. */
+.workspace-header .session-notice {
+    max-width: 70ch;
+    margin-top: 12px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+.public-pagination {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+.public-pagination .btn { padding: 6px 12px; font-size: 0.8rem; }

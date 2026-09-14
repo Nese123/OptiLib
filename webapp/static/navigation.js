@@ -31,3 +31,11 @@
 
     mobileViewport.addEventListener('change', () => setMenuOpen(false));
 })();
+
+// Home navigation uses listeners so the script policy can reject inline code.
+document.querySelectorAll('[data-scroll-home]').forEach(link => {
+    link.addEventListener('click', event => {
+        event.preventDefault();
+        window.scrollTo({top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
+    });
+});

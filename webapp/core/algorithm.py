@@ -18,6 +18,26 @@ from .records import METADATA_COLUMNS, target_columns
 #  PROBLEM DEFINITION
 # ═══════════════════════════════════════════════════════════════
 
+MATRIX_BLOCK_BYTES = 32 * 1024 * 1024
+
+
+def matrix_blocks(matrix, budget=MATRIX_BLOCK_BYTES):
+    """Bound matrix temporaries, allowing up to four arrays per row block."""
+    rows = max(1, budget // max(1, matrix.shape[1] * matrix.dtype.itemsize * 4))
+    for start in range(0, len(matrix), rows):
+        yield start, matrix[start:start + rows]
+
+
+def column_maximum(matrix, selection=None):
+    result = np.full(matrix.shape[1], -np.inf, dtype=matrix.dtype)
+    for start, block in matrix_blocks(matrix):
+        if selection is not None:
+            block = block[selection[start:start + len(block)]]
+        if len(block):
+            result = np.fmax(result, np.fmax.reduce(block, axis=0))
+    return result
+
+
 class DrugLibraryProblem(ElementwiseProblem):
     """Multi-objective drug library optimization problem for NSGA-II.
 
@@ -43,7 +63,7 @@ class DrugLibraryProblem(ElementwiseProblem):
 
         # Compute pool-level baselines for normalization and reporting
         self.pool_total_cost = float(np.sum(self.prices))
-        pool_max_scores = np.fmax.reduce(self.matrix, axis=0)
+        pool_max_scores = column_maximum(self.matrix)
         pool_max_scores = np.nan_to_num(pool_max_scores, nan=-1.0)
 
         positive_pool_scores = pool_max_scores[pool_max_scores > 0]
@@ -82,12 +102,10 @@ class DrugLibraryProblem(ElementwiseProblem):
             out["G"] = [self.num_targets]
             return
 
-        if self._scores is not None:
-            all_scores = np.max(self._scores[mask, :], axis=0)
-        else:
-            target_max_scores = np.fmax.reduce(self.matrix[mask, :], axis=0)
-            target_max_scores = np.nan_to_num(target_max_scores, nan=-1.0)
-            all_scores = np.maximum(target_max_scores, 0)
+        target_max_scores = column_maximum(
+            self._scores if self._scores is not None else self.matrix, mask)
+        target_max_scores = np.nan_to_num(target_max_scores, nan=-1.0)
+        all_scores = np.maximum(target_max_scores, 0)
         missed_targets = np.sum(all_scores <= 0)
         coverage_violation = missed_targets - self.max_allowed_misses
 
@@ -135,56 +153,50 @@ def build_smart_init(selectivities, prices, pop_size=100, seed=1):
     rng = np.random.default_rng(seed)
     X_init = rng.integers(0, 2, size=(pop_size, selectivities.shape[0]), dtype=bool)
 
-    # Precompute coverage mask
-    coverage_mask = selectivities > 0
-    has_coverage = np.any(coverage_mask, axis=0)
-
-    # -------------------------------------------------------------
-    # Smart Guess 1: "The Bargain Bin" (Cheapest drug for each target)
-    masked_prices = np.where(coverage_mask, prices[:, np.newaxis], np.inf)
-    cheapest_per_target = np.argmin(masked_prices, axis=0)
-    cheapest_drugs = np.unique(cheapest_per_target[has_coverage])
-
-    X_init[0, :] = 0
-    X_init[0, cheapest_drugs] = 1
-
-    # -------------------------------------------------------------
-    # Smart Guess 5: "Second Cheapest" (modify in-place, no copy needed)
-    for t, d in enumerate(cheapest_per_target):
-        if has_coverage[t]:
-            masked_prices[d, t] = np.inf
-    has_second_coverage = np.any(masked_prices != np.inf, axis=0)
-    second_cheapest_per_target = np.argmin(masked_prices, axis=0)
-    del masked_prices  # Free memory
-    second_cheapest_drugs = np.unique(second_cheapest_per_target[has_second_coverage])
-
-    X_init[4, :] = 0
-    X_init[4, second_cheapest_drugs] = 1
-
-    # -------------------------------------------------------------
-    # Smart Guess 2: "Maximum Efficacy" (Highest selectivity drug for each target)
-    best_per_target = np.argmax(np.where(coverage_mask, selectivities, -np.inf), axis=0)
-    best_scores = selectivities[best_per_target, np.arange(selectivities.shape[1])]
-    max_sel_drugs = np.unique(best_per_target[best_scores > 0])
-
-    X_init[1, :] = 0
-    X_init[1, max_sel_drugs] = 1
-
-    # -------------------------------------------------------------
-    # Smart Guess 3: "Cost-Effective" (Highest selectivity / price)
-    masked_sel = np.where(coverage_mask, selectivities, 0)
-    sel_per_dollar = masked_sel / np.maximum(prices[:, np.newaxis], 1e-6)
-    del masked_sel  # Free memory
-    cost_effective_per_target = np.argmax(sel_per_dollar, axis=0)
-    del sel_per_dollar  # Free memory
-    cost_effective_drugs = np.unique(cost_effective_per_target[has_coverage])
-
-    X_init[2, :] = 0
-    X_init[2, cost_effective_drugs] = 1
-
-    # -------------------------------------------------------------
-    # Smart Guess 4: "The Union" (Bargain Bin + Max Efficacy)
-    X_init[3, :] = X_init[0] | X_init[1]
+    # Reduce each block in original row order. Strict comparisons retain the
+    # first index on ties, matching NumPy argmin/argmax on the original matrix.
+    targets = selectivities.shape[1]
+    cheapest = np.full(targets, np.inf)
+    second = np.full(targets, np.inf)
+    best = np.full(targets, -np.inf)
+    value = np.full(targets, -np.inf)
+    cheapest_i = np.full(targets, -1, dtype=int)
+    second_i = np.full(targets, -1, dtype=int)
+    best_i = np.full(targets, -1, dtype=int)
+    value_i = np.full(targets, -1, dtype=int)
+    for start, block in matrix_blocks(selectivities):
+        coverage = block > 0
+        masked = np.where(coverage, prices[start:start + len(block), None], np.inf)
+        # Only the best two candidates in a block can enter the global top two.
+        for _ in range(2):
+            indices = np.argmin(masked, axis=0)
+            costs = masked[indices, np.arange(targets)]
+            global_indices = indices + start
+            first = costs < cheapest
+            next_best = ~first & (costs < second)
+            second[first], second_i[first] = cheapest[first], cheapest_i[first]
+            second[next_best], second_i[next_best] = costs[next_best], global_indices[next_best]
+            cheapest[first], cheapest_i[first] = costs[first], global_indices[first]
+            masked[indices, np.arange(targets)] = np.inf
+        del masked
+        masked = np.where(coverage, block, -np.inf)
+        indices = np.argmax(masked, axis=0)
+        scores = masked[indices, np.arange(targets)]
+        better = scores > best
+        best[better], best_i[better] = scores[better], indices[better] + start
+        del masked
+        ratio = np.where(coverage, block, 0) / np.maximum(prices[start:start + len(block), None], 1e-6)
+        indices = np.argmax(ratio, axis=0)
+        scores = ratio[indices, np.arange(targets)]
+        better = scores > value
+        value[better], value_i[better] = scores[better], indices[better] + start
+    X_init[:5] = False
+    for row, indices in ((0, cheapest_i), (1, best_i), (2, value_i), (4, second_i)):
+        valid = indices >= 0
+        if row == 2:
+            valid &= cheapest_i >= 0
+        X_init[row, indices[valid]] = True
+    X_init[3] = X_init[0] | X_init[1]
 
     return X_init
 
@@ -403,7 +415,8 @@ def write_library_excel(winning_matrix_df, output_file):
             suffix='.xlsx', delete=False,
         ) as temporary_file:
             temporary_path = Path(temporary_file.name)
-        winning_matrix_df.to_excel(temporary_path, index=False, engine='xlsxwriter')
+        from .storage import write_frame_excel
+        write_frame_excel(winning_matrix_df, temporary_path)
         os.replace(temporary_path, output_path)
     finally:
         if temporary_path is not None:

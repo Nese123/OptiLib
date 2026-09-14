@@ -4,6 +4,7 @@ import logging
 import os
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 
 from .records import format_target_col, looks_like_inchikey, looks_like_smiles
 
@@ -36,7 +37,7 @@ def resolve_compounds(compound_ids, db_path):
     db_path = str(db_path)
     raw_matches = []
     try:
-        with closing(sqlite3.connect(db_path)) as conn:
+        with closing(sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)) as conn:
             chunk_size = 500
             for i in range(0, len(search_list), chunk_size):
                 chunk = search_list[i:i + chunk_size]
@@ -143,7 +144,7 @@ def resolve_targets(target_ids, db_path):
     db_path = str(db_path)
     rows = []
     try:
-        with closing(sqlite3.connect(db_path)) as conn:
+        with closing(sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)) as conn:
             chunk_size = 500
             for i in range(0, len(search_list), chunk_size):
                 chunk = search_list[i:i + chunk_size]
@@ -242,7 +243,7 @@ def get_target_info(target_list, db_path):
         db_path = str(db_path)
         if os.path.exists(db_path) and to_lookup:
             lookup_list = list(to_lookup)
-            with closing(sqlite3.connect(db_path)) as conn:
+            with closing(sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)) as conn:
                 placeholders = ",".join(["?"] * len(lookup_list))
                 query = f"""
                     SELECT td.chembl_id, td.pref_name,

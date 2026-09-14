@@ -239,11 +239,11 @@ class MatrixStorageTests(unittest.TestCase):
         excel_path = csv_path.with_suffix(".xlsx")
         previous = csv_path.read_bytes()
 
-        def fail(frame, path, **kwargs):
+        def fail(columns, rows, path):
             Path(path).write_bytes(b"partial workbook")
             raise OSError("write failed")
 
-        for failure in (patch.object(pd.DataFrame, "to_excel", autospec=True, side_effect=fail),
+        for failure in (patch("webapp.core.storage.write_rows_excel", side_effect=fail),
                         patch("webapp.core.storage.os.replace", side_effect=OSError("replace failed"))):
             with failure, self.assertRaises(OSError):
                 ensure_matrix_excel(csv_path)
@@ -256,12 +256,13 @@ class MatrixStorageTests(unittest.TestCase):
         export_lock = threading.Lock()
         ready = threading.Barrier(4)
         writes = []
-        write_excel = pd.DataFrame.to_excel
+        from webapp.core.storage import write_rows_excel
+        write_excel = write_rows_excel
         replace = os.replace
 
-        def write(frame, path, **kwargs):
+        def write(columns, rows, path):
             writes.append(path)
-            return write_excel(frame, path, **kwargs)
+            return write_excel(columns, rows, path)
 
         def publish(source, destination):
             self.assertFalse(Path(destination).exists())
@@ -273,7 +274,7 @@ class MatrixStorageTests(unittest.TestCase):
             with export_lock:
                 return ensure_matrix_excel(csv_path)
 
-        with patch.object(pd.DataFrame, "to_excel", autospec=True, side_effect=write), \
+        with patch("webapp.core.storage.write_rows_excel", side_effect=write), \
                 patch("webapp.core.storage.os.replace", side_effect=publish), \
                 ThreadPoolExecutor(max_workers=4) as executor:
             paths = list(executor.map(download, range(4)))
