@@ -1,290 +1,293 @@
-# Public deployment
+# Deploy OptiLib on a server
 
-OptiLib's public service supports anonymous, temporary sessions and matrices up to
-100,000 compounds × 1,000 targets. A matrix of this size contains 100 million
-float64 cells (800 MB before working buffers). The configured four-hour runtime
-is a deadline, not a guarantee of optimizer convergence.
+This guide assumes a dedicated Ubuntu 24.04 server with sudo access and a domain
+name. Docker runs the web app and computation service; Nginx handles HTTPS.
+Python 3.12 and the application dependencies are installed inside the images.
 
-## Architecture and requirements
+Replace `optilib.example.com` with your domain and `YOUR_REPOSITORY_URL` with your
+OptiLib repository URL. Run commands on the server, from the repository directory
+after step 2.
 
-Use Linux, Python 3.12, Docker Engine with Compose 2.24 or newer, 8 GB RAM and
-4 CPUs. Provide **at least 32 GiB of runtime storage in addition to** the ChEMBL
-and MolPort databases, application images and operational logs. An SSD with
-100 GB or more is a practical starting point for the current databases.
+## 1. Prepare the server
 
-The web service uses `webapp.wsgi:app`, one Gunicorn process and four threads,
-limited to 768 MiB and one CPU. It stores summaries and artifact references.
-The separate computation service has a 5 GiB memory limit and three CPUs. Its
-supervisor spawns disposable processes, with one numerical-library thread each.
-Large jobs reserve 4 GiB and run exclusively; small jobs reserve 2 GiB and at most
-two run concurrently. Matrix builds conservatively reserve the large slot because
-their final dimensions are not known at admission. There is no unbounded queue.
+- Use at least 4 CPUs and 8 GB RAM.
+- Allow at least 32 GiB of runtime storage **in addition to** the databases,
+  Docker images, and logs. A 100 GB SSD is a starting point; check database sizes
+  and allow extra space for backups and database maintenance.
+- Point your domain's DNS A record to the server's public IPv4 address. If you
+  publish an AAAA record, IPv6 must also reach this server.
+- Allow inbound TCP ports 80 and 443 in the server and hosting-provider firewalls.
+  Keep your SSH port accessible. Do not expose port 5000 publicly.
 
-A shared runtime bind mount contains the SQLite job database and private session
-artifacts. Source databases are mounted read-only. Both services run as UID/GID
-10001, drop Linux capabilities, have read-only root filesystems, and use a bounded
-temporary filesystem. The supervisor enforces deadlines and checks child RSS and
-artifact usage; container limits isolate the web service if a child allocates
-memory faster than a polling check can stop it.
+Install the host tools:
 
-The former in-process application remains for local numerical development and
-regression tests. Do not deploy its development mode publicly. Even when using
-`webapp.app:app`, production mode selects the new service.
+```bash
+sudo apt update
+sudo apt install -y git curl nginx certbot openssl nano
+```
 
-## Configure and start
+Install Docker Engine and its Compose plugin using the
+[official Ubuntu instructions](https://docs.docker.com/engine/install/ubuntu/#install-using-the-apt-repository).
+Then check the installation:
 
-From the repository root:
+```bash
+sudo systemctl enable --now docker nginx
+sudo docker compose version
+sudo docker run --rm hello-world
+```
+
+Use Compose 2.24 or newer. The commands below use `sudo docker`, so Docker group
+membership is not required.
+
+## 2. Copy the application and databases
+
+```bash
+git clone YOUR_REPOSITORY_URL OptiLib
+cd OptiLib
+mkdir -p database
+```
+
+Copy your prepared databases to these paths on the server:
+
+```text
+OptiLib/database/chembl_37.db
+OptiLib/database/molport.db
+```
+
+These databases are not included in Git. Use consistent copies made while the
+source databases are closed, or use SQLite backups. The ChEMBL database must
+include OptiLib's selectivity table and scoring metadata; see the maintenance
+section below if it needs rebuilding.
+
+Check that the price prediction model is also present before building:
+
+```bash
+ls -lh database/chembl_37.db database/molport.db
+ls -lh MolPrice/models/Numpy/MP_Morgan_hybrid.pkl
+```
+
+## 3. Configure the application
 
 ```bash
 cp .env.example .env
-python3 -c "import secrets; print(secrets.token_hex(32))"
+chmod 600 .env
+openssl rand -hex 32
+nano .env
 ```
 
-Set `SECRET_KEY` to the generated value, `OPTILIB_ENV=production`,
-`SESSION_COOKIE_SECURE=true`, and `TRUSTED_HOSTS` to your public hostname (a
-comma-separated list if needed, without URL schemes or ports). Production refuses
-missing/placeholder/short secrets or insecure cookie configuration. The CSRF token
-lifetime is five hours so a four-hour job can still be followed by a result action.
+Paste the generated value into `SECRET_KEY` and set:
 
-Place `chembl_37.db` and `molport.db` in `database/`. Ensure their contents and model
-assets are readable by UID 10001. Complete any selectivity migration described
-below before starting the public service. After offline maintenance, checkpoint
-and close WAL databases so read-only containers do not require writable sidecars:
-
-```bash
-.venv/bin/python scripts/prepare_readonly_databases.py
+```dotenv
+SECRET_KEY=PASTE_THE_GENERATED_VALUE_HERE
+OPTILIB_ENV=production
+SESSION_COOKIE_SECURE=true
+TRUSTED_HOSTS=optilib.example.com
+RUNTIME_HOST_PATH=/var/lib/optilib/runtime
+OPTILIB_ACCEL_REDIRECT=true
 ```
 
-This is an explicit maintenance command. Stop all database readers and writers
-before running it. It checkpoints WAL and switches existing database files to
-DELETE journaling; it does not change source records or rebuild scores.
+Use only a hostname for `TRUSTED_HOSTS`, without `https://`, a port, or a path.
+Leave the remaining limits at their defaults initially. MolPort FTP credentials
+are needed only if you run the optional database updater. Keep `.env` private.
+
+## 4. Build the images and prepare storage
 
 ```bash
 sudo install -d -o 10001 -g 10001 -m 755 /var/lib/optilib/runtime
-docker compose build
-docker compose up -d computation optilib
-docker compose ps
-docker compose logs -f optilib computation
+sudo chown -R 10001:10001 database
+sudo chmod 755 database
+sudo chmod 644 database/chembl_37.db database/molport.db
+sudo docker compose build
 ```
 
-Only `127.0.0.1:5000` is published. The computation service has no published port.
-Production traffic must go through Nginx. Completed exports use authenticated
-`X-Accel-Redirect` delivery through its internal artifact location, freeing
-Gunicorn threads immediately; the internal location is not publicly addressable. The container entrypoint uses
-`requirements.lock`; update that lock only with regression and build validation.
+The containers run as UID/GID 10001. They need read access to the source databases
+and write access to runtime storage. The maintenance container also needs write
+access to the database directory.
 
-For local testing of the same architecture, set `OPTILIB_ENV=development`,
-`SESSION_COOKIE_SECURE=false`, and an absolute `OPTILIB_RUNTIME` directory in a
-local `.env`. Start `.venv/bin/python -m webapp.public.worker` and
-`.venv/bin/gunicorn --bind 127.0.0.1:5000 --workers 1 --threads 4 webapp.wsgi:app`
-in separate terminals. Set `OPTILIB_ACCEL_REDIRECT=false` for direct local HTTP
-without Nginx. Both load `.env`. Local source databases should still be
-prepared for read-only use. Do not run multiple web masters or supervisors against
-the same runtime volume.
+If ChEMBL needs a selectivity rebuild, run the maintenance command below now.
+Then prepare the databases for read-only mounts:
 
-## Nginx and TLS
+```bash
+sudo docker compose --profile maintenance run --rm --no-deps molport-updater \
+  python scripts/prepare_readonly_databases.py
+```
 
-Install host Nginx and Certbot, configure DNS, and obtain a certificate for the
-public hostname before enabling the supplied HTTPS configuration. The template
-contains top-level `events` and `http` blocks; merge it carefully if the host runs
-other sites. Set its server names and certificate paths to match `TRUSTED_HOSTS`.
-Its upstream is already `127.0.0.1:5000`. Its internal export alias must match
-`RUNTIME_HOST_PATH` (default `/var/lib/optilib/runtime`). Nginx needs read/traverse
-access to that directory; the application UID owns writes. Never change the
-internal artifact location into a public alias.
+This checkpoints SQLite WAL files and switches to DELETE journaling. Run it only
+while all database readers, writers, and maintenance jobs are stopped. It does
+not rebuild selectivity scores.
+
+## 5. Start the application
+
+```bash
+sudo docker compose up -d computation optilib
+sudo docker compose ps
+curl -i -H 'Host: optilib.example.com' http://127.0.0.1:5000/health
+```
+
+Allow a minute for startup. The health request should return `200 OK` with all
+checks set to `true`. If it returns `503`, inspect the failed checks and logs:
+
+```bash
+sudo docker compose logs --tail=100 optilib computation
+```
+
+The app listens on `127.0.0.1:5000`. Complete HTTPS setup before using it in a
+browser because production session cookies require HTTPS.
+
+## 6. Obtain an HTTPS certificate
+
+First, create a temporary HTTP site so Certbot can verify your domain:
+
+```bash
+sudo install -d -m 755 /var/www/certbot
+sudo tee /etc/nginx/sites-available/optilib-acme > /dev/null <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name optilib.example.com;
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 404;
+    }
+}
+EOF
+sudo ln -s /etc/nginx/sites-available/optilib-acme /etc/nginx/sites-enabled/optilib-acme
+sudo nginx -t
+sudo systemctl reload nginx
+sudo certbot certonly --webroot -w /var/www/certbot -d optilib.example.com
+```
+
+Follow Certbot's prompts. DNS must resolve to this server and port 80 must be
+reachable. This uses Certbot's
+[webroot verification](https://eff-certbot.readthedocs.io/en/stable/using.html#webroot),
+which also supports renewal while Nginx stays running.
+
+## 7. Enable the production Nginx configuration
+
+The supplied file replaces the entire Nginx configuration. These commands assume
+this server hosts only OptiLib. If it hosts other sites, merge the configuration
+with the existing setup instead.
 
 ```bash
 sudo install -d -m 755 /var/www/optilib/static
 sudo cp -a webapp/static/. /var/www/optilib/static/
+sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.before-optilib
 sudo cp nginx/nginx.conf /etc/nginx/nginx.conf
+sudo nano /etc/nginx/nginx.conf
+```
+
+In the copied configuration:
+
+- Replace every `optilib.example.com` with your domain, including both
+  certificate paths. Use the paths Certbot printed if they differ.
+- If you published an AAAA record, add IPv6 listeners alongside the HTTP and
+  HTTPS listeners (`listen [::]:80;` and `listen [::]:443 ssl http2;`). Add
+  `default_server` to the IPv6 listener in the default HTTP server block.
+- If you changed `RUNTIME_HOST_PATH`, update the internal artifact alias to
+  `<RUNTIME_HOST_PATH>/sessions/`. Nginx needs read and directory traversal access.
+  Keep the `internal;` directive: exports require session authorization.
+
+Test and load it:
+
+```bash
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Copy static assets on every release; HTML and private APIs are not cached. Nginx
-replaces forwarded IP, host and scheme headers. Flask trusts only this single
-proxy. Configure certificate renewal and test it with `certbot renew --dry-run`.
-Do not expose port 5000 through another Docker mapping or host firewall rule.
-
-## Resource policy and public interfaces
-
-Defaults are configurable in `.env.example`:
-
-| Resource | Default |
-| --- | --- |
-| Matrix | 100,000 compounds, 1,000 targets, 100 million cells |
-| Upload measurements | 1 million affinity rows per session |
-| Upload request | 16 MiB, 20 files; browser batches leave 1 MiB multipart headroom |
-| Retained uploads | 100 files, 256 MiB of original uploaded content |
-| XLSX expansion | 128 MiB per file; only CSV and XLSX are accepted |
-| Runtime storage | 6 GiB/session, 24 GiB globally, including temporary artifacts |
-| Free disk reserve | 4 GiB |
-| Sessions | 100; two-hour inactivity expiry |
-| Admission | One active job/session and IP; four matrix/optimization starts/IP/hour |
-| Runtime | Four hours optimization; one hour other stages; 60-second stop grace |
-
-Limits reject input without publishing partial changes. IP limits apply to users
-sharing a NAT address. Resetting a session does not reset the hourly IP allowance.
-An optimization deadline requests feasible partial results, then terminates the
-process after the grace period. If no feasible result can be published in time,
-the job ends with an error and previous results remain available.
-
-Uploads, upload edits, matrix builds, optimizations, solution selection and export
-preparation return `202` with `job_id` and `status_url`. Poll `/api/jobs/<id>` in the
-same cookie session; completion includes `result`, and failures include `error`.
-Existing pipeline and optimizer status routes remain available. Busy admission
-returns `503`; IP limits return `429`, both with `Retry-After`. Invalid requests
-return `400`, and request/storage quota rejections can return `413`. Validation
-errors discovered asynchronously appear in job status.
-
-`/api/heatmap-data` accepts `row_offset`, `column_offset`, `row_count` and
-`column_count`. The default viewport is 20 × 40; each axis is capped at 100. It
-returns total dimensions, window labels, global color bounds, full-selection
-numeric distribution summaries, and a selection revision. Compound listings in
-`/api/results` and `/api/uploads/affinity` or `/api/uploads/prices` use `offset`
-and `limit` (default 100, maximum 500). The browser discards stale heatmap replies.
-
-Downloads accept `format=xlsx` or `format=csv`. Preparation is asynchronous and
-requires the session's `X-CSRFToken` header even on GET; fetching a completed
-artifact is an ordinary download. Concurrent requests reuse one export job.
-CSV is useful for large matrices: XLSX's temporary XML can consume substantial
-storage and still remains subject to the session quota. CSV spreadsheet-control
-strings are prefixed with an apostrophe; XLSX stores uploaded strings as literal
-text. Neither export uses a full-matrix DataFrame.
-
-Sessions intentionally do not survive a web-master restart. Their jobs are
-cancelled and owned artifacts are cleaned up. Users must download results they
-want to retain. Active jobs do not expire for inactivity. Unreferenced artifacts
-are pruned after a two-minute reader grace period; operational files outside
-owned session directories are never removed. Keep logs in Docker's logging driver
-or a separate host log directory, not in the session volume. Configure host log
-rotation and disk/CPU/memory monitoring.
-
-## Readiness, maintenance and rollout checks
-
-`/live` checks the web process; it is the web container's liveness check.
-`/health` and `/api/health` return 200 only when required source schemas, scoring
-provenance, runtime writes, supervisor heartbeat and startup model validation are
-healthy. These checks are independent of normal job saturation. Database checks
-are cached for 15 seconds. The supervisor healthcheck validates its heartbeat.
-Docker does not automatically restart a merely unhealthy container: alert on
-readiness failures and investigate logs.
+Only reload after the configuration test succeeds. Set up automatic certificate
+renewal and reload Nginx after successful renewals:
 
 ```bash
-curl -H 'Host: YOUR_PUBLIC_HOSTNAME' http://127.0.0.1:5000/live
-curl -i https://YOUR_PUBLIC_HOSTNAME/health
-.venv/bin/python -m unittest discover -s tests -v
-node --test tests/test_frontend_admission.js tests/test_frontend_performance.js tests/test_frontend_public.js
+sudo install -d /etc/letsencrypt/renewal-hooks/deploy
+sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx > /dev/null <<'EOF'
+#!/bin/sh
+nginx -t && systemctl reload nginx
+EOF
+sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+sudo systemctl enable --now certbot.timer
+sudo certbot renew --dry-run
 ```
 
-The updater is a manual, disabled-by-default `maintenance` profile. Stop public
-services, grant the maintenance UID write access to the database directory, run
-updates, checkpoint databases, then restart. Store updater logs outside runtime.
+## 8. Check the public website
 
 ```bash
-docker compose stop optilib computation
-docker compose --profile maintenance run --rm molport-updater
-.venv/bin/python scripts/prepare_readonly_databases.py
-docker compose up -d computation optilib
+curl -I http://optilib.example.com
+curl -i https://optilib.example.com/health
 ```
 
-Back up source databases before maintenance. Session outputs are disposable and
-should not be included in backups. Preserve a tested application image and its
-matching database scoring version for rollback. The runtime schema is internal;
-stop both services and replace the disposable runtime directory when rolling back
-across incompatible versions. Do not mount runtime or exports under `/static/`.
+HTTP should redirect to HTTPS, and `/health` should return `200 OK`. Open
+`https://optilib.example.com` in a browser and test an upload, matrix creation,
+optimization, solution selection, and both CSV and XLSX downloads. Check from
+another machine that port 5000 is inaccessible.
 
-Before public launch, validate the actual container build and TLS deployment,
-verify that port 5000 is unreachable externally, and exercise uploads, polling,
-selection and both download formats in a browser. During a large job, measure
-status and viewport latency (95th percentile below two seconds). Test a second
-user receiving a busy response and continuing to access existing results.
+Monitor `/health`, Docker logs, and host disk/memory usage. Docker restarts exited
+services, but an unhealthy status alone does not trigger a restart. Test your
+expected job sizes on the server before opening it to public use.
 
-Run both density cases under the actual computation-container limits. These
-commands require temporarily stopping the supervisor so the benchmark does not
-compete with public jobs:
+## Updating the application
+
+Tell users before restarting: sessions and their jobs do not survive a web
+restart, so users should download results first. Keep a tested previous image and
+matching database backup for rollback.
+
+From the repository directory, deploy a tested release:
 
 ```bash
-docker compose stop optilib computation
-docker compose run --rm --no-deps --entrypoint python computation scripts/benchmark_public.py --directory /app/runtime --density .05
-docker compose run --rm --no-deps --entrypoint python computation scripts/benchmark_public.py --directory /app/runtime --density 1
-docker compose run --rm --no-deps --entrypoint python computation scripts/benchmark_public.py --directory /app/runtime --density .05 --soak-seconds 14400
+git pull --ff-only
+sudo docker compose build
+sudo docker compose stop optilib computation
+sudo cp -a webapp/static/. /var/www/optilib/static/
+sudo docker compose up -d computation optilib
+curl -i https://optilib.example.com/health
 ```
 
-The benchmark checks 100-million-cell storage, initialization and optimizer
-execution, and records wall time and peak RSS. The soak mode repeats real searches
-for at least four hours; it does not replace an API deadline/cancellation test.
-Also run a four-hour API job on staging to verify deadline handling, and exercise
-full-size ingestion, selection and exports. Do not claim those acceptance checks
-passed merely because the numerical benchmark passed. Record observed results in
-`PUBLIC_LAUNCH_VALIDATION.md`.
+Review release-specific database or configuration changes before restarting.
+Keep one web process and one computation supervisor per runtime directory.
 
-## ChEMBL selectivity maintenance
+## Database maintenance (only when needed)
 
-The application requires the active ChEMBL selectivity table to use
-`blended_boundary_average_v2`. This version averages equally distant neighbors
-at the local-potency cutoff. The builder records the scoring version and a unique
-build ID in `optilib_selectivity_metadata`; both identify cached matrices. A table
-without this metadata is treated as legacy and must be rebuilt before the current
-application can run a ChEMBL pipeline. Do not label old scores as the new version
-by editing metadata alone.
-
-Rebuilds are explicit maintenance commands; the web server never runs a migration
-at startup. Run one maintenance job at a time. The current ChEMBL 37 installation
-has **2,251,098 compound-target rows**, so its rebuild command is:
+Back up the source databases and stop all readers and writers before maintenance:
 
 ```bash
-.venv/bin/python -u scripts/build_selectivity_table.py \
+sudo docker compose stop optilib computation
+```
+
+For a MolPort update, set the FTP credentials in `.env`, then run:
+
+```bash
+sudo docker compose --profile maintenance run --rm --no-deps molport-updater
+```
+
+For a legacy ChEMBL selectivity table, rebuild it using the current scoring
+version, `blended_boundary_average_v2`. Missing scoring metadata also requires a
+rebuild; do not fix it by relabeling old scores. The following row count applies
+to the existing prepared ChEMBL 37 dataset, not arbitrary ChEMBL releases:
+
+```bash
+sudo docker compose --profile maintenance run --rm --no-deps molport-updater \
+  python -u scripts/build_selectivity_table.py \
   --db-path database/chembl_37.db \
   --expected-row-count 2251098 \
-  --batch-size 25000 \
-  > database/selectivity-rebuild.log 2>&1
+  --batch-size 25000
 ```
 
-For a container installation, replace `.venv/bin/python` with
-`docker compose run --rm --no-deps molport-updater python`. The database and log paths above are
-relative to the repository root. Monitor progress with:
+Allow additional disk space for staging, indexes, and the retained previous table.
+The builder validates row counts and compound-target keys before replacing the
+active table. It prints the retained staging file and rollback table names; keep
+them until the new build is accepted. A different source dataset needs separate
+preparation and validation.
+
+After successful maintenance, prepare the databases again and restart:
 
 ```bash
-tail -f database/selectivity-rebuild.log
+sudo docker compose --profile maintenance run --rm --no-deps molport-updater \
+  python scripts/prepare_readonly_databases.py
+sudo docker compose up -d computation optilib
+curl -i https://optilib.example.com/health
 ```
 
-The builder creates a separate staging SQLite database under `database/`, streams
-activities in bounded chunks, and calculates exact medians on disk. It adds
-indexes for target/assay and active-activity lookups; source activity, assay, and
-target rows remain unchanged. Leave space for the staging file, replacement
-selectivity table, indexes, and retained previous table. The log records the
-staging path, row counts, query plans, score changes, peak memory, and duration.
-
-The existing selectivity table remains active during the build. Before publication,
-the builder checks the row count and compares every compound-target key in both
-directions. A failure leaves the active table and its provenance intact. Successful
-publication swaps the table and metadata in one transaction and retains the old
-table under the rollback name printed in the log. The count/key checks target a
-scoring migration of the same source dataset; a changed ChEMBL release requires
-its own validated database preparation.
-
-The successful staging file is retained for verification and can be removed after
-the new build is accepted. Keep the retained rollback table until that recovery
-option is no longer needed. Both staging files and maintenance logs belong in the
-ignored `database/` directory.
-
-Restore the most recently retained table and its matching provenance with:
-
-```bash
-.venv/bin/python scripts/build_selectivity_table.py \
-  --db-path database/chembl_37.db --rollback
-```
-
-To select a particular retained table, add its name from the migration log. For
-example, the 2026-09-09 local migration retained:
-
-```bash
-.venv/bin/python scripts/build_selectivity_table.py \
-  --db-path database/chembl_37.db --rollback \
-  --backup-table compound_target_selectivity_backup_0bc527c792ce
-```
-
-Rollback also retains the replaced build. Restoring a legacy scoring table restores
-legacy provenance: deploy its compatible application version, or rebuild current
-scores before starting new ChEMBL pipelines with the current application.
+Back up source databases and private configuration regularly. Session outputs in
+`/var/lib/optilib/runtime` are temporary and do not need backups. Keep maintenance
+logs outside that directory and configure host log rotation.
