@@ -75,3 +75,4 @@ runtime/
 logs/
 
 AGENTS.md
+docker-compose.local.yml

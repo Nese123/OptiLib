@@ -14,8 +14,8 @@ from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 
 from webapp.core.algorithm import (DrugLibraryProblem, build_smart_init, run_optimization,
                                    select_best_solution, find_knee_point, column_maximum)
-from webapp.core.records import METADATA_COLUMNS
-from webapp.core.resolution import resolve_targets
+from webapp.core.records import METADATA_COLUMNS, format_compound_display, format_target_display
+from webapp.core.resolution import resolve_compounds, resolve_targets
 from webapp.core.storage import write_rows_excel
 from . import ingestion, matrices
 
@@ -184,6 +184,24 @@ def export(context, payload, snapshot):
     return {'exports':exports}, {'status':'complete','download_url':f"/api/download/{payload['which']}?format={payload['format']}"}
 
 
+def cache_compound_labels(context, path, kind):
+    """Resolve new compound labels in bounded batches for upload list pages."""
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute('DELETE FROM compound_labels WHERE compound NOT IN (SELECT compound FROM affinity UNION SELECT compound FROM prices)')
+        cursor = db.execute(f'SELECT DISTINCT compound FROM {kind} ORDER BY compound')
+        while rows := cursor.fetchmany(256):
+            context.checkpoint()
+            compounds = [row[0] for row in rows]
+            placeholders = ','.join('?' for _ in compounds)
+            cached = {row[0] for row in db.execute(f'SELECT compound FROM compound_labels WHERE compound IN ({placeholders})', compounds)}
+            missing = [raw for raw in compounds if raw not in cached]
+            if missing:
+                resolved = resolve_compounds(missing, context.runtime.policy.chembl)
+                db.executemany('INSERT INTO compound_labels VALUES (?,?)', [
+                    (raw, format_compound_display(raw, resolved.get(raw))) for raw in missing
+                ])
+
+
 def execute(runtime, job):
     context = Context(runtime,job)
     payload,snapshot = job['spec']['payload'],job['spec']['snapshot']
@@ -199,15 +217,21 @@ def execute(runtime, job):
             ingestion.ingest(destination,staged,upload_kind,runtime.policy,context.checkpoint)
         else:
             ingestion.edit(destination,upload_kind,payload['operation'],payload.get('value',''))
+        if upload_kind in ('affinity', 'prices'):
+            cache_compound_labels(context, destination, upload_kind)
         response = ingestion.summary(destination,upload_kind)
         if upload_kind == 'targets':
             resolved = resolve_targets(response,runtime.policy.chembl)
             def target_summary(targets):
-                ids = list(dict.fromkeys(resolved[raw]['chembl_id'] for raw in targets if resolved[raw]['is_chembl']))
-                matched = [raw for raw in targets if resolved[raw]['is_chembl']]
+                chembl_map = {
+                    format_target_display(raw, resolved[raw]): resolved[raw]['chembl_id']
+                    for raw in targets if resolved[raw]['is_chembl']
+                }
+                ids = list(dict.fromkeys(chembl_map.values()))
+                matched = list(chembl_map)
                 unmatched = [raw for raw in targets if not resolved[raw]['is_chembl']]
                 return {'total':len(targets),'matched':matched,'unmatched':unmatched,
-                        'chembl_ids':ids,'chembl_map':{raw:resolved[raw]['chembl_id'] for raw in matched}}
+                        'chembl_ids':ids,'chembl_map':chembl_map}
             response = target_summary(response)
             response['uploaded_files'] = []
             with closing(sqlite3.connect(destination)) as db:
@@ -215,6 +239,12 @@ def execute(runtime, job):
                     targets = [row[0] for row in db.execute('SELECT target FROM targets WHERE file=? ORDER BY rowid',(item['name'],))]
                     response['uploaded_files'].append({'name':item['name'],**target_summary(targets)})
         else:
+            if upload_kind == 'affinity':
+                resolved = resolve_targets(response['targets'],runtime.policy.chembl)
+                response['target_labels'] = {
+                    raw: format_target_display(raw, resolved.get(raw))
+                    for raw in response['targets']
+                }
             uploaded = {item['name'] for item in payload.get('files',[])}
             response['uploaded_files'] = [item for item in response['all_files'] if item['name'] in uploaded]
         summaries = dict(snapshot.get('upload_summaries',{})); summaries[upload_kind] = response

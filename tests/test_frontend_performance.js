@@ -29,6 +29,116 @@ test('legacy upload aggregates are migrated once beside compact file entries', (
     assert.equal(context.normalizeUploadState(migrated), migrated);
 });
 
+test('affinity target labels survive storage and removal sends the original identifier', async () => {
+    const element = () => ({
+        style: {}, children: [], textContent: '',
+        set innerHTML(value) { this.children = []; },
+        appendChild(child) { this.children.push(child); },
+    });
+    const nodes = new Map();
+    const node = id => {
+        if (!nodes.has(id)) nodes.set(id, element());
+        return nodes.get(id);
+    };
+    const storage = new Map(), requests = [];
+    const context = vm.createContext({
+        uploadedAffinityFilesData: [], affinityAggregate: null,
+        document: {createElement: element}, $: node,
+        fileInfo: element(), removeAllBtnContainer: element(), removeAllBtn: element(),
+        removeAllConfirm: element(), affinitySummary: element(), thresholdControl: element(),
+        buildMatrixBtn: element(), fileInput: element(),
+        sessionStorage: {setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)},
+        fetch: async (url, options) => {
+            requests.push({url, body: JSON.parse(options.body)});
+            return {ok: true, json: async () => ({all_files: [], num_compounds: 0, num_targets: 0})};
+        },
+        parseJsonResponse: response => response.json(), resetOptSettingsToDefault() {},
+    });
+    vm.runInContext(section('function normalizeUploadState', 'const restoredAffinity'), context);
+    vm.runInContext(section('function applyUploadResponse', '// Leave headroom'), context);
+    vm.runInContext(section('function renderAffinityFiles', '// Build Matrix button'), context);
+    context.applyUploadResponse('affinity', {
+        all_files: [{name: 'affinity.csv'}], compounds: ['A'], targets: ['P04626', 'CUSTOM'],
+        target_labels: {'P04626': 'P04626 -> Receptor kinase (ERBB2)', 'CUSTOM': 'CUSTOM'},
+        num_compounds: 1, num_targets: 2, num_datapoints: 2,
+    });
+    context.renderAffinityFiles();
+    let rows = node('#affinityTargetList').children;
+    assert.deepEqual(rows.map(row => row.children[0].textContent), ['P04626 -> Receptor kinase (ERBB2)', 'CUSTOM']);
+    const restored = context.normalizeUploadState(JSON.parse(storage.get('uploadedAffinityFilesData')));
+    context.uploadedAffinityFilesData = restored.files;
+    context.affinityAggregate = restored.aggregate;
+    context.renderAffinityFiles();
+    rows = node('#affinityTargetList').children;
+    assert.equal(rows[0].children[0].textContent, 'P04626 -> Receptor kinase (ERBB2)');
+    rows[0].children[1].onclick();
+    await rows[0].children[1].children[0].onclick();
+    assert.deepEqual(requests, [{url: '/api/remove-affinity-target', body: {target: 'P04626'}}]);
+});
+
+for (const kind of ['affinity', 'price']) {
+    test(`${kind} compound labels survive storage and removal sends the original identifier`, async () => {
+        const element = () => ({
+            style: {}, children: [], textContent: '',
+            set innerHTML(value) { this.children = []; },
+            appendChild(child) { this.children.push(child); },
+        });
+        const nodes = new Map();
+        const node = id => {
+            if (!nodes.has(id)) nodes.set(id, element());
+            return nodes.get(id);
+        };
+        const storage = new Map(), requests = [];
+        const context = vm.createContext({
+            uploadedAffinityFilesData: [], affinityAggregate: null,
+            uploadedPriceFilesData: [], priceAggregate: null,
+            document: {createElement: element}, $: node,
+            fileInfo: element(), removeAllBtnContainer: element(), removeAllBtn: element(),
+            removeAllConfirm: element(), affinitySummary: element(), thresholdControl: element(),
+            buildMatrixBtn: element(), fileInput: element(),
+            sessionStorage: {setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)},
+            fetch: async (url, options) => {
+                requests.push({url, body: JSON.parse(options.body)});
+                return {ok: true, json: async () => ({all_files: [], compounds: [], num_compounds: 0, num_targets: 0, num_prices: 0})};
+            },
+            parseJsonResponse: response => response.json(), resetOptSettingsToDefault() {},
+        });
+        vm.runInContext(section('function normalizeUploadState', 'const restoredAffinity'), context);
+        vm.runInContext(section('function applyUploadResponse', '// Leave headroom'), context);
+        vm.runInContext(section('function renderAffinityFiles', '// Build Matrix button'), context);
+        vm.runInContext(section('function renderPriceFiles', '// Remove All buttons'), context);
+        const response = {
+            all_files: [{name: `${kind}.csv`}], compounds: ['Aspirin', 'CUSTOM'], targets: ['T1', 'T2'],
+            compound_labels: {'Aspirin': 'Aspirin -> BSYNRYMUTXBXSQ-UHFFFAOYSA-N (CHEMBL25)'},
+            num_compounds: 2, num_targets: 2, num_datapoints: 4, num_prices: 2,
+        };
+        const render = kind === 'affinity' ? context.renderAffinityFiles : context.renderPriceFiles;
+        const list = node(`#${kind}CompoundList`);
+        context.applyUploadResponse(kind, response);
+        render();
+        assert.deepEqual(list.children.map(row => row.children[0].textContent),
+                         [response.compound_labels.Aspirin, 'CUSTOM']);
+
+        const storageKey = kind === 'affinity' ? 'uploadedAffinityFilesData' : 'uploadedPriceFilesData';
+        const restored = context.normalizeUploadState(JSON.parse(storage.get(storageKey)));
+        context[storageKey] = restored.files;
+        context[`${kind}Aggregate`] = restored.aggregate;
+        render();
+        assert.equal(list.children[0].children[0].textContent, response.compound_labels.Aspirin);
+
+        context.applyUploadResponse(kind, {...response, compound_labels: undefined});
+        render();
+        assert.deepEqual(list.children.map(row => row.children[0].textContent), ['Aspirin', 'CUSTOM']);
+
+        context.applyUploadResponse(kind, response);
+        render();
+        const row = list.children[0];
+        row.children[1].onclick();
+        await row.children[1].children[0].onclick();
+        assert.deepEqual(requests, [{url: `/api/remove-${kind}-compound`, body: {compound: 'Aspirin'}}]);
+    });
+}
+
 test('heatmap creates only a viewport of values and hover metadata', () => {
     const context = vm.createContext({});
     vm.runInContext(section('function heatmapWindow', 'async function loadHeatmap'), context);

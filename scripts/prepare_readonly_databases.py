@@ -1,11 +1,17 @@
-"""Offline WAL checkpoint for databases that will be mounted read-only.
+"""Prepare indexed target lookups and checkpoint databases for read-only mounts.
 
 Stop all application, updater and migration processes before running this command.
 """
 import argparse
 import sqlite3
+import sys
 from contextlib import closing
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from webapp.core.target_lookup import rebuild_target_lookup
 
 
 def main():
@@ -20,6 +26,9 @@ def main():
             mode=db.execute('PRAGMA journal_mode=DELETE').fetchone()[0]
             if mode.lower()!='delete':
                 raise RuntimeError(f'{path.name}: could not switch to DELETE journal mode')
+            count=rebuild_target_lookup(db)
+            if count is not None:
+                print(f'{path.name}: indexed {count:,} target identifiers')
         print(f'{path.name}: checkpointed and ready for read-only mounts')
 
 

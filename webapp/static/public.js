@@ -192,29 +192,4 @@
         await page(0);
     };
 
-    for (const [kind, listId, render] of [
-        ['affinity', 'affinityCompoundList', renderAffinityFiles],
-        ['prices', 'priceCompoundList', renderPriceFiles],
-    ]) {
-        const list = document.getElementById(listId);
-        if (!list) continue;
-        const controls = document.createElement('div'); controls.className = 'public-pagination';
-        const previous = document.createElement('button'), next = document.createElement('button'), label = document.createElement('span');
-        previous.className = next.className = 'btn btn-secondary';
-        previous.textContent = 'Previous compounds'; next.textContent = 'Next compounds';
-        controls.append(previous, label, next); list.after(controls);
-        let offset = 0;
-        async function page(nextOffset) {
-            const response = await window.fetch(`/api/uploads/${kind}?offset=${nextOffset}&limit=100`);
-            if (!response.ok) return;
-            const data = await response.json();
-            offset = nextOffset;
-            applyUploadResponse(kind === 'prices' ? 'price' : kind, data);
-            render();
-            label.textContent = `${offset + 1}–${Math.min(offset + 100, data.total)} of ${data.total}`;
-            previous.disabled = offset === 0; next.disabled = offset + 100 >= data.total;
-        }
-        previous.addEventListener('click', () => page(Math.max(0, offset - 100)).catch(console.error));
-        next.addEventListener('click', () => page(offset + 100).catch(console.error));
-    }
 })();

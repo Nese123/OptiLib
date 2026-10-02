@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from webapp.public.config import Policy, configure_security, GiB
 from webapp.public.runtime import Runtime, Rejected
@@ -54,6 +54,194 @@ class PublicTests(unittest.TestCase):
 
     def upload(self,kind,text):
         return self.perform(self.client.post('/api/upload-'+kind,data={'files[]':(io.BytesIO(text.encode()),kind+'.csv')}))
+
+    def upload_excel(self, kind, header, rows):
+        book = Workbook()
+        book.active.append(header)
+        for row in rows:
+            book.active.append(row)
+        content = io.BytesIO()
+        book.save(content)
+        book.close()
+        content.seek(0)
+        filename = kind + '.XLSX'
+        result = self.perform(self.client.post('/api/upload-' + kind, data={
+            'files[]': (content, filename),
+        }))
+        self.assertEqual(result['uploaded_files'][0]['name'], filename)
+        return result
+
+    def test_excel_targets_upload_completes(self):
+        result = self.upload_excel('targets', ['Target'], [['T1'], ['T2']])
+        self.assertEqual(result['total'], 2)
+        self.assertEqual(result['matched'], [])
+        self.assertEqual(result['unmatched'], ['T1', 'T2'])
+
+    def test_excel_affinity_upload_completes(self):
+        result = self.upload_excel('affinity', ['Compound', 'Target', 'Affinity'],
+                                   [['A', 'T1', 9], ['B', 'T2', 8]])
+        self.assertEqual(result['num_datapoints'], 2)
+        self.assertEqual(result['num_compounds'], 2)
+        self.assertEqual(result['num_targets'], 2)
+
+    def test_excel_prices_upload_completes(self):
+        result = self.upload_excel('prices', ['Compound', 'Price'], [['A', 10], ['B', 20]])
+        self.assertEqual(result['num_prices'], 2)
+        self.assertEqual(result['compounds'], ['A', 'B'])
+
+    def test_target_upload_formats_labels_and_maps_for_each_file(self):
+        kinase_alpha = {'is_chembl': True, 'chembl_id': 'CHEMBL1',
+                        'pref_name': 'Kinase alpha', 'gene_symbol': 'KINA'}
+        resolved = {
+            'CHEMBL1': kinase_alpha,
+            'KINA': kinase_alpha,
+            'UNKNOWN': {'is_chembl': False},
+            'CHEMBL2': {'is_chembl': True, 'chembl_id': 'CHEMBL2',
+                       'pref_name': 'Kinase beta', 'gene_symbol': ''},
+            'KINB': {'is_chembl': True, 'chembl_id': 'CHEMBL3',
+                     'pref_name': '', 'gene_symbol': 'KINB'},
+        }
+        with patch('webapp.public.tasks.resolve_targets', return_value=resolved):
+            result = self.perform(self.client.post('/api/upload-targets', data={
+                'files[]': [
+                    (io.BytesIO(b'Target\nCHEMBL1\nKINA\nUNKNOWN\n'), 'first.csv'),
+                    (io.BytesIO(b'Target\nCHEMBL2\nKINB\n'), 'second.csv'),
+                ],
+            }))
+        labels = ['CHEMBL1 -> Kinase alpha (KINA)', 'KINA -> Kinase alpha (KINA)',
+                  'CHEMBL2 -> Kinase beta (CHEMBL2)', 'KINB -> KINB (KINB)']
+        expected_map = dict(zip(labels, ['CHEMBL1', 'CHEMBL1', 'CHEMBL2', 'CHEMBL3']))
+        self.assertEqual(result['total'], 5)
+        self.assertEqual(result['matched'], labels)
+        self.assertEqual(result['unmatched'], ['UNKNOWN'])
+        self.assertEqual(result['chembl_ids'], ['CHEMBL1', 'CHEMBL2', 'CHEMBL3'])
+        self.assertEqual(result['chembl_map'], expected_map)
+        first, second = result['uploaded_files']
+        self.assertEqual(first['name'], 'first.csv')
+        self.assertEqual(first['matched'], labels[:2])
+        self.assertEqual(first['unmatched'], ['UNKNOWN'])
+        self.assertEqual(first['chembl_map'], {label: expected_map[label] for label in labels[:2]})
+        self.assertEqual(second['name'], 'second.csv')
+        self.assertEqual(second['matched'], labels[2:])
+        self.assertEqual(second['unmatched'], [])
+        self.assertEqual(second['chembl_map'], {label: expected_map[label] for label in labels[2:]})
+
+    def test_affinity_target_labels_preserve_raw_ids_for_edits_and_pages(self):
+        resolved = {
+            'CHEMBL1': {'is_chembl': True, 'chembl_id': 'CHEMBL1',
+                        'pref_name': 'Kinase alpha', 'gene_symbol': 'KINA'},
+            'CHEMBL2': {'is_chembl': True, 'chembl_id': 'CHEMBL2',
+                        'pref_name': 'Kinase beta', 'gene_symbol': ''},
+            'KINB': {'is_chembl': True, 'chembl_id': 'CHEMBL3',
+                     'pref_name': '', 'gene_symbol': 'KINB'},
+            'P04626': {'is_chembl': True, 'chembl_id': 'CHEMBL4',
+                       'pref_name': 'Receptor kinase', 'gene_symbol': 'ERBB2'},
+            'UNKNOWN': {'is_chembl': False},
+        }
+        labels = {
+            'CHEMBL1': 'CHEMBL1 -> Kinase alpha (KINA)',
+            'CHEMBL2': 'CHEMBL2 -> Kinase beta (CHEMBL2)',
+            'KINB': 'KINB -> KINB (KINB)',
+            'P04626': 'P04626 -> Receptor kinase (ERBB2)',
+            'UNKNOWN': 'UNKNOWN',
+        }
+        with patch('webapp.public.tasks.resolve_targets', return_value=resolved):
+            result = self.perform(self.client.post('/api/upload-affinity', data={
+                'files[]': [
+                    (io.BytesIO(b'Compound,Target,Affinity\nA,CHEMBL1,9\nA,CHEMBL2,8\n'
+                                b'A,KINB,7\nB,P04626,9\nB,UNKNOWN,8\n'), 'first.csv'),
+                    (io.BytesIO(b'Compound,Target,Affinity\nC,P04626,6\nC,UNKNOWN,7\n'), 'second.csv'),
+                ],
+            }))
+            self.assertEqual(result['targets'], list(labels))
+            self.assertEqual(result['target_labels'], labels)
+            self.assertEqual(result['num_targets'], 5)
+            self.assertEqual(result['num_datapoints'], 7)
+            page = self.client.get('/api/uploads/affinity?offset=1&limit=1').json
+            self.assertEqual(page['targets'], result['targets'])
+            self.assertEqual(page['target_labels'], labels)
+            self.assertEqual(page['compounds'], ['B'])
+
+            edited = self.perform(self.client.post('/api/remove-affinity-target', json={'target': 'P04626'}))
+            remaining_labels = {raw: label for raw, label in labels.items() if raw != 'P04626'}
+            self.assertEqual(edited['targets'], list(remaining_labels))
+            self.assertEqual(edited['target_labels'], remaining_labels)
+            self.assertEqual(edited['num_datapoints'], 5)
+            self.assertEqual(self.client.get('/api/uploads/affinity').json['target_labels'], remaining_labels)
+            uploads = self.runtime.artifact(self.sid, self.runtime.state(self.sid)['uploads'])
+            with sqlite3.connect(uploads) as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM affinity WHERE target=?', ('P04626',)).fetchone()[0], 0)
+                self.assertEqual({row[0] for row in db.execute('SELECT DISTINCT target FROM affinity')}, set(remaining_labels))
+
+    def test_compound_labels_preserve_raw_ids_for_upload_pages_and_edits(self):
+        aspirin = {'inchi_key': 'BSYNRYMUTXBXSQ-UHFFFAOYSA-N', 'chembl_id': 'CHEMBL25'}
+        resolved = {
+            'Aspirin': aspirin,
+            'CHEMBL25': aspirin,
+            'CHEMBL941': {'inchi_key': 'COMPOUND-INCHIKEY', 'chembl_id': 'CHEMBL941'},
+            'Dasatinib': {'inchi_key': 'DASATINIB-INCHIKEY', 'chembl_id': 'CHEMBL1421'},
+            'ID_ONLY': {'chembl_id': 'CHEMBL10'},
+            'INCHI_ONLY': {'inchi_key': 'INCHIKEY-ONLY'},
+            'UNKNOWN': {},
+        }
+        labels = {
+            'Aspirin': 'Aspirin -> BSYNRYMUTXBXSQ-UHFFFAOYSA-N (CHEMBL25)',
+            'CHEMBL25': 'CHEMBL25 -> BSYNRYMUTXBXSQ-UHFFFAOYSA-N (CHEMBL25)',
+            'CHEMBL941': 'CHEMBL941 -> COMPOUND-INCHIKEY (CHEMBL941)',
+            'Dasatinib': 'Dasatinib -> DASATINIB-INCHIKEY (CHEMBL1421)',
+            'ID_ONLY': 'ID_ONLY -> (CHEMBL10)',
+            'INCHI_ONLY': 'INCHI_ONLY -> INCHIKEY-ONLY',
+            'UNKNOWN': 'UNKNOWN',
+        }
+        for kind in ('affinity', 'prices'):
+            with self.subTest(kind=kind), patch('webapp.public.tasks.resolve_compounds', return_value=resolved) as lookup:
+                header = 'Compound,Target,Affinity\n' if kind == 'affinity' else 'Compound,Price\n'
+                suffix = ',PTGS1,7\n' if kind == 'affinity' else ',10\n'
+                result = self.upload(kind, header + ''.join(raw + suffix for raw in labels))
+                self.assertEqual(result['compounds'], sorted(labels))
+                self.assertEqual(result['compound_labels'], labels)
+                lookup_count = lookup.call_count
+                page = self.client.get(f'/api/uploads/{kind}?offset=1&limit=2').json
+                page_ids = sorted(labels)[1:3]
+                self.assertEqual(page['compounds'], page_ids)
+                self.assertEqual(page['compound_labels'], {raw: labels[raw] for raw in page_ids})
+                self.assertEqual(lookup.call_count, lookup_count)
+
+                edited = self.perform(self.client.post(f'/api/remove-{kind}-compound', json={'compound': 'Aspirin'}))
+                remaining = {raw: label for raw, label in labels.items() if raw != 'Aspirin'}
+                self.assertEqual(edited['compounds'], sorted(remaining))
+                self.assertEqual(edited['compound_labels'], remaining)
+                self.assertEqual(lookup.call_count, lookup_count)
+                self.assertEqual(self.client.get(f'/api/uploads/{kind}').json['compound_labels'], remaining)
+                uploads = self.runtime.artifact(self.sid, self.runtime.state(self.sid)['uploads'])
+                with sqlite3.connect(uploads) as db:
+                    self.assertEqual(db.execute(f'SELECT count(*) FROM {kind} WHERE compound=?', ('Aspirin',)).fetchone()[0], 0)
+                    self.assertEqual({row[0] for row in db.execute(f'SELECT DISTINCT compound FROM {kind}')}, set(remaining))
+
+    def test_compound_labels_available_beyond_first_page_and_after_legacy_snapshot(self):
+        from webapp.public.ingestion import summary
+
+        raw_ids = [f'Compound {i:03}' for i in range(270)]
+        def resolve(ids, database):
+            return {raw: {'inchi_key': f'INCHIKEY-{raw}'} for raw in ids}
+
+        with patch('webapp.public.tasks.resolve_compounds', side_effect=resolve) as lookup:
+            result = self.upload('prices', 'Compound,Price\n' + ''.join(raw + ',10\n' for raw in raw_ids))
+            self.assertEqual(len(result['compound_labels']), 100)
+            self.assertEqual([len(call.args[0]) for call in lookup.call_args_list], [256, 14])
+            page = self.client.get('/api/uploads/prices?offset=260&limit=10').json
+            expected = {raw: f'{raw} -> INCHIKEY-{raw}' for raw in raw_ids[260:]}
+            self.assertEqual(page['compounds'], raw_ids[260:])
+            self.assertEqual(page['compound_labels'], expected)
+            self.assertEqual(lookup.call_count, 2)
+
+            uploads = self.runtime.artifact(self.sid, self.runtime.state(self.sid)['uploads'])
+            with sqlite3.connect(uploads) as db:
+                db.execute('DROP TABLE compound_labels')
+            self.assertEqual(summary(uploads, 'prices')['compound_labels'], {})
+            edited = self.perform(self.client.post('/api/remove-prices-compound', json={'compound': raw_ids[0]}))
+            self.assertEqual(edited['compounds'][0], raw_ids[1])
+            self.assertEqual(edited['compound_labels'][raw_ids[1]], f'{raw_ids[1]} -> INCHIKEY-{raw_ids[1]}')
 
     def dataset(self):
         self.upload('affinity','Compound,Target,Affinity\nA,T1,9\nA,T2,1\nA,T3,2\nB,T1,1\nB,T2,9\nB,T3,2\nC,T1,1\nC,T2,2\nC,T3,9\n')

@@ -260,7 +260,10 @@ def create_app(policy=None):
         limit=integer(request.args.get('limit'),100,1,500)
         offset=integer(request.args.get('offset'),0,0,policy.compounds)
         path=require('uploads')
-        return summary(path,kind,offset,limit)
+        response=summary(path,kind,offset,limit)
+        if kind=='affinity':
+            response['target_labels']=state().get('upload_summaries',{}).get(kind,{}).get('target_labels',{})
+        return response
 
     @app.post('/api/build-matrix')
     @app.post('/api/build-matrix-from-affinity')

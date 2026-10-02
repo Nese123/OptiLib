@@ -117,12 +117,17 @@ function applyUploadResponse(kind, data) {
         uploadedAffinityFilesData = files;
         affinityAggregate = {
             allCompounds: data.compounds || [], allTargets: data.targets || [],
+            compoundLabels: data.compound_labels || {},
+            targetLabels: data.target_labels || {},
             totalCompounds: data.num_compounds, totalTargets: data.num_targets,
             totalDatapoints: data.num_datapoints,
         };
     } else {
         uploadedPriceFilesData = files;
-        priceAggregate = {allCompounds: data.compounds || [], totalUnique: data.num_prices};
+        priceAggregate = {
+            allCompounds: data.compounds || [], compoundLabels: data.compound_labels || {},
+            totalUnique: data.num_prices,
+        };
     }
 }
 
@@ -635,7 +640,7 @@ function renderPriceFiles() {
                 item.className = 'target-list-item';
 
                 const textSpan = document.createElement('span');
-                textSpan.textContent = c;
+                textSpan.textContent = priceAggregate?.compoundLabels?.[c] || c;
 
                 const delBtn = document.createElement('span');
                 delBtn.textContent = '❌';
@@ -1203,7 +1208,7 @@ function renderAffinityFiles() {
                 item.className = 'target-list-item';
 
                 const textSpan = document.createElement('span');
-                textSpan.textContent = c;
+                textSpan.textContent = affinityAggregate?.compoundLabels?.[c] || c;
 
                 const delBtn = document.createElement('span');
                 delBtn.textContent = '❌';
@@ -1276,7 +1281,7 @@ function renderAffinityFiles() {
                 item.className = 'target-list-item';
 
                 const textSpan = document.createElement('span');
-                textSpan.textContent = t;
+                textSpan.textContent = affinityAggregate?.targetLabels?.[t] || t;
 
                 const delBtn = document.createElement('span');
                 delBtn.textContent = '❌';

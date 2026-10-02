@@ -112,9 +112,9 @@ sudo docker compose --profile maintenance run --rm --no-deps molport-updater \
   python scripts/prepare_readonly_databases.py
 ```
 
-This checkpoints SQLite WAL files and switches to DELETE journaling. Run it only
-while all database readers, writers, and maintenance jobs are stopped. It does
-not rebuild selectivity scores.
+This builds the indexed ChEMBL target lookup, checkpoints SQLite WAL files, and
+switches to DELETE journaling. Run it only while all database readers, writers,
+and maintenance jobs are stopped. It does not rebuild selectivity scores.
 
 ## 5. Start the application
 
@@ -279,7 +279,11 @@ active table. It prints the retained staging file and rollback table names; keep
 them until the new build is accepted. A different source dataset needs separate
 preparation and validation.
 
-After successful maintenance, prepare the databases again and restart:
+After successful maintenance, prepare the databases again and restart. Preparation
+also rebuilds the indexed ChEMBL target lookup for names, gene symbols, UniProt
+accessions, EC numbers, and ChEMBL IDs. Run it after replacing or updating ChEMBL
+so the lookup reflects the current source data. Databases without this lookup
+remain supported through the original identifier query.
 
 ```bash
 sudo docker compose --profile maintenance run --rm --no-deps molport-updater \

@@ -38,13 +38,15 @@ def upload_rows(path, name, policy):
                         if total > policy.xlsx_bytes:
                             raise ValueError('Excel archive exceeds the decompressed size limit.')
         from openpyxl import load_workbook
-        book = load_workbook(path, read_only=True, data_only=True, keep_links=False)
-        try:
-            sheet = book.worksheets[0]
-            sheet.reset_dimensions()
-            yield from sheet.iter_rows(values_only=True)
-        finally:
-            book.close()
+        # Staged uploads have no extension; read the workbook from its stream.
+        with open(path, 'rb') as source:
+            book = load_workbook(source, read_only=True, data_only=True, keep_links=False)
+            try:
+                sheet = book.worksheets[0]
+                sheet.reset_dimensions()
+                yield from sheet.iter_rows(values_only=True)
+            finally:
+                book.close()
     else:
         raise ValueError('Use CSV or Excel (.xlsx). Legacy .xls is not supported.')
 
@@ -68,6 +70,7 @@ def initialize(path, previous=None):
             CREATE TABLE IF NOT EXISTS prices(file TEXT,compound TEXT,value REAL,UNIQUE(file,compound));
             CREATE INDEX IF NOT EXISTS price_compound ON prices(compound);
             CREATE TABLE IF NOT EXISTS targets(file TEXT,target TEXT,UNIQUE(file,target));
+            CREATE TABLE IF NOT EXISTS compound_labels(compound TEXT PRIMARY KEY,label TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS affinity_compound ON affinity(compound);
             CREATE INDEX IF NOT EXISTS affinity_target ON affinity(target);
         ''')
@@ -161,15 +164,22 @@ def edit(path, kind, operation, value):
 
 def summary(path, kind, offset=0, limit=100):
     with closing(sqlite3.connect(path.as_uri()+'?mode=ro', uri=True)) as db:
+        def compound_labels(compounds):
+            # Older snapshots still display their original identifiers.
+            if not compounds or not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='compound_labels'").fetchone():
+                return {}
+            placeholders = ','.join('?' for _ in compounds)
+            return dict(db.execute(f'SELECT compound,label FROM compound_labels WHERE compound IN ({placeholders})', compounds))
+
         if kind == 'affinity':
             n,t,count = db.execute('SELECT count(DISTINCT compound),count(DISTINCT target),count(*) FROM (SELECT DISTINCT compound,target,value FROM affinity)').fetchone()
             compounds = [r[0] for r in db.execute('SELECT DISTINCT compound FROM affinity ORDER BY compound LIMIT ? OFFSET ?', (limit,offset))]
             targets = [r[0] for r in db.execute('SELECT DISTINCT target FROM affinity ORDER BY target')]
             files = [{'name':name,'num_datapoints':rows,'num_compounds':compounds_n,'num_targets':targets_n,'compounds':[],'targets':[]} for name,rows,compounds_n,targets_n in db.execute('SELECT file,count(*),count(DISTINCT compound),count(DISTINCT target) FROM affinity GROUP BY file')]
-            return {'num_compounds':n,'num_targets':t,'num_datapoints':count,'compounds':compounds,'targets':targets,'all_files':files,'offset':offset,'limit':limit,'total':n,'paged':True}
+            return {'num_compounds':n,'num_targets':t,'num_datapoints':count,'compounds':compounds,'compound_labels':compound_labels(compounds),'targets':targets,'all_files':files,'offset':offset,'limit':limit,'total':n,'paged':True}
         if kind == 'prices':
             total = db.execute('SELECT count(DISTINCT compound) FROM prices').fetchone()[0]
             compounds = [r[0] for r in db.execute('SELECT DISTINCT compound FROM prices ORDER BY compound LIMIT ? OFFSET ?', (limit,offset))]
             files = [{'name':name,'num_prices':n,'compounds':[]} for name,n in db.execute('SELECT file,count(*) FROM prices GROUP BY file')]
-            return {'num_prices':total,'compounds':compounds,'all_files':files,'filename':', '.join(f['name'] for f in files),'offset':offset,'limit':limit,'total':total,'paged':True}
+            return {'num_prices':total,'compounds':compounds,'compound_labels':compound_labels(compounds),'all_files':files,'filename':', '.join(f['name'] for f in files),'offset':offset,'limit':limit,'total':total,'paged':True}
         return [r[0] for r in db.execute('SELECT DISTINCT target FROM targets ORDER BY rowid')]

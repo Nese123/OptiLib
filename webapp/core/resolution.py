@@ -7,6 +7,7 @@ from contextlib import closing
 from pathlib import Path
 
 from .records import format_target_col, looks_like_inchikey, looks_like_smiles
+from .target_lookup import lookup_target_rows
 
 logger = logging.getLogger("optilib")
 
@@ -134,17 +135,17 @@ def resolve_targets(target_ids, db_path):
     if not unique_targets:
         return {}
 
-    search_set = set()
-    for tid in unique_targets:
-        search_set.add(tid)
-        search_set.add(tid.upper())
-        search_set.add(tid.lower())
-    search_list = list(search_set)
-
     db_path = str(db_path)
     rows = []
+    by_identifier = None
     try:
         with closing(sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+            by_identifier = lookup_target_rows(conn, unique_targets)
+            search_set = set()
+            if by_identifier is None:
+                for tid in unique_targets:
+                    search_set.update((tid, tid.upper(), tid.lower()))
+            search_list = list(search_set)
             chunk_size = 500
             for i in range(0, len(search_list), chunk_size):
                 chunk = search_list[i:i + chunk_size]
@@ -177,12 +178,13 @@ def resolve_targets(target_ids, db_path):
 
     # Keep the first matching database row, as the previous nested scan did.
     # Building this index once avoids rescanning every row for every input.
-    by_identifier = {}
-    for row in rows:
-        cid, name, gene_sym, acc, syn, _ = row
-        for identifier in (cid, name, gene_sym, acc, syn):
-            if identifier:
-                by_identifier.setdefault(str(identifier).lower(), row)
+    if by_identifier is None:
+        by_identifier = {}
+        for row in rows:
+            cid, name, gene_sym, acc, syn, _ = row
+            for identifier in (cid, name, gene_sym, acc, syn):
+                if identifier:
+                    by_identifier.setdefault(str(identifier).lower(), row)
 
     resolved = {}
     for target_in in unique_targets:
