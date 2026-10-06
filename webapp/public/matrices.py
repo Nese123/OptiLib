@@ -43,6 +43,16 @@ def price_map(upload, chembl):
 def build(directory, kind, payload, upload, policy, checkpoint, progress):
     directory = Path(directory)
     scratch = directory / 'build.sqlite'
+    step_summaries = {}
+    selectivity_label = ('Searching for selective compounds...' if kind == 'chembl'
+                         else 'Calculating selectivity matrix...')
+
+    def update_progress(step, label, detail, summary=None):
+        if summary is not None:
+            step_summaries[step] = summary
+        progress({'current_step': step, 'step_label': label, 'detail': detail,
+                  'step_summaries': dict(step_summaries)})
+
     with closing(connect(scratch)) as db:
         db.executescript('''
             CREATE TABLE observations(compound TEXT,target TEXT,value REAL);
@@ -52,6 +62,9 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
         provenance = {'scoring_version':SELECTIVITY_SCORING_VERSION,'build_id':directory.name}
         if kind == 'chembl':
             ids = payload['chembl_ids']
+            requested_targets = payload.get('matched_count') or len(ids)
+            update_progress(1, selectivity_label,
+                            f'Querying database for compounds active against {requested_targets} targets...')
             policy.dimensions(0, len(ids))
             with closing(sqlite3.connect(policy.chembl.as_uri()+'?mode=ro', uri=True)) as source:
                 source.set_progress_handler(lambda: 1 if checkpoint() else 0, 10000)
@@ -71,11 +84,16 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
                     db.executemany('INSERT INTO observations VALUES (?,?,?)',observations)
                     db.executemany('INSERT OR IGNORE INTO compounds VALUES (?,?)',compounds)
                     db.commit()
-                    policy.dimensions(db.execute('SELECT count(*) FROM compounds').fetchone()[0],len(ids))
+                    found = db.execute('SELECT count(*) FROM compounds').fetchone()[0]
+                    policy.dimensions(found,len(ids))
+                    update_progress(1, selectivity_label,
+                                    f'Found {found:,} compounds so far...')
                 _, active = read_chembl_candidates(source,ids,payload.get('selectivity_threshold',.5),sink=sink)
                 if not active:
                     raise ValueError('No targets have qualifying ChEMBL activity.')
         else:
+            update_progress(1, selectivity_label,
+                            'Computing blended selectivity scores from uploaded affinity data...')
             if upload is None:
                 raise ValueError('Upload affinity data first.')
             db.execute('ATTACH DATABASE ? AS uploads', (str(upload),))
@@ -103,13 +121,17 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
         policy.dimensions(compounds_n,len(targets))
         if not compounds_n or len(targets) < 2:
             raise ValueError('At least one compound and two targets are required.')
+        if kind == 'chembl':
+            records_n = db.execute('SELECT count(*) FROM observations').fetchone()[0]
+            update_progress(1, selectivity_label,
+                            f'Fetched selectivity scores for {records_n:,} records covering '
+                            f'{compounds_n:,} candidate compounds before filtering')
         target_index = {t:i for i,t in enumerate(targets)}
         matrix = np.lib.format.open_memmap(directory/'raw.npy',mode='w+',dtype='float64',shape=(compounds_n,len(targets)))
         # Initialize per row: touching the entire mapping at once is unnecessary.
         for i,(compound,) in enumerate(db.execute('SELECT compound FROM compounds ORDER BY compound')):
             if i % 256 == 0:
                 checkpoint()
-                progress({'current_step':1,'step_label':'Building matrix','detail':f'{i:,} of {compounds_n:,} compounds'})
             row = np.full(len(targets),np.nan)
             for target,value in db.execute('SELECT target,max(value) FROM observations WHERE compound=? GROUP BY target',(compound,)):
                 row[target_index[target]] = value
@@ -129,6 +151,23 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
         indices, columns = np.flatnonzero(rows_keep), np.flatnonzero(cols_keep)
         if not len(indices) or not len(columns):
             raise ValueError('No compounds or targets remain at this selectivity threshold.')
+        final_drugs, final_targets = len(indices), len(columns)
+        summary = (
+            f"Found {final_drugs:,} candidate compound{'s' if final_drugs != 1 else ''} "
+            f"for {final_targets:,} target{'s' if final_targets != 1 else ''}."
+        )
+        if kind == 'chembl':
+            dropped_targets = requested_targets - final_targets
+            if dropped_targets > 0:
+                summary += (f" {dropped_targets:,} target{'s were' if dropped_targets != 1 else ' was'} "
+                            'dropped because they lacked '
+                            'compounds with sufficient affinity or selectivity.')
+        else:
+            dropped_targets = len(targets) - final_targets
+            if dropped_targets > 0:
+                summary += (f" {dropped_targets:,} target{'s were' if dropped_targets != 1 else ' was'} "
+                            'dropped due to low selectivity.')
+        update_progress(1, selectivity_label, summary, summary)
         final = np.lib.format.open_memmap(directory/'matrix.npy',mode='w+',dtype='float64',shape=(len(indices),len(columns)))
         offset = 0
         for start,block in matrix_blocks(matrix):
@@ -140,8 +179,14 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
         matrix.flush()
         del final,matrix
         (directory/'raw.npy').unlink()
-        progress({'current_step':2,'step_label':'Resolving prices','detail':'Looking up and predicting compound prices'})
+        update_progress(2, 'Getting price data...',
+                        'Querying database for prices' if kind == 'chembl' else 'Resolving compound prices...')
         custom_prices = price_map(upload, policy.chembl)
+        has_custom_price = bool(custom_prices)
+        if upload is not None and not has_custom_price:
+            with closing(connect(upload)) as uploaded:
+                has_custom_price = bool(uploaded.execute("SELECT 1 FROM files WHERE kind='prices' LIMIT 1").fetchone())
+        price_counts = {'custom': 0, 'molport': 0, 'molprice': 0}
         prices = np.full(len(indices),np.nan)
         metadata = directory/'metadata.sqlite'
         from webapp.core.pricing import _resolve_affinity_prices
@@ -157,11 +202,17 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
                 mapping = {r['Compound_Name']:{'chembl_id':r['Molecule_ChEMBL_ID'],'inchi_key':r['InChIKey'],'smiles':r['SMILES'],'pref_name':r['Compound_Name']} for r in records}
                 # Resolve finite prices without applying a per-batch fallback.
                 resolved_prices, counts = _resolve_affinity_prices(records,mapping,{'price_map':custom_prices}, fallback=False)
+                for source in price_counts:
+                    price_counts[source] += counts[source]
                 for record,price in zip(records,resolved_prices):
                     prices[output_index] = price
                     meta.execute('INSERT INTO compounds VALUES (?,?,?,?,?,?)',(output_index,record['Compound_Name'],record['Molecule_ChEMBL_ID'],record['InChIKey'],record['SMILES'],float(price) if np.isfinite(price) else None))
                     output_index += 1
                 records.clear()
+                custom_detail = f"Custom: {price_counts['custom']}, " if has_custom_price else ''
+                update_progress(2, 'Getting price data...',
+                                f'Found prices for {sum(price_counts.values())}/{final_drugs} compounds '
+                                f"({custom_detail}MolPort: {price_counts['molport']}, MolPrice approx: {price_counts['molprice']})")
             for i,(_,record) in enumerate(db.execute('SELECT compound,record FROM compounds ORDER BY compound')):
                 if i in kept:
                     records.append(json.loads(record))
@@ -173,6 +224,18 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
             prices[missing] = fallback
             meta.execute('UPDATE compounds SET price=? WHERE price IS NULL',(fallback,))
             meta.commit()
+        custom_summary = f"{price_counts['custom']} prices assigned from custom price file, " if has_custom_price else ''
+        custom_detail = f"Custom: {price_counts['custom']}, " if has_custom_price else ''
+        fallback_count = int(missing.sum())
+        fallback_summary = f', {fallback_count} median fallback' if fallback_count else ''
+        fallback_detail = f', Fallback: {fallback_count}' if fallback_count else ''
+        update_progress(2, 'Getting price data...',
+                        f"All prices assigned ({custom_detail}MolPort: {price_counts['molport']}, "
+                        f"MolPrice approx: {price_counts['molprice']}{fallback_detail})",
+                        f"All prices assigned. {custom_summary}{price_counts['molport']} prices found from the MolPort database, "
+                        f"{price_counts['molprice']} prices approximated using MolPrice{fallback_summary}.")
+        update_progress(3, 'Saving matrix...',
+                        'Saving matrix...' if kind == 'chembl' else 'Saving selectivity matrix...')
         np.save(directory/'prices.npy',prices,allow_pickle=False)
         description = {'shape':[len(indices),len(columns)],'targets':[targets[i] for i in columns],
                        'provenance':provenance,'custom':kind=='affinity','total_cost':float(prices.sum())}

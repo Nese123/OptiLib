@@ -248,6 +248,30 @@ class PublicTests(unittest.TestCase):
         self.upload('prices','Compound,Price\nA,10\nB,20\nC,30\n')
         self.perform(self.client.post('/api/build-matrix-from-affinity',json={}))
 
+    def test_completed_matrix_status_preserves_build_summaries(self):
+        self.upload('affinity', 'Compound,Target,Affinity\nA,T1,9\nA,T2,1\nB,T1,1\nB,T2,9\n')
+        self.upload('prices', 'Compound,Price\nA,10\nB,20\n')
+        self.perform(self.client.post('/api/build-matrix-from-affinity', json={}))
+        response = self.client.get('/api/pipeline-status')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {
+            'status': 'complete', 'current_step': 3, 'total_steps': 3,
+            'step_label': 'Done', 'detail': 'Matrix ready: 2 compounds × 2 targets',
+            'error': '', 'step_summaries': {
+                '1': 'Found 2 candidate compounds for 2 targets.',
+                '2': 'All prices assigned. 2 prices assigned from custom price file, 0 prices found from the MolPort database, 0 prices approximated using MolPrice.',
+            },
+        })
+
+    def test_chembl_build_keeps_matched_count_for_progress_summary(self):
+        response = self.client.post('/api/build-matrix', json={
+            'chembl_ids': ['CHEMBL1', 'CHEMBL1', 'CHEMBL2'], 'matched_count': 3,
+        })
+        self.assertEqual(response.status_code, 202, response.json)
+        payload = self.runtime.job(response.json['job_id'])['spec']['payload']
+        self.assertEqual(payload['chembl_ids'], ['CHEMBL1', 'CHEMBL2'])
+        self.assertEqual(payload['matched_count'], 3)
+
     def test_end_to_end_artifacts_tiles_and_formula_safe_exports(self):
         self.dataset()
         self.assertEqual(self.client.get('/api/dataset-info').json['num_drugs'],3)
@@ -261,10 +285,6 @@ class PublicTests(unittest.TestCase):
         self.assertEqual(len(tile['matrix'][0]),2)
         self.assertEqual(tile['total_rows'],3)
         self.assertEqual(self.client.get('/api/heatmap-data?row_count=101').status_code,400)
-        response=self.client.get('/api/download/library')
-        duplicate=self.client.get('/api/download/library')
-        self.assertEqual(response.json['job_id'],duplicate.json['job_id'])
-        self.perform(response)
         result=self.client.get('/api/download/library')
         self.assertEqual(result.status_code,200)
         book=load_workbook(io.BytesIO(result.data),read_only=True)

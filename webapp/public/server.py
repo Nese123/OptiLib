@@ -8,7 +8,9 @@ import tempfile
 import time
 import uuid
 from contextlib import closing
+from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 
 from flask import Flask, g, request, session, render_template, send_file, Response
 from flask_limiter import Limiter
@@ -22,6 +24,9 @@ from .config import ROOT, Policy, MiB, configure_security
 from .runtime import Runtime, Rejected
 
 logger = logging.getLogger('optilib.http')
+HEATMAP_PRELOAD_MAX_CELLS = 50000
+HEATMAP_PRELOAD_MAX_AXIS = 1000
+HEATMAP_TARGET_CACHE_MAX_TARGETS = 1000
 
 
 def integer(value, default, low, high):
@@ -58,7 +63,11 @@ def create_app(policy=None):
     def current():
         if not hasattr(g,'optilib_session'):
             g.optilib_session = runtime.session(session.get('sid'),epoch)
-            session['sid'] = g.optilib_session['sid']
+            # Runtime tracks activity without refreshing the signed cookie on
+            # every poll. A clock adjustment can invalidate a freshly signed
+            # cookie and disconnect the browser from its active computation.
+            if session.get('sid') != g.optilib_session['sid']:
+                session['sid'] = g.optilib_session['sid']
         return g.optilib_session
 
     def state():
@@ -78,6 +87,15 @@ def create_app(policy=None):
 
     def metadata(directory,name):
         return json.loads((directory/name).read_text())
+
+    target_metadata_lock = Lock()
+
+    @lru_cache(maxsize=32)
+    def cached_target_metadata(dataset_path,modified_ns,size):
+        from webapp.core.resolution import get_target_info
+        description=metadata(Path(dataset_path),'dataset.json')
+        symbols,names=get_target_info(description['targets'],policy.chembl)
+        return tuple(symbols),tuple(names)
 
     def enqueue(kind,payload,*,ready=True,reserve=None):
         info = state().get('dataset_info',{})
@@ -278,6 +296,7 @@ def create_app(policy=None):
             if not isinstance(ids,list) or not ids or not all(isinstance(v,str) and 0<len(v)<=64 for v in ids):
                 raise ValueError('chembl_ids must be a list of target identifiers.')
             payload['chembl_ids']=list(dict.fromkeys(ids))
+            payload['matched_count']=integer(data.get('matched_count'),len(payload['chembl_ids']),0,policy.upload_rows)
             policy.dimensions(0,len(payload['chembl_ids']))
         else:
             require('uploads')
@@ -310,7 +329,8 @@ def create_app(policy=None):
             data['error']=job['error'] or ''
             if job['status']=='complete':
                 info=state().get('dataset_info',{})
-                data.update(current_step=3,detail=f"{info.get('num_drugs',0):,} compounds × {info.get('num_targets',0):,} targets")
+                data.update(current_step=3,step_label='Done',
+                            detail=f"Matrix ready: {info.get('num_drugs',0)} compounds × {info.get('num_targets',0)} targets")
         return data
 
     @app.get('/api/status')
@@ -353,7 +373,11 @@ def create_app(policy=None):
             db.execute('BEGIN IMMEDIATE')
             if db.execute("SELECT 1 FROM jobs WHERE sid=? AND status IN ('reserved','running','stopping')",(sid,)).fetchone():
                 raise Rejected('Stop the active computation before resetting.',409)
-            value=dict(state());value.update(solutions=None,selection=None,exports={},opt_reset_at=time.time())
+            value=json.loads(db.execute('SELECT state FROM sessions WHERE sid=?',(sid,)).fetchone()['state'])
+            matrix_keys={f"matrix:{fmt}:{value.get('dataset')}" for fmt in ('xlsx','csv')}
+            exports={key:reference for key,reference in value.get('exports',{}).items()
+                     if key in matrix_keys}
+            value.update(solutions=None,selection=None,exports=exports,opt_reset_at=time.time())
             db.execute('UPDATE sessions SET state=?,revision=revision+1 WHERE sid=?',(json.dumps(value),sid))
         return {'status':'reset'}
 
@@ -399,17 +423,42 @@ def create_app(policy=None):
         co=integer(request.args.get('column_offset'),0,0,len(cols))
         nr=integer(request.args.get('row_count'),20,1,100)
         nc=integer(request.args.get('column_count'),40,1,100)
+        preload=integer(request.args.get('preload'),0,0,1)
+        if preload:
+            if len(rows)*len(cols)>HEATMAP_PRELOAD_MAX_CELLS:
+                raise ValueError(f'Heatmap preload is limited to {HEATMAP_PRELOAD_MAX_CELLS:,} cells.')
+            if len(rows)>HEATMAP_PRELOAD_MAX_AXIS or len(cols)>HEATMAP_PRELOAD_MAX_AXIS:
+                raise ValueError(f'Heatmap preload is limited to {HEATMAP_PRELOAD_MAX_AXIS:,} compounds and targets.')
+            ro,co,nr,nc=0,0,len(rows),len(cols)
         directory=require('dataset')
         description=metadata(directory,'dataset.json')
         matrix=np.load(directory/'matrix.npy',mmap_mode='r',allow_pickle=False)
-        values=matrix[np.ix_(rows[ro:ro+nr],cols[co:co+nc])]
+        columns=cols[co:co+nc]
+        values=matrix[np.ix_(rows[ro:ro+nr],columns)]
         labels=compound_page(rows,ro,nr)
-        return {'paged':True,'row_offset':ro,'column_offset':co,'total_rows':len(rows),'total_columns':len(cols),
+        distribution=selection['distribution']
+        if len(description['targets'])<=HEATMAP_TARGET_CACHE_MAX_TARGETS:
+            info=(directory/'dataset.json').stat()
+            # Artifact paths include the session and dataset revision. Cache
+            # only bounded target labels; rows and matrices stay on disk.
+            with target_metadata_lock:
+                symbols,names=cached_target_metadata(str(directory),info.st_mtime_ns,info.st_size)
+            targets=[symbols[i] for i in columns]
+            target_names=[names[i] for i in columns]
+            target_labels={raw:(symbols[i],names[i]) for i,raw in enumerate(description['targets'])}
+            distribution=[dict(item,target=target_labels[item['target']][0],
+                               target_name=target_labels[item['target']][1])
+                          if item['target'] in target_labels else item for item in distribution]
+        else:
+            # Configurations allowing more targets retain bounded tile work.
+            from webapp.core.resolution import get_target_info
+            targets,target_names=get_target_info([description['targets'][i] for i in columns],policy.chembl)
+        return {'paged':not preload,'row_offset':ro,'column_offset':co,'total_rows':len(rows),'total_columns':len(cols),
                 'matrix':[[float(v) if math.isfinite(v) else None for v in row] for row in values],
-                'targets':[description['targets'][i] for i in cols[co:co+nc]],
+                'targets':targets,'target_names':target_names,
                 'compounds':[r['chembl_id'] or r['inchikey'] or r['name'] for r in labels],
                 'zmin':selection['zmin'],'zmax':selection['zmax'],'revision':state()['selection'],
-                'distribution':selection['distribution']}
+                'distribution':distribution}
 
     @app.get('/api/download/<which>')
     def download(which):
@@ -421,19 +470,22 @@ def create_app(policy=None):
         fmt=request.args.get('format','xlsx')
         if fmt not in ('xlsx','csv'):
             raise ValueError('Choose XLSX or CSV.')
+        download_name=f'{"optimized_library" if which=="library" else "selectivity_matrix"}.{fmt}'
         revision=state().get('selection') if which=='library' else state()['dataset']
         key=f'{which}:{fmt}:{revision}'
         reference=state().get('exports',{}).get(key)
         if reference:
             path=runtime.artifact(current()['sid'],reference)
             if path.is_file():
+                if request.args.get('prepare') == '1':
+                    return {'status':'complete','download_url':f'/api/download/{which}?format={fmt}'}
                 if os.environ.get('OPTILIB_ACCEL_REDIRECT','false').lower() in ('true','1','yes'):
                     # The Nginx location is internal; access was checked above.
                     response=Response(mimetype='text/csv' if fmt=='csv' else 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
                     response.headers['X-Accel-Redirect']=f"/_optilib_artifacts/{current()['sid']}/{reference}"
-                    response.headers['Content-Disposition']=f'attachment; filename="{which}.{fmt}"'
+                    response.headers['Content-Disposition']=f'attachment; filename="{download_name}"'
                     return response
-                return send_file(path,as_attachment=True,download_name=f'{which}.{fmt}')
+                return send_file(path,as_attachment=True,download_name=download_name)
         job=latest(('export',))
         if job and job['status'] in ('reserved','running','stopping') and job['spec']['payload']['key']==key:
             return accepted(job['id'])

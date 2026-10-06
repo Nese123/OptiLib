@@ -1359,7 +1359,8 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
             df_raw, active_chembl_ids = read_chembl_candidates(
                 conn, chembl_ids, selectivity_threshold,
                 progress=lambda count: _update_pipeline(
-                    sid, 1, "Searching for selective compounds...", f"Found {count} compounds so far..."),
+                    sid, 1, "Searching for selective compounds...",
+                    f"Found {count:,} compounds so far..."),
             )
         dropped_targets_no_pchembl = [cid for cid in chembl_ids if cid.upper() not in active_chembl_ids]
         if dropped_targets_no_pchembl:
@@ -1375,7 +1376,8 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
             for p, g, c in zip(df_raw["Target_Pref_Name"], df_raw["Target_Gene_Symbol"], df_raw["Target_ChEMBL_ID"])
         ]
         _update_pipeline(sid, 1, "Searching for selective compounds...",
-                         f"Fetched selectivity scores for {len(df_raw)} records covering {compounds_found_initial} compounds")
+                         f"Fetched selectivity scores for {len(df_raw):,} records covering "
+                         f"{compounds_found_initial:,} candidate compounds")
 
         df_raw["SMILES"] = df_raw["SMILES"].astype(str).replace("nan", "Missing_SMILES")
         
@@ -1396,8 +1398,6 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         )
         del df_raw  # Free memory — no longer needed
 
-        new_drugs, new_targets = selectivity_df.shape
-
         if remove_targets:
             clean_df = selectivity_df.loc[
                 (selectivity_df.max(axis=1) >= selectivity_threshold),
@@ -1411,19 +1411,7 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
 
         del selectivity_df  # Free memory — no longer needed
         final_drugs, final_targets = clean_df.shape
-        pruned_low_sel = new_drugs - final_drugs
         dropped_targets = matched_count - final_targets
-        if dropped_targets > 0:
-            summary_text = (
-                f"Found {final_drugs} compounds active against {final_targets} targets. "
-                f"{dropped_targets} targets were dropped because they lacked compounds with sufficient affinity or selectivity."
-            )
-        else:
-            summary_text = f"Found {final_drugs} compounds active against {final_targets} targets"
-
-        _update_pipeline(sid, 1, "Searching for selective compounds...",
-                         f"Pruned {pruned_low_sel} compounds with low selectivity: {final_drugs} compounds remaining",
-                         summary=summary_text)
 
         if final_drugs == 0 or final_targets == 0:
             raise ValueError("No compounds/targets survived selectivity pruning. Try a lower threshold.")
@@ -1433,6 +1421,19 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         del clean_df  # Free memory — no longer needed
         final_export_df = final_export_df[final_export_df["SMILES"] != "Missing_SMILES"]
         final_export_df = final_export_df.dropna(subset=["SMILES"])
+        final_drugs = len(final_export_df)
+        summary_text = (
+            f"Found {final_drugs:,} candidate compound{'s' if final_drugs != 1 else ''} "
+            f"for {final_targets:,} target{'s' if final_targets != 1 else ''}."
+        )
+        if dropped_targets > 0:
+            summary_text += (
+                f" {dropped_targets:,} target{'s were' if dropped_targets != 1 else ' was'} "
+                "dropped because they lacked "
+                "compounds with sufficient affinity or selectivity."
+            )
+        _update_pipeline(sid, 1, "Searching for selective compounds...",
+                         summary_text, summary=summary_text)
 
         if "Compound_Name" in final_export_df.columns:
             final_export_df = final_export_df.drop(columns=["Compound_Name"])
@@ -1603,7 +1604,7 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
 
         selectivity_df = pd.DataFrame(selectivity_matrix, index=compounds_list, columns=targets_list)
 
-        init_drugs, init_targets = selectivity_df.shape
+        init_targets = selectivity_df.shape[1]
 
         if remove_targets:
             clean_df = selectivity_df.loc[
@@ -1621,16 +1622,16 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
             raise ValueError(f"No compounds or targets survived selectivity pruning at threshold {selectivity_threshold}. Try lowering the threshold.")
 
         dropped_targets = init_targets - final_targets
+        summary_text = (
+            f"Found {final_drugs:,} candidate compound{'s' if final_drugs != 1 else ''} "
+            f"for {final_targets:,} target{'s' if final_targets != 1 else ''}."
+        )
         if dropped_targets > 0:
-            summary_text = (
-                f"Calculated selectivity for {final_drugs} compounds across {final_targets} targets. "
-                f"{dropped_targets} targets were dropped due to low selectivity."
-            )
-        else:
-            summary_text = f"Calculated selectivity for {final_drugs} compounds across {final_targets} targets."
+            summary_text += (f" {dropped_targets:,} target{'s were' if dropped_targets != 1 else ' was'} "
+                             "dropped due to low selectivity.")
 
         _update_pipeline(sid, 1, "Calculating selectivity matrix...",
-                         f"Selectivity matrix computed: {final_drugs} compounds × {final_targets} targets",
+                         summary_text,
                          summary=summary_text)
 
         # ─────────────────────────────────────────────

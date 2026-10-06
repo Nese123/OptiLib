@@ -87,11 +87,13 @@
                     <div class="upload-hint" id="dropZoneHint">CSV or Excel (.xlsx) with a "Target" column · Accepts
                         target names, ChEMBL
                         IDs, Gene Symbols, or UniProt Accessions</div>
+                    <div class="upload-text" id="targetSearchStatus" role="status"
+                        style="display: none; margin-top: 0.75rem; margin-bottom: 0;">Searching for targets...</div>
                     <input type="file" id="fileInput" aria-labelledby="step1Title" aria-describedby="dropZoneHint" accept=".csv,.xlsx" multiple>
                 </div>
 
                 <div style="margin-top: 1.5rem; text-align: center;">
-                    <a href="/static/example_targets.xlsx" download="example_targets.xlsx" class="btn btn-secondary"
+                    <a href="/static/example_targets.xlsx" download class="btn btn-secondary"
                         id="exampleDownloadBtn" style="padding: 0.5rem 1rem; font-size: 0.9rem;">
                         <span class="btn-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons.svg#download"></use></svg></span> <span id="exampleDownloadText">Download Example Targets</span>
                     </a>
@@ -720,8 +722,8 @@
     </footer>
 
     <script src="/static/navigation.js?v=1.0"></script>
-    <script defer src="/static/app.js?v=7.0"></script>
-    {% if public_mode %}<script defer src="/static/public.js?v=1"></script>{% endif %}
+    <script defer src="/static/app.js?v=7.4"></script>
+    {% if public_mode %}<script defer src="/static/public.js?v=3"></script>{% endif %}
 
 </body>
 

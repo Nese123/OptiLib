@@ -21,6 +21,10 @@ from . import ingestion, matrices
 
 logger = logging.getLogger('optilib.jobs')
 
+# Prepare typical library downloads while their selection worker is already
+# warm. Large selections keep the existing on-demand export path.
+EAGER_LIBRARY_EXPORT_CELLS = 100000
+
 
 class Cancelled(Exception):
     pass
@@ -39,8 +43,8 @@ class Context:
         self.last_check = 0
         self.stopping = False
 
-    def checkpoint(self, allow_stop=False):
-        if time.monotonic() - self.last_check >= .2:
+    def checkpoint(self, allow_stop=False, force=False):
+        if force or time.monotonic() - self.last_check >= .2:
             self.last_check = time.monotonic()
             status = self.runtime.job(self.job['id'])['status']
             self.stopping = status not in ('running','reserved')
@@ -117,7 +121,19 @@ def selection(context, dataset_dir, solutions_dir, index, problem=None):
     comparison = {'pool':pool,'library':library,'percentages':percentages,'has_custom_affinity':description['custom']}
     result = {'comparison':comparison,'selected_idx':int(index),'shape':[len(indices),len(columns)],'zmin':low or 0.,'zmax':high if high is not None else 1.,'distribution':stats}
     (context.directory/'selection.json').write_text(json.dumps(result,allow_nan=False))
+    if (len(indices)+1)*(len(columns)+len(METADATA_COLUMNS)) <= EAGER_LIBRARY_EXPORT_CELLS:
+        write_export(context,dataset_dir,'library','xlsx',context.directory,
+                     allow_stop=context.job['kind']=='optimization')
     return result
+
+
+def selection_exports(context, snapshot):
+    """Only the immutable dataset matrix survives a library selection change."""
+    matrix_keys = {f"matrix:{fmt}:{snapshot['dataset']}" for fmt in ('xlsx','csv')}
+    exports = {key:value for key,value in snapshot.get('exports',{}).items() if key in matrix_keys}
+    if (context.directory/'library.xlsx').is_file():
+        exports[f'library:xlsx:{context.reference()}'] = context.reference('library.xlsx')
+    return exports
 
 
 def optimize(context, payload, snapshot):
@@ -148,39 +164,49 @@ def optimize(context, payload, snapshot):
     (context.directory/'solutions.json').write_text(json.dumps(solutions,allow_nan=False))
     del result,choices,seeds
     chosen = selection(context,dataset_dir,context.directory,best,problem)
-    return {'solutions':context.reference(),'selection':context.reference(),'exports':{}}, {'status':'complete','partial':partial,'selected_idx':chosen['selected_idx']}
+    return {'solutions':context.reference(),'selection':context.reference(),'exports':selection_exports(context,snapshot)}, {'status':'complete','partial':partial,'selected_idx':chosen['selected_idx']}
 
 
-def export(context, payload, snapshot):
-    dataset_dir = context.artifact(snapshot['dataset'])
+def write_export(context, dataset_dir, which, fmt, selected=None, *, allow_stop=False):
+    """Stream both eager and requested exports through the same atomic writer."""
     matrix,prices,description = matrices.open_dataset(dataset_dir)
-    if payload['which'] == 'library':
-        selected = context.artifact(snapshot['selection'])
+    if which == 'library':
         rows = np.load(selected/'rows.npy',mmap_mode='r',allow_pickle=False)
         columns = np.load(selected/'columns.npy',mmap_mode='r',allow_pickle=False)
     else:
         rows,columns = range(matrix.shape[0]),range(matrix.shape[1])
-    filename = payload['which'] + '.' + payload['format']
+    filename = which + '.' + fmt
     headers = list(METADATA_COLUMNS)+[description['targets'][i] for i in columns]
-    with closing(sqlite3.connect((dataset_dir/'metadata.sqlite').as_uri()+'?mode=ro',uri=True)) as db:
-        def values():
-            for i in rows:
-                context.checkpoint()
-                name,cid,ik,smiles,price = db.execute('SELECT name,chembl_id,inchikey,smiles,price FROM compounds WHERE i=?',(int(i),)).fetchone()
-                yield [name,cid,ik,smiles,price]+matrix[int(i),columns].tolist()
-        temporary = context.directory/(filename+'.tmp')
-        if payload['format'] == 'xlsx':
-            write_rows_excel(headers,values(),temporary)
-        else:
-            with temporary.open('w',newline='') as stream:
-                writer = csv.writer(stream)
-                writer.writerow(["'"+v if v.startswith(('=','+','-','@','\t','\r')) else v for v in headers])
-                for row in values():
-                    # Spreadsheet applications must not execute uploaded text.
-                    writer.writerow([("'"+v if isinstance(v,str) and v.startswith(('=','+','-','@','\t','\r')) else '' if isinstance(v,float) and not np.isfinite(v) else v) for v in row])
+    temporary = context.directory/(filename+'.tmp')
+    try:
+        with closing(sqlite3.connect((dataset_dir/'metadata.sqlite').as_uri()+'?mode=ro',uri=True)) as db:
+            def values():
+                for i in rows:
+                    context.checkpoint(allow_stop=allow_stop)
+                    name,cid,ik,smiles,price = db.execute('SELECT name,chembl_id,inchikey,smiles,price FROM compounds WHERE i=?',(int(i),)).fetchone()
+                    yield [name,cid,ik,smiles,price]+matrix[int(i),columns].tolist()
+            if fmt == 'xlsx':
+                write_rows_excel(headers,values(),temporary)
+            else:
+                with temporary.open('w',newline='') as stream:
+                    writer = csv.writer(stream)
+                    writer.writerow(["'"+v if v.startswith(('=','+','-','@','\t','\r')) else v for v in headers])
+                    for row in values():
+                        # Spreadsheet applications must not execute uploaded text.
+                        writer.writerow([("'"+v if isinstance(v,str) and v.startswith(('=','+','-','@','\t','\r')) else '' if isinstance(v,float) and not np.isfinite(v) else v) for v in row])
+        # XLSX closing/compression may outlast the last row checkpoint.
+        context.checkpoint(allow_stop=allow_stop,force=True)
         temporary.replace(context.directory/filename)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return context.reference(filename)
+
+
+def export(context, payload, snapshot):
+    selected = context.artifact(snapshot['selection']) if payload['which'] == 'library' else None
+    reference = write_export(context,context.artifact(snapshot['dataset']),payload['which'],payload['format'],selected)
     exports = dict(snapshot.get('exports',{}))
-    exports[payload['key']] = context.reference(filename)
+    exports[payload['key']] = reference
     return {'exports':exports}, {'status':'complete','download_url':f"/api/download/{payload['which']}?format={payload['format']}"}
 
 
@@ -261,7 +287,7 @@ def execute(runtime, job):
         changes,response = optimize(context,payload,snapshot)
     elif kind == 'selection':
         selected = selection(context,context.artifact(snapshot['dataset']),context.artifact(snapshot['solutions']),payload['index'])
-        changes,response = {'selection':context.reference(),'exports':{}},{'status':'complete','selected_idx':selected['selected_idx']}
+        changes,response = {'selection':context.reference(),'exports':selection_exports(context,snapshot)},{'status':'complete','selected_idx':selected['selected_idx']}
     elif kind == 'export':
         changes,response = export(context,payload,snapshot)
     else:

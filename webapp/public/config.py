@@ -39,7 +39,7 @@ class Policy:
         self.stop_grace = positive('JOB_STOP_GRACE_SECONDS', 60)
         self.xlsx_bytes = positive('MAX_XLSX_EXPANDED_BYTES', 128 * MiB)
         self.files = positive('MAX_SESSION_FILES', 100)
-        self.starts = positive('MAX_COMPUTATION_STARTS_PER_HOUR', 4)
+        self.starts = positive('MAX_COMPUTATION_STARTS_PER_HOUR', 100)
         self.small_cells = positive('SMALL_JOB_MATRIX_CELLS', 10000000)
 
     def dimensions(self, rows, cols):

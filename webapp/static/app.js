@@ -32,6 +32,7 @@ let uploadMode = sessionStorage.getItem('uploadMode') || 'target'; // 'target' |
 let uploadedChemblIds = [];
 let uploadedMatchedCount = 0;
 let uploadedFilesData = [];
+let pendingTargetUploads = 0;
 let uploadedAffinityFilesData = [];
 let uploadedAffinityData = null;
 let uploadedPriceFilesData = [];
@@ -305,6 +306,7 @@ const modeAffinityBtn = $('#modeAffinityBtn');
 const step1Title = $('#step1Title');
 const dropZoneText = $('#dropZoneText');
 const dropZoneHint = $('#dropZoneHint');
+const targetSearchStatus = $('#targetSearchStatus');
 const exampleDownloadBtn = $('#exampleDownloadBtn');
 const exampleDownloadText = $('#exampleDownloadText');
 
@@ -316,6 +318,7 @@ function setupModeSwitcher() {
         modeAffinityBtn.setAttribute('aria-pressed', String(mode === 'affinity'));
         uploadMode = mode;
         sessionStorage.setItem('uploadMode', mode);
+        updateTargetSearchStatus();
 
         if (mode === 'target') {
             modeTargetBtn.classList.add('active');
@@ -788,6 +791,10 @@ thresholdValue.addEventListener('change', () => {
     }
 });
 
+function updateTargetSearchStatus() {
+    targetSearchStatus.style.display = uploadMode === 'target' && pendingTargetUploads > 0 ? 'block' : 'none';
+}
+
 async function handleFileUpload(files) {
     uploadError.style.display = 'none';
     const fileList = files instanceof File ? [files] : Array.from(files);
@@ -801,13 +808,22 @@ async function handleFileUpload(files) {
     buildMatrixBtn.disabled = true;
     thresholdControl.style.display = 'none';
     const pending = fileList.filter(f => !uploadedFilesData.some(d => d.name === f.name));
-    await uploadFileBatches(pending, '/api/upload-targets', data => {
-        for (const file of data.uploaded_files) {
-            uploadedFilesData.push({name: file.name, data: file});
-        }
-    });
-    resetOptSettingsToDefault();
-    renderFiles();
+    if (pending.length > 0) {
+        pendingTargetUploads++;
+        updateTargetSearchStatus();
+    }
+    try {
+        await uploadFileBatches(pending, '/api/upload-targets', data => {
+            for (const file of data.uploaded_files) {
+                uploadedFilesData.push({name: file.name, data: file});
+            }
+        });
+        resetOptSettingsToDefault();
+        renderFiles();
+    } finally {
+        if (pending.length > 0) pendingTargetUploads--;
+        updateTargetSearchStatus();
+    }
 }
 
 function renderFiles() {
@@ -1472,7 +1488,7 @@ function resetPipelineUI() {
     $('#matrixTitle').innerHTML = '<span class="icon">⚙️</span> Building Selectivity Matrix';
 
     // Set step 1 label dynamically based on mode
-    const step1NameEl = document.querySelector('.pipeline-step[data-pipeline="1"] .step-name');
+    const step1NameEl = document.querySelector('.pipeline-step[data-pipeline="1"] .step-text');
     if (step1NameEl) {
         step1NameEl.textContent = uploadMode === 'affinity'
             ? 'Calculating selectivity matrix'
@@ -2547,43 +2563,67 @@ async function loadParetoChart() {
     }
 }
 
-function heatmapWindow(data, targetNames, compounds, targetStart = 0, compoundStart = 0) {
-    const x = Array.from({length: Math.min(40, data.targets.length - targetStart)}, (_, j) => j + targetStart);
-    const y = Array.from({length: Math.min(20, data.compounds.length - compoundStart)}, (_, i) => i + compoundStart);
-    const z = y.map(i => data.matrix[i].slice(targetStart, targetStart + 40));
+function heatmapWindow(data, targetNames, compounds,
+    targetStart = data.paged ? data.column_offset : 0,
+    compoundStart = data.paged ? data.row_offset : 0) {
+    const columnOffset = data.paged ? data.column_offset : 0;
+    const rowOffset = data.paged ? data.row_offset : 0;
+    const firstColumn = targetStart - columnOffset;
+    const firstRow = compoundStart - rowOffset;
+    const x = Array.from({length: Math.min(40, data.targets.length - firstColumn)}, (_, j) => j + firstColumn + columnOffset);
+    const y = Array.from({length: Math.min(20, data.compounds.length - firstRow)}, (_, i) => i + firstRow + rowOffset);
+    const z = y.map(i => data.matrix[i - rowOffset].slice(firstColumn, firstColumn + 40));
     return {
         x, y, z,
+        targetLabels: x.map(j => data.targets[j - columnOffset]),
+        compoundLabels: y.map(i => compounds[i - rowOffset]),
         text: z.map(row => row.map(value => value === null ? 'No Data' : value.toFixed(2))),
-        customdata: y.map(i => x.map(j => [compounds[i], targetNames[j]])),
+        customdata: y.map(i => x.map(j => [compounds[i - rowOffset], targetNames[j - columnOffset]])),
     };
 }
 
+let heatmapRequest = 0;
+let cancelHeatmap = null;
 async function loadHeatmap(prefetchedData) {
+    const requestId = ++heatmapRequest;
+    if (cancelHeatmap) cancelHeatmap();
+    const controller = new AbortController();
+    let tileController = null, pendingFrame = null;
+    cancelHeatmap = () => {
+        controller.abort();
+        if (tileController) tileController.abort();
+        if (pendingFrame !== null) cancelAnimationFrame(pendingFrame);
+    };
     try {
         let data = prefetchedData;
         if (!data) {
-            const res = await fetch('/api/heatmap-data');
+            const res = await fetch('/api/heatmap-data', {signal: controller.signal});
             data = await res.json();
             if (!res.ok) return;
         }
+        if (requestId !== heatmapRequest) return;
 
-        const targetNames = (data.target_names || data.targets).map((name, j) => {
-            const symbol = data.targets[j];
+        const targetNamesFor = (tile) => (tile.target_names || tile.targets).map((name, j) => {
+            const symbol = tile.targets[j];
             return (name && name !== symbol) ? `${name} (${symbol})` : symbol;
         });
+        const compoundLabelsFor = (tile) => tile.compounds.map((s) => (s && s.length > 30) ? s.substring(0, 27) + '...' : (s || 'Unknown'));
+        const targetNames = targetNamesFor(data);
 
-        const truncCompounds = data.compounds.map((s) => (s && s.length > 30) ? s.substring(0, 27) + '...' : (s || 'Unknown'));
+        const truncCompounds = compoundLabelsFor(data);
         const initialWindow = heatmapWindow(data, targetNames, truncCompounds);
         const xIndices = initialWindow.x;
         const yIndices = initialWindow.y;
         // Scan numeric values once without allocating per-cell display metadata.
-        let zmin = Infinity, zmax = -Infinity;
-        for (const row of data.matrix) {
-            for (const value of row) {
-                if (Number.isFinite(value)) { zmin = Math.min(zmin, value); zmax = Math.max(zmax, value); }
+        let zmin = data.paged ? data.zmin : Infinity, zmax = data.paged ? data.zmax : -Infinity;
+        if (!data.paged) {
+            for (const row of data.matrix) {
+                for (const value of row) {
+                    if (Number.isFinite(value)) { zmin = Math.min(zmin, value); zmax = Math.max(zmax, value); }
+                }
             }
         }
-        if (!Number.isFinite(zmin)) { zmin = 0; zmax = 1; }
+        if (!Number.isFinite(zmin) || !Number.isFinite(zmax)) { zmin = 0; zmax = 1; }
         else if (zmin === zmax) { zmin -= 0.5; zmax += 0.5; }
 
         const trace = {
@@ -2606,14 +2646,16 @@ async function loadHeatmap(prefetchedData) {
 
         const TARGET_WINDOW = 40;
         const COMPOUND_WINDOW = 20;
-        const numTargets = data.targets.length;
-        const numCompounds = data.compounds.length;
+        const numTargets = data.paged ? data.total_columns : data.targets.length;
+        const numCompounds = data.paged ? data.total_rows : data.compounds.length;
 
         const hasManyTargets = numTargets > TARGET_WINDOW;
         const hasManyCompounds = numCompounds > COMPOUND_WINDOW;
 
-        const initialTargetCount = Math.min(TARGET_WINDOW, numTargets);
-        const initialCompoundCount = Math.min(COMPOUND_WINDOW, numCompounds);
+        const initialTargetStart = data.paged ? data.column_offset : 0;
+        const initialCompoundStart = data.paged ? data.row_offset : 0;
+        const initialTargetCount = xIndices.length;
+        const initialCompoundCount = yIndices.length;
 
         // Setup sliders display before Plotly.newPlot so container width is accurately allocated
         const targetSliderWrapper = $('#heatmapTargetSliderWrapper');
@@ -2629,7 +2671,7 @@ async function loadHeatmap(prefetchedData) {
                 targetSliderWrapper.style.display = 'block';
                 targetRangeSlider.min = 0;
                 targetRangeSlider.max = numTargets - TARGET_WINDOW;
-                targetRangeSlider.value = 0;
+                targetRangeSlider.value = initialTargetStart;
                 if (targetTotalText) targetTotalText.textContent = `of ${numTargets}`;
                 if (targetMinLabel) targetMinLabel.textContent = `1`;
                 if (targetMaxLabel) targetMaxLabel.textContent = `${numTargets}`;
@@ -2653,7 +2695,7 @@ async function loadHeatmap(prefetchedData) {
                 compoundSliderWrapper.style.display = 'flex';
                 compoundRangeSlider.min = 0;
                 compoundRangeSlider.max = numCompounds - COMPOUND_WINDOW;
-                compoundRangeSlider.value = 0;
+                compoundRangeSlider.value = initialCompoundStart;
                 if (compoundTotalText) compoundTotalText.textContent = `of ${numCompounds}`;
                 if (compoundMinLabel) compoundMinLabel.textContent = `1`;
                 if (compoundMaxLabel) compoundMaxLabel.textContent = `${numCompounds}`;
@@ -2675,10 +2717,10 @@ async function loadHeatmap(prefetchedData) {
                 automargin: false,
                 tickmode: 'array',
                 tickvals: xIndices,
-                ticktext: data.targets.slice(0, 40),
+                ticktext: initialWindow.targetLabels,
                 tickfont: { color: '#9898b8', size: 10 },
                 tickangle: -90,
-                range: [-0.5, initialTargetCount - 0.5],
+                range: [initialTargetStart - 0.5, initialTargetStart + initialTargetCount - 0.5],
                 fixedrange: true,
             },
             yaxis: {
@@ -2688,8 +2730,8 @@ async function loadHeatmap(prefetchedData) {
                 showline: false,
                 tickmode: 'array',
                 tickvals: yIndices,
-                ticktext: truncCompounds.slice(0, 20),
-                range: [initialCompoundCount - 0.5, -0.5],
+                ticktext: initialWindow.compoundLabels,
+                range: [initialCompoundStart + initialCompoundCount - 0.5, initialCompoundStart - 0.5],
                 title: false,
                 automargin: false,
                 tickfont: { color: '#9898b8', size: 10 },
@@ -2720,6 +2762,7 @@ async function loadHeatmap(prefetchedData) {
             scrollZoom: false,
             doubleClick: false,
         });
+        if (requestId !== heatmapRequest) return;
 
         // Ensure proper chart dimensions inside flex container
         requestAnimationFrame(() => {
@@ -2736,37 +2779,123 @@ async function loadHeatmap(prefetchedData) {
             ro.observe(heatmapEl);
         }
 
-        let targetStart = 0, compoundStart = 0, pendingFrame = null;
-        const renderWindow = () => {
-            if (pendingFrame !== null) cancelAnimationFrame(pendingFrame);
-            pendingFrame = requestAnimationFrame(() => {
-                pendingFrame = null;
-                const view = heatmapWindow(data, targetNames, truncCompounds, targetStart, compoundStart);
-                Plotly.update('heatmapChart', {
-                    z: [view.z], x: [view.x], y: [view.y],
-                    text: [view.text], customdata: [view.customdata],
-                }, {
-                    'xaxis.tickvals': view.x, 'xaxis.ticktext': view.x.map(j => data.targets[j]),
-                    'yaxis.tickvals': view.y, 'yaxis.ticktext': view.y.map(i => truncCompounds[i]),
-                    'xaxis.range': [targetStart - 0.5, targetStart + view.x.length - 0.5],
-                    'yaxis.range': [compoundStart + view.y.length - 0.5, compoundStart - 0.5],
-                });
+        // Keep a bounded set of numeric buffers; hover metadata is made only for
+        // the visible 20 × 40 cells, including when a full small library is ready.
+        const CACHE_CELLS = 50000;
+        const cachedTiles = [];
+        let cachedCells = 0;
+        const rememberTile = (tile) => {
+            if (data.paged && tile.revision !== data.revision) return false;
+            if (tile.paged && cachedTiles.some(entry => !entry.tile.paged)) return true;
+            const cells = tile.compounds.length * tile.targets.length;
+            if (data.paged && cells > CACHE_CELLS) return false;
+            if (!tile.paged) { cachedTiles.length = 0; cachedCells = 0; }
+            cachedTiles.push({
+                tile, cells,
+                targetNames: tile === data ? targetNames : targetNamesFor(tile),
+                compounds: tile === data ? truncCompounds : compoundLabelsFor(tile),
             });
+            cachedCells += cells;
+            while (data.paged && (cachedCells > CACHE_CELLS || cachedTiles.length > 5)) cachedCells -= cachedTiles.shift().cells;
+            return true;
+        };
+        const cachedWindow = (row, column) => {
+            for (let i = cachedTiles.length - 1; i >= 0; i--) {
+                const entry = cachedTiles[i], tile = entry.tile;
+                const ro = tile.paged ? tile.row_offset : 0, co = tile.paged ? tile.column_offset : 0;
+                if (row < ro || column < co ||
+                    Math.min(row + COMPOUND_WINDOW, numCompounds) > ro + tile.compounds.length ||
+                    Math.min(column + TARGET_WINDOW, numTargets) > co + tile.targets.length) continue;
+                cachedTiles.splice(i, 1);
+                cachedTiles.push(entry);
+                return {tile, view: heatmapWindow(tile, entry.targetNames, entry.compounds, column, row)};
+            }
+            return null;
+        };
+        const bufferUrl = (row, column) => {
+            const ro = Math.max(0, Math.min(numCompounds - 100, row - 40));
+            const co = Math.max(0, Math.min(numTargets - 100, column - 30));
+            return `/api/heatmap-data?row_offset=${ro}&column_offset=${co}&row_count=100&column_count=100`;
+        };
+        rememberTile(data);
+
+        let targetStart = initialTargetStart, compoundStart = initialCompoundStart, tileRequest = 0, pendingTile = null;
+        const fetchBuffer = (url) => {
+            if (pendingTile && pendingTile.url === url && !pendingTile.controller.signal.aborted) return pendingTile.promise;
+            if (tileController) tileController.abort();
+            tileController = new AbortController();
+            const pending = {url, controller: tileController};
+            pendingTile = pending;
+            pending.promise = (async () => {
+                const response = await fetch(url, {signal: pending.controller.signal});
+                if (!response.ok) return;
+                const tile = await response.json();
+                if (requestId !== heatmapRequest || pending.controller.signal.aborted) return;
+                rememberTile(tile);
+            })().finally(() => {
+                if (pendingTile === pending) pendingTile = null;
+            });
+            return pending.promise;
+        };
+        const renderWindow = () => {
+            const sequence = ++tileRequest;
+            if (pendingFrame !== null) cancelAnimationFrame(pendingFrame);
+            pendingFrame = requestAnimationFrame(async () => {
+                pendingFrame = null;
+                try {
+                    if (requestId !== heatmapRequest) return;
+                    const row = compoundStart, column = targetStart;
+                    let cached = cachedWindow(row, column);
+                    if (!cached) {
+                        await fetchBuffer(bufferUrl(row, column));
+                        cached = cachedWindow(row, column);
+                    } else if (tileController) {
+                        tileController.abort();
+                    }
+                    if (!cached || requestId !== heatmapRequest || sequence !== tileRequest) return;
+                    const {view, tile} = cached;
+                    await Plotly.update('heatmapChart', {
+                        z: [view.z], x: [view.x], y: [view.y],
+                        text: [view.text], customdata: [view.customdata],
+                    }, {
+                        'xaxis.tickvals': view.x, 'xaxis.ticktext': view.targetLabels,
+                        'yaxis.tickvals': view.y, 'yaxis.ticktext': view.compoundLabels,
+                        'xaxis.range': [view.x[0] - 0.5, view.x[0] + view.x.length - 0.5],
+                        'yaxis.range': [view.y[0] + view.y.length - 0.5, view.y[0] - 0.5],
+                    });
+                    if (requestId === heatmapRequest && sequence === tileRequest) {
+                        updateTargetSliderView(column);
+                        updateCompoundSliderView(row, tile);
+                    }
+                } catch (err) {
+                    if (err.name !== 'AbortError') console.error('Failed to load heatmap window:', err);
+                }
+            });
+        };
+
+        const updateTargetSliderView = (startIdx) => {
+            const endIdx = Math.min(startIdx + TARGET_WINDOW, numTargets);
+            if (targetRangeText) targetRangeText.textContent = `${startIdx + 1}–${endIdx}`;
+            if (targetTotalText) targetTotalText.textContent = `of ${numTargets}`;
+        };
+        const updateCompoundSliderView = (startIdx, tile = data) => {
+            const endIdx = Math.min(startIdx + COMPOUND_WINDOW, numCompounds);
+            if (compoundRangeText) compoundRangeText.textContent = `${startIdx + 1}–${endIdx}`;
+            if (compoundTotalText) compoundTotalText.textContent = `of ${numCompounds}`;
+            if (!tile) return;
+            const compounds = tile === data ? truncCompounds : compoundLabelsFor(tile);
+            const offset = tile.paged ? tile.row_offset : 0;
+            if (compoundStartEl) compoundStartEl.textContent = compounds[startIdx - offset] || '';
+            if (compoundEndEl) compoundEndEl.textContent = compounds[endIdx - offset - 1] || '';
+            if (compoundSubtext) compoundSubtext.title = `${tile.compounds[startIdx - offset]} → ${tile.compounds[endIdx - offset - 1]}`;
         };
 
         // Setup 40-target window slider interactions
         if (targetSliderWrapper && targetRangeSlider && hasManyTargets) {
-            const updateTargetSliderView = (startIdx) => {
-                const endIdx = Math.min(startIdx + TARGET_WINDOW, numTargets);
-                if (targetRangeText) targetRangeText.textContent = `${startIdx + 1}–${endIdx}`;
-                if (targetTotalText) targetTotalText.textContent = `of ${numTargets}`;
-            };
-
-            updateTargetSliderView(0);
+            updateTargetSliderView(initialTargetStart);
 
             targetRangeSlider.oninput = (e) => {
                 const startIdx = parseInt(e.target.value, 10);
-                const endIdx = Math.min(startIdx + TARGET_WINDOW, numTargets);
                 updateTargetSliderView(startIdx);
                 targetStart = startIdx;
                 renderWindow();
@@ -2775,18 +2904,7 @@ async function loadHeatmap(prefetchedData) {
 
         // Setup 20-compound window slider interactions
         if (compoundSliderWrapper && compoundRangeSlider && hasManyCompounds) {
-            const updateCompoundSliderView = (startIdx) => {
-                const endIdx = Math.min(startIdx + COMPOUND_WINDOW, numCompounds);
-                const startComp = truncCompounds[startIdx];
-                const endComp = truncCompounds[endIdx - 1];
-                if (compoundRangeText) compoundRangeText.textContent = `${startIdx + 1}–${endIdx}`;
-                if (compoundTotalText) compoundTotalText.textContent = `of ${numCompounds}`;
-                if (compoundStartEl) compoundStartEl.textContent = startComp;
-                if (compoundEndEl) compoundEndEl.textContent = endComp;
-                if (compoundSubtext) compoundSubtext.title = `${data.compounds[startIdx]} → ${data.compounds[endIdx - 1]}`;
-            };
-
-            updateCompoundSliderView(0);
+            updateCompoundSliderView(initialCompoundStart);
 
             const vContainer = document.getElementById('heatmapVSliderContainer');
             if (vContainer && compoundRangeSlider) {
@@ -2810,8 +2928,7 @@ async function loadHeatmap(prefetchedData) {
 
             compoundRangeSlider.oninput = (e) => {
                 const startIdx = parseInt(e.target.value, 10);
-                const endIdx = Math.min(startIdx + COMPOUND_WINDOW, numCompounds);
-                updateCompoundSliderView(startIdx);
+                updateCompoundSliderView(startIdx, data.paged ? null : data);
                 compoundStart = startIdx;
                 renderWindow();
             };
@@ -2822,8 +2939,23 @@ async function loadHeatmap(prefetchedData) {
             heatmapEl.on('plotly_doubleclick', () => false);
         }
 
+        if (data.paged && (hasManyTargets || hasManyCompounds)) {
+            const url = numCompounds <= 1000 && numTargets <= 1000 && numCompounds * numTargets <= CACHE_CELLS ? '/api/heatmap-data?preload=1' :
+                bufferUrl(initialCompoundStart, initialTargetStart);
+            // Warm data after the first chart is visible. A failed preload leaves
+            // ordinary bounded tile loading available to either slider.
+            fetch(url, {signal: controller.signal}).then(async (response) => {
+                if (!response.ok) return;
+                const tile = await response.json();
+                if (requestId !== heatmapRequest || controller.signal.aborted || !rememberTile(tile)) return;
+                if (targetStart !== initialTargetStart || compoundStart !== initialCompoundStart) renderWindow();
+            }).catch((err) => {
+                if (err.name !== 'AbortError') console.error('Failed to preload heatmap:', err);
+            });
+        }
+
     } catch (err) {
-        console.error('Failed to load heatmap:', err);
+        if (err.name !== 'AbortError') console.error('Failed to load heatmap:', err);
     }
 }
 
@@ -2842,9 +2974,15 @@ async function loadDistributionChart(prefetchedData) {
 
         let stats = [];
         if (data.distribution) {
-            stats = data.distribution.map(item => ({...item,
-                fullName: item.target, displayName: item.target,
-            }));
+            stats = data.distribution.map(item => {
+                // Older selection artifacts contain 'Preferred name (Symbol)'.
+                // Keep names in hover text and use compact symbols on the axis.
+                const parsed = String(item.target).match(/^(.*?)\s*\(([^()]+)\)$/);
+                const symbol = parsed ? parsed[2].trim() : item.target;
+                const fullName = item.target_name || (parsed ? parsed[1].trim() : symbol);
+                return {...item, target: symbol, fullName,
+                    displayName: fullName && fullName !== symbol ? `${fullName} (${symbol})` : symbol};
+            });
         } else {
 
         for (let j = 0; j < numTargets; j++) {
