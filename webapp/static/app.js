@@ -33,6 +33,7 @@ let uploadedChemblIds = [];
 let uploadedMatchedCount = 0;
 let uploadedFilesData = [];
 let pendingTargetUploads = 0;
+let pendingAffinityUploads = 0;
 let uploadedAffinityFilesData = [];
 let uploadedAffinityData = null;
 let uploadedPriceFilesData = [];
@@ -307,6 +308,7 @@ const step1Title = $('#step1Title');
 const dropZoneText = $('#dropZoneText');
 const dropZoneHint = $('#dropZoneHint');
 const targetSearchStatus = $('#targetSearchStatus');
+const affinityProcessingStatus = $('#affinityProcessingStatus');
 const exampleDownloadBtn = $('#exampleDownloadBtn');
 const exampleDownloadText = $('#exampleDownloadText');
 
@@ -319,6 +321,7 @@ function setupModeSwitcher() {
         uploadMode = mode;
         sessionStorage.setItem('uploadMode', mode);
         updateTargetSearchStatus();
+        updateAffinityProcessingStatus();
 
         if (mode === 'target') {
             modeTargetBtn.classList.add('active');
@@ -795,13 +798,26 @@ function updateTargetSearchStatus() {
     targetSearchStatus.style.display = uploadMode === 'target' && pendingTargetUploads > 0 ? 'block' : 'none';
 }
 
+function updateAffinityProcessingStatus() {
+    affinityProcessingStatus.style.display = uploadMode === 'affinity' && pendingAffinityUploads > 0 ? 'block' : 'none';
+}
+
 async function handleFileUpload(files) {
     uploadError.style.display = 'none';
     const fileList = files instanceof File ? [files] : Array.from(files);
     if (uploadMode === 'affinity') {
-        await uploadFileBatches(fileList, '/api/upload-affinity', data => applyUploadResponse('affinity', data));
-        resetOptSettingsToDefault();
-        renderAffinityFiles();
+        if (fileList.length > 0) {
+            pendingAffinityUploads++;
+            updateAffinityProcessingStatus();
+        }
+        try {
+            await uploadFileBatches(fileList, '/api/upload-affinity', data => applyUploadResponse('affinity', data));
+            resetOptSettingsToDefault();
+            renderAffinityFiles();
+        } finally {
+            if (fileList.length > 0) pendingAffinityUploads--;
+            updateAffinityProcessingStatus();
+        }
         return;
     }
     validationSummary.style.display = 'none';

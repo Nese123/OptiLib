@@ -89,6 +89,8 @@
                         IDs, Gene Symbols, or UniProt Accessions</div>
                     <div class="upload-text" id="targetSearchStatus" role="status"
                         style="display: none; margin-top: 0.75rem; margin-bottom: 0;">Searching for targets...</div>
+                    <div class="upload-text" id="affinityProcessingStatus" role="status"
+                        style="display: none; margin-top: 0.75rem; margin-bottom: 0;">Processing affinity data...</div>
                     <input type="file" id="fileInput" aria-labelledby="step1Title" aria-describedby="dropZoneHint" accept=".csv,.xlsx" multiple>
                 </div>
 
@@ -722,7 +724,7 @@
     </footer>
 
     <script src="/static/navigation.js?v=1.0"></script>
-    <script defer src="/static/app.js?v=7.4"></script>
+    <script defer src="/static/app.js?v=7.5"></script>
     {% if public_mode %}<script defer src="/static/public.js?v=3"></script>{% endif %}
 
 </body>
