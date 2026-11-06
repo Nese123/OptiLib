@@ -34,6 +34,7 @@ let uploadedMatchedCount = 0;
 let uploadedFilesData = [];
 let pendingTargetUploads = 0;
 let pendingAffinityUploads = 0;
+let pendingPriceUploads = 0;
 let uploadedAffinityFilesData = [];
 let uploadedAffinityData = null;
 let uploadedPriceFilesData = [];
@@ -492,11 +493,25 @@ async function uploadFileBatches(files, endpoint, accept) {
     return changed;
 }
 
+function updatePriceProcessingStatus() {
+    const priceProcessingStatus = $('#priceProcessingStatus');
+    if (priceProcessingStatus) priceProcessingStatus.style.display = pendingPriceUploads > 0 ? 'block' : 'none';
+}
+
 async function handlePriceFileUpload(files) {
     const fileList = files instanceof File ? [files] : files;
-    await uploadFileBatches(fileList, '/api/upload-prices', data => applyUploadResponse('price', data));
-    resetOptSettingsToDefault();
-    renderPriceFiles();
+    if (fileList.length > 0) {
+        pendingPriceUploads++;
+        updatePriceProcessingStatus();
+    }
+    try {
+        await uploadFileBatches(fileList, '/api/upload-prices', data => applyUploadResponse('price', data));
+        resetOptSettingsToDefault();
+        renderPriceFiles();
+    } finally {
+        if (fileList.length > 0) pendingPriceUploads--;
+        updatePriceProcessingStatus();
+    }
 }
 
 function renderPriceFiles() {

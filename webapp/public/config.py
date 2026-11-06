@@ -48,6 +48,40 @@ class Policy:
                              f'{self.targets:,} targets, {self.cells:,} matrix cells.')
 
 
+CLOCK_SKEW_SECONDS = 300
+
+
+def _skew_tolerant_session_interface():
+    """Accept cookies signed slightly "in the future" after a clock step back.
+
+    itsdangerous rejects any negative signature age, so a backward wall-clock
+    adjustment (NTP step, VM resume, WSL2 sync) would silently replace the
+    visitor's session and disconnect them from running computations.
+    """
+    import time
+    from flask.sessions import SecureCookieSessionInterface
+    from itsdangerous import BadSignature
+
+    class SkewTolerantSessionInterface(SecureCookieSessionInterface):
+        def open_session(self, app, request):
+            serializer = self.get_signing_serializer(app)
+            if serializer is None:
+                return None
+            value = request.cookies.get(self.get_cookie_name(app))
+            if not value:
+                return self.session_class()
+            try:
+                data, signed = serializer.loads(value, max_age=None, return_timestamp=True)
+            except BadSignature:
+                return self.session_class()
+            age = time.time() - signed.timestamp()
+            if not -CLOCK_SKEW_SECONDS <= age <= app.permanent_session_lifetime.total_seconds():
+                return self.session_class()
+            return self.session_class(data)
+
+    return SkewTolerantSessionInterface()
+
+
 def configure_security(app):
     mode = os.environ.get('OPTILIB_ENV', 'development')
     if mode not in ('production', 'development'):
@@ -67,6 +101,7 @@ def configure_security(app):
                       TRUSTED_HOSTS=hosts or None, MAX_CONTENT_LENGTH=16 * MiB,
                       MAX_FORM_PARTS=25, MAX_FORM_MEMORY_SIZE=256 * 1024,
                       WTF_CSRF_TIME_LIMIT=18000)
+    app.session_interface = _skew_tolerant_session_interface()
     if production:
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)

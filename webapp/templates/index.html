@@ -175,6 +175,8 @@
                         <div class="price-drop-hint">CSV or Excel (.xlsx) with "Compound" and "Price" (USD/mg) column
                             · Accepts compound names,
                             ChEMBL IDs, SMILES Strings, or InChIKeys for compound IDs</div>
+                        <div class="price-drop-text" id="priceProcessingStatus" role="status"
+                            style="display: none; margin-top: 0.5rem;">Processing price data...</div>
                         <input type="file" id="priceFileInput" aria-label="Upload custom compound prices" accept=".csv,.xlsx" multiple>
                     </div>
 
@@ -724,7 +726,7 @@
     </footer>
 
     <script src="/static/navigation.js?v=1.0"></script>
-    <script defer src="/static/app.js?v=7.5"></script>
+    <script defer src="/static/app.js?v=7.6"></script>
     {% if public_mode %}<script defer src="/static/public.js?v=3"></script>{% endif %}
 
 </body>

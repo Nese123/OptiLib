@@ -7,6 +7,23 @@ METADATA_COLUMN_SET = frozenset(METADATA_COLUMNS)
 _SENTINEL_STRINGS = frozenset({"nan", "None", "Unknown", ""})
 
 
+def selectivity_summary(final_compounds, final_targets, dropped_compounds, dropped_targets):
+    """Step-1 summary: kept counts, plus dropped counts when anything was filtered out."""
+    summary = (
+        f"Found {final_compounds:,} candidate compound{'s' if final_compounds != 1 else ''} "
+        f"for {final_targets:,} target{'s' if final_targets != 1 else ''}."
+    )
+    dropped_compounds, dropped_targets = max(dropped_compounds, 0), max(dropped_targets, 0)
+    parts = []
+    if dropped_compounds:
+        parts.append(f"{dropped_compounds:,} compound{'s' if dropped_compounds != 1 else ''}")
+    if dropped_targets:
+        parts.append(f"{dropped_targets:,} target{'s' if dropped_targets != 1 else ''}")
+    if parts:
+        summary += f" {' and '.join(parts)} dropped due to lack of affinity or selectivity."
+    return summary
+
+
 def target_columns(frame):
     return [column for column in frame.columns if column not in METADATA_COLUMN_SET]
 

@@ -9,7 +9,7 @@ import numpy as np
 from webapp.core.algorithm import matrix_blocks, column_maximum
 from webapp.core.chembl import get_selectivity_provenance
 from webapp.core.queries import read_chembl_candidates
-from webapp.core.records import format_target_col, clean_str
+from webapp.core.records import format_target_col, clean_str, selectivity_summary
 from webapp.core.resolution import resolve_compounds, resolve_targets
 from webapp.core.selectivity import SELECTIVITY_SCORING_VERSION, score_measured_affinities
 
@@ -152,21 +152,8 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
         if not len(indices) or not len(columns):
             raise ValueError('No compounds or targets remain at this selectivity threshold.')
         final_drugs, final_targets = len(indices), len(columns)
-        summary = (
-            f"Found {final_drugs:,} candidate compound{'s' if final_drugs != 1 else ''} "
-            f"for {final_targets:,} target{'s' if final_targets != 1 else ''}."
-        )
-        if kind == 'chembl':
-            dropped_targets = requested_targets - final_targets
-            if dropped_targets > 0:
-                summary += (f" {dropped_targets:,} target{'s were' if dropped_targets != 1 else ' was'} "
-                            'dropped because they lacked '
-                            'compounds with sufficient affinity or selectivity.')
-        else:
-            dropped_targets = len(targets) - final_targets
-            if dropped_targets > 0:
-                summary += (f" {dropped_targets:,} target{'s were' if dropped_targets != 1 else ' was'} "
-                            'dropped due to low selectivity.')
+        dropped_targets = (requested_targets if kind == 'chembl' else len(targets)) - final_targets
+        summary = selectivity_summary(final_drugs, final_targets, compounds_n - final_drugs, dropped_targets)
         update_progress(1, selectivity_label, summary, summary)
         final = np.lib.format.open_memmap(directory/'matrix.npy',mode='w+',dtype='float64',shape=(len(indices),len(columns)))
         offset = 0
@@ -209,10 +196,10 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
                     meta.execute('INSERT INTO compounds VALUES (?,?,?,?,?,?)',(output_index,record['Compound_Name'],record['Molecule_ChEMBL_ID'],record['InChIKey'],record['SMILES'],float(price) if np.isfinite(price) else None))
                     output_index += 1
                 records.clear()
-                custom_detail = f"Custom: {price_counts['custom']}, " if has_custom_price else ''
+                custom_detail = f"Custom: {price_counts['custom']:,}, " if has_custom_price else ''
                 update_progress(2, 'Getting price data...',
                                 f'Found prices for {sum(price_counts.values())}/{final_drugs} compounds '
-                                f"({custom_detail}MolPort: {price_counts['molport']}, MolPrice approx: {price_counts['molprice']})")
+                                f"({custom_detail}MolPort: {price_counts['molport']:,}, MolPrice approx: {price_counts['molprice']:,})")
             for i,(_,record) in enumerate(db.execute('SELECT compound,record FROM compounds ORDER BY compound')):
                 if i in kept:
                     records.append(json.loads(record))
@@ -224,16 +211,16 @@ def build(directory, kind, payload, upload, policy, checkpoint, progress):
             prices[missing] = fallback
             meta.execute('UPDATE compounds SET price=? WHERE price IS NULL',(fallback,))
             meta.commit()
-        custom_summary = f"{price_counts['custom']} prices assigned from custom price file, " if has_custom_price else ''
-        custom_detail = f"Custom: {price_counts['custom']}, " if has_custom_price else ''
+        custom_summary = f"{price_counts['custom']:,} prices assigned from custom price file, " if has_custom_price else ''
+        custom_detail = f"Custom: {price_counts['custom']:,}, " if has_custom_price else ''
         fallback_count = int(missing.sum())
-        fallback_summary = f', {fallback_count} median fallback' if fallback_count else ''
-        fallback_detail = f', Fallback: {fallback_count}' if fallback_count else ''
+        fallback_summary = f', {fallback_count:,} median fallback' if fallback_count else ''
+        fallback_detail = f', Fallback: {fallback_count:,}' if fallback_count else ''
         update_progress(2, 'Getting price data...',
-                        f"All prices assigned ({custom_detail}MolPort: {price_counts['molport']}, "
-                        f"MolPrice approx: {price_counts['molprice']}{fallback_detail})",
-                        f"All prices assigned. {custom_summary}{price_counts['molport']} prices found from the MolPort database, "
-                        f"{price_counts['molprice']} prices approximated using MolPrice{fallback_summary}.")
+                        f"All prices assigned ({custom_detail}MolPort: {price_counts['molport']:,}, "
+                        f"MolPrice approx: {price_counts['molprice']:,}{fallback_detail})",
+                        f"All prices assigned. {custom_summary}{price_counts['molport']:,} prices found from the MolPort database, "
+                        f"{price_counts['molprice']:,} prices approximated using MolPrice{fallback_summary}.")
         update_progress(3, 'Saving matrix...',
                         'Saving matrix...' if kind == 'chembl' else 'Saving selectivity matrix...')
         np.save(directory/'prices.npy',prices,allow_pickle=False)

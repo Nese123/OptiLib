@@ -330,7 +330,7 @@ def create_app(policy=None):
             if job['status']=='complete':
                 info=state().get('dataset_info',{})
                 data.update(current_step=3,step_label='Done',
-                            detail=f"Matrix ready: {info.get('num_drugs',0)} compounds × {info.get('num_targets',0)} targets")
+                            detail=f"Matrix ready: {int(info.get('num_drugs') or 0):,} compounds × {int(info.get('num_targets') or 0):,} targets")
         return data
 
     @app.get('/api/status')

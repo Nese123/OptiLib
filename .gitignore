@@ -75,4 +75,5 @@ runtime/
 logs/
 
 AGENTS.md
+CLAUDE.md
 docker-compose.local.yml

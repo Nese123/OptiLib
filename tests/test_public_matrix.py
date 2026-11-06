@@ -41,7 +41,8 @@ class DiskMatrixTests(unittest.TestCase):
                 self.assertEqual([r[0] for r in db.execute('SELECT chembl_id FROM compounds ORDER BY i')],['CHEMBL_M100','CHEMBL_M200','CHEMBL_M300'])
             self.assertIsInstance(matrix,np.memmap)
             summaries = {
-                1: 'Found 3 candidate compounds for 2 targets.',
+                1: ('Found 3 candidate compounds for 2 targets. '
+                    '1 compound dropped due to lack of affinity or selectivity.'),
                 2: 'All prices assigned. 3 prices found from the MolPort database, 0 prices approximated using MolPrice.',
             }
             details = [update['detail'] for update in progress]
@@ -79,7 +80,7 @@ class DiskMatrixTests(unittest.TestCase):
                                   [update['detail'] for update in progress])
                     self.assertEqual(progress[-1]['step_summaries'][1],
                                      'Found 1 candidate compound for 1 target. '
-                                     f'{dropped} targets were dropped because they lacked compounds with sufficient affinity or selectivity.')
+                                     f'2 compounds and {dropped} targets dropped due to lack of affinity or selectivity.')
 
     def test_affinity_progress_summarizes_filtered_matrix_and_all_price_batches(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,7 +131,7 @@ class DiskMatrixTests(unittest.TestCase):
                 'current_step': 3, 'step_label': 'Saving matrix...',
                 'detail': 'Saving selectivity matrix...', 'step_summaries': {
                     1: ('Found 258 candidate compounds for 2 targets. '
-                        '1 target was dropped due to low selectivity.'),
+                        '1 compound and 1 target dropped due to lack of affinity or selectivity.'),
                     2: 'All prices assigned. 65 prices assigned from custom price file, 65 prices found from the MolPort database, 64 prices approximated using MolPrice, 64 median fallback.',
                 },
             })

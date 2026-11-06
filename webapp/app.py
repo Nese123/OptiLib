@@ -72,6 +72,7 @@ from core.records import (
     format_compound_display as _format_compound_display,
     format_target_display as _format_target_display,
     looks_like_inchikey as _looks_like_inchikey, looks_like_smiles as _looks_like_smiles,
+    selectivity_summary as _selectivity_summary,
 )
 from core.resolution import resolve_compounds, resolve_targets, get_target_info
 from core.datasets import prepare_dataset
@@ -672,7 +673,14 @@ def _resolve_affinity_prices(meta_records, compounds_map, price_state):
     pending = []
     for index, row in enumerate(meta_records):
         compound = row["Compound_Name"]
-        price = _lookup_custom_price(compound, compounds_map.get(compound, {}), price_state)
+        info = dict(compounds_map.get(compound, {}))
+        # Row identifiers also match custom prices; resolved values are kept
+        # where the row has none.
+        for key, column in (("chembl_id", "Molecule_ChEMBL_ID"), ("inchi_key", "InChIKey"),
+                            ("smiles", "SMILES")):
+            if row.get(column):
+                info[key] = row[column]
+        price = _lookup_custom_price(compound, info, price_state)
         if price is not None and np.isfinite(price):
             prices[index] = price
             counts["custom"] += 1
@@ -815,7 +823,7 @@ def upload_targets():
 
         target_col = None
         for col in df.columns:
-            if col.strip().lower() in ("target", "target_name", "targets", "target_names"):
+            if str(col).strip().lower() in ("target", "target_name", "targets", "target_names"):
                 target_col = col
                 break
 
@@ -883,7 +891,7 @@ def upload_affinity():
         aff_col = None
 
         for col in df.columns:
-            clean_col = col.strip().lower().replace(" ", "_").replace("-", "_")
+            clean_col = str(col).strip().lower().replace(" ", "_").replace("-", "_")
             if clean_col in ("compound", "compound_id", "compound_name", "drug", "drug_id", "molecule", "molecule_id", "ligand", "id"):
                 if cmpd_col is None:
                     cmpd_col = col
@@ -988,7 +996,7 @@ def upload_prices():
         price_col = None
 
         for col in df.columns:
-            clean_col = col.strip().lower().replace(" ", "_").replace("-", "_")
+            clean_col = str(col).strip().lower().replace(" ", "_").replace("-", "_")
             if clean_col in ("compound", "compound_id", "compound_name", "drug", "drug_id", "molecule", "molecule_id", "ligand", "id", "inchikey", "smiles", "name"):
                 if cmpd_col is None: cmpd_col = col
             elif clean_col in ("price", "price_usd_per_mg", "price_usd", "price_per_mg", "cost", "cost_usd", "usd_per_mg"):
@@ -1264,7 +1272,9 @@ def build_matrix():
         return {"error": "No matched targets provided"}, 400
     threshold = _number(data, "selectivity_threshold", 0.5)
     matched_count = _number(data, "matched_count", len(chembl_ids), integer=True)
-    remove_targets = bool(data.get("remove_targets", True))
+    remove_targets = data.get("remove_targets", True)
+    if not isinstance(remove_targets, bool):
+        raise ValueError("remove_targets must be true or false")
     return _start_computation(s, _run_pipeline,
                               (sid, chembl_ids, threshold, remove_targets, matched_count), "chembl")
 
@@ -1279,7 +1289,9 @@ def build_matrix_from_affinity():
     if not isinstance(data, dict):
         raise ValueError("Expected a JSON object")
     threshold = _number(data, "selectivity_threshold", 0.5)
-    remove_targets = bool(data.get("remove_targets", True))
+    remove_targets = data.get("remove_targets", True)
+    if not isinstance(remove_targets, bool):
+        raise ValueError("remove_targets must be true or false")
     return _start_computation(s, _run_affinity_pipeline,
                               (sid, threshold, remove_targets), "affinity")
 
@@ -1319,7 +1331,7 @@ def _publish_dataset(s, frame, matrix_file, custom, revision, provenance):
         s["dataset"].update(dataset)
         s["pipeline_state"].update(
             status="complete", current_step=3, step_label="Done",
-            detail=f"Matrix ready: {dataset['num_drugs']} compounds × {dataset['num_targets']} targets",
+            detail=f"Matrix ready: {dataset['num_drugs']:,} compounds × {dataset['num_targets']:,} targets",
         )
     return True
 
@@ -1422,16 +1434,8 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         final_export_df = final_export_df[final_export_df["SMILES"] != "Missing_SMILES"]
         final_export_df = final_export_df.dropna(subset=["SMILES"])
         final_drugs = len(final_export_df)
-        summary_text = (
-            f"Found {final_drugs:,} candidate compound{'s' if final_drugs != 1 else ''} "
-            f"for {final_targets:,} target{'s' if final_targets != 1 else ''}."
-        )
-        if dropped_targets > 0:
-            summary_text += (
-                f" {dropped_targets:,} target{'s were' if dropped_targets != 1 else ' was'} "
-                "dropped because they lacked "
-                "compounds with sufficient affinity or selectivity."
-            )
+        summary_text = _selectivity_summary(
+            final_drugs, final_targets, compounds_found_final - final_drugs, dropped_targets)
         _update_pipeline(sid, 1, "Searching for selective compounds...",
                          summary_text, summary=summary_text)
 
@@ -1447,93 +1451,31 @@ def _run_pipeline(sid, chembl_ids, selectivity_threshold, remove_targets=True, m
         # ─────────────────────────────────────────────
         _update_pipeline(sid, 2, "Getting price data...", "Querying database for prices")
 
-        inchikeys = final_export_df["InChIKey"].dropna().unique().tolist()
-        molport_dict, molport_source_dict = _lookup_molport_prices(inchikeys)
+        # Same precedence as uploaded affinities: custom price, MolPort, MolPrice
+        # (invalid SMILES are coerced per row), then a median fallback, so no
+        # compound counted in the step 1 summary is dropped here.
+        meta_records = [
+            {"Compound_Name": _clean_str(name), "Molecule_ChEMBL_ID": _clean_str(chembl_id),
+             "InChIKey": _clean_str(inchikey), "SMILES": _clean_str(smiles)}
+            for name, chembl_id, inchikey, smiles in zip(
+                final_export_df["Compound_Name"], final_export_df["Molecule_ChEMBL_ID"],
+                final_export_df["InChIKey"], final_export_df["SMILES"])
+        ]
+        prices, price_counts = _resolve_affinity_prices(meta_records, {}, price_state)
+        final_export_df["Price_USD_per_mg"] = prices
+        final_export_df.drop(columns=["MW"], inplace=True, errors="ignore")
 
-        # Check custom uploaded prices first
-        custom_price_dict = {}
-        custom_source_dict = {}
-        for idx, row in final_export_df.iterrows():
-            cmpd_name = row.get("Compound_Name", "")
-            res_info = {
-                "chembl_id": row.get("Molecule_ChEMBL_ID", ""),
-                "inchi_key": row.get("InChIKey", ""),
-                "smiles": row.get("SMILES", ""),
-                "pref_name": row.get("Compound_Name", "")
-            }
-            p = _lookup_custom_price(cmpd_name, res_info, price_state)
-            if p is not None:
-                ik = row.get("InChIKey", "")
-                if ik:
-                    custom_price_dict[ik] = float(p)
-                    custom_source_dict[ik] = "Custom Price File"
-
-        custom_price_series = final_export_df["InChIKey"].map(custom_price_dict)
-        final_export_df["Molport_Price"] = custom_price_series.combine_first(final_export_df["InChIKey"].map(molport_dict))
-        final_export_df["Molport_Source"] = final_export_df["InChIKey"].map(custom_source_dict).combine_first(final_export_df["InChIKey"].map(molport_source_dict))
-        
-        found_count = final_export_df["Molport_Price"].notna().sum()
-        custom_matched_count = custom_price_series.notna().sum()
-        molprice_approx_count = (final_export_df["Molport_Source"] == "MolPrice").sum()
-        molport_direct_count = found_count - molprice_approx_count - custom_matched_count
-        has_custom_price = bool(price_state.get("files")) or bool(price_state.get("price_map")) or (price_state.get("count", 0) > 0) or (custom_matched_count > 0)
-        custom_part_summary = f"{custom_matched_count} prices assigned from custom price file, " if has_custom_price else ""
-        custom_part_detail = f"Custom: {custom_matched_count}, " if has_custom_price else ""
-        
+        has_custom_price = bool(price_state.get("files")) or bool(price_state.get("price_map")) or (price_state.get("count", 0) > 0) or (price_counts["custom"] > 0)
+        custom_part_summary = f"{price_counts['custom']:,} prices assigned from custom price file, " if has_custom_price else ""
+        custom_part_detail = f"Custom: {price_counts['custom']:,}, " if has_custom_price else ""
+        fallback_count = price_counts["fallback"]
+        fallback_summary = f", {fallback_count:,} median fallback" if fallback_count else ""
+        fallback_detail = f", Fallback: {fallback_count:,}" if fallback_count else ""
         _update_pipeline(sid, 2, "Getting price data...",
-                         f"Found prices for {found_count}/{len(final_export_df)} compounds ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})")
-
-        # ─────────────────────────────────────────────
-        # Handle missing prices
-        # ─────────────────────────────────────────────
-        missing_price_mask = final_export_df["Molport_Price"].isna()
-        missing_count = int(missing_price_mask.sum())
-
-        if missing_count > 0:
-            _update_pipeline(sid, 2, "Getting price data...",
-                             f"Predicting prices for {missing_count} compounds not found in database using MolPrice",
-                             summary=f"Found prices. Predicting {missing_count} with MolPrice.")
-
-            # Use MolPrice to predict prices from SMILES for missing compounds
-            try:
-                molprice_weights = str(MOLPRICE_DIR / "models" / "Numpy" / "MP_Morgan_hybrid.pkl")
-                molprice_model = NumpyFingerprints(weights_path=molprice_weights)
-
-                missing_smiles = final_export_df.loc[missing_price_mask, "SMILES"].tolist()
-                predicted_prices = molprice_model.predict_batch_from_smiles(missing_smiles)
-                predicted_prices = [p[0] if hasattr(p, '__len__') else float(p) for p in predicted_prices]
-
-                # Assign predicted prices to missing entries
-                final_prices = final_export_df["Molport_Price"].copy()
-                final_prices.loc[missing_price_mask] = predicted_prices
-                final_prices = final_prices.values
-                molprice_approx_count += missing_count
-
-                _update_pipeline(sid, 2, "Getting price data...",
-                                 f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})",
-                                 summary=f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_approx_count} prices approximated using MolPrice.")
-            except Exception as e:
-                fallback = final_export_df["Molport_Price"].median()
-                if pd.isna(fallback):
-                    fallback = 100.0
-                final_prices = np.where(
-                    missing_price_mask,
-                    fallback,
-                    final_export_df["Molport_Price"]
-                )
-                _update_pipeline(sid, 2, "Getting price data...",
-                                 f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count}, Fallback: {missing_count})",
-                                 summary=f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_approx_count} prices approximated using MolPrice, {missing_count} median fallback.")
-        else:
-            _update_pipeline(sid, 2, "Getting price data...", 
-                             f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_approx_count})", 
-                             summary=f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_approx_count} prices approximated using MolPrice.")
-            final_prices = final_export_df["Molport_Price"].values
-        final_export_df["Price_USD_per_mg"] = final_prices
-        final_export_df.drop(columns=["MW", "Molport_Price", "Molport_Source"], inplace=True, errors="ignore")
-
-        # Drop rows with NaN prices
-        final_export_df = final_export_df.dropna(subset=["Price_USD_per_mg"])
+                         f"All prices assigned ({custom_part_detail}MolPort: {price_counts['molport']:,}, "
+                         f"MolPrice approx: {price_counts['molprice']:,}{fallback_detail})",
+                         summary=f"All prices assigned. {custom_part_summary}{price_counts['molport']:,} prices found from the MolPort database, "
+                                 f"{price_counts['molprice']:,} prices approximated using MolPrice{fallback_summary}.")
 
         final_export_df = reorder_meta_columns(final_export_df)
 
@@ -1621,14 +1563,8 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
         if final_drugs == 0 or final_targets == 0:
             raise ValueError(f"No compounds or targets survived selectivity pruning at threshold {selectivity_threshold}. Try lowering the threshold.")
 
-        dropped_targets = init_targets - final_targets
-        summary_text = (
-            f"Found {final_drugs:,} candidate compound{'s' if final_drugs != 1 else ''} "
-            f"for {final_targets:,} target{'s' if final_targets != 1 else ''}."
-        )
-        if dropped_targets > 0:
-            summary_text += (f" {dropped_targets:,} target{'s were' if dropped_targets != 1 else ' was'} "
-                             "dropped due to low selectivity.")
+        summary_text = _selectivity_summary(
+            final_drugs, final_targets, len(compounds_list) - final_drugs, init_targets - final_targets)
 
         _update_pipeline(sid, 1, "Calculating selectivity matrix...",
                          summary_text,
@@ -1676,15 +1612,15 @@ def _run_affinity_pipeline(sid, selectivity_threshold=0.5, remove_targets=True):
         final_export_df["Price_USD_per_mg"] = prices
 
         has_custom_price = bool(price_state.get("files")) or bool(price_state.get("price_map")) or (price_state.get("count", 0) > 0) or (custom_price_count > 0)
-        custom_part_summary = f"{custom_price_count} prices assigned from custom price file, " if has_custom_price else ""
-        custom_part_detail = f"Custom: {custom_price_count}, " if has_custom_price else ""
+        custom_part_summary = f"{custom_price_count:,} prices assigned from custom price file, " if has_custom_price else ""
+        custom_part_detail = f"Custom: {custom_price_count:,}, " if has_custom_price else ""
 
         if fallback_count > 0:
-            summary_msg = f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_count} prices approximated using MolPrice, {fallback_count} median fallback."
-            detail_msg = f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_count}, Fallback: {fallback_count})"
+            summary_msg = f"All prices assigned. {custom_part_summary}{molport_direct_count:,} prices found from the MolPort database, {molprice_count:,} prices approximated using MolPrice, {fallback_count:,} median fallback."
+            detail_msg = f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count:,}, MolPrice approx: {molprice_count:,}, Fallback: {fallback_count:,})"
         else:
-            summary_msg = f"All prices assigned. {custom_part_summary}{molport_direct_count} prices found from the MolPort database, {molprice_count} prices approximated using MolPrice."
-            detail_msg = f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count}, MolPrice approx: {molprice_count})"
+            summary_msg = f"All prices assigned. {custom_part_summary}{molport_direct_count:,} prices found from the MolPort database, {molprice_count:,} prices approximated using MolPrice."
+            detail_msg = f"All prices assigned ({custom_part_detail}MolPort: {molport_direct_count:,}, MolPrice approx: {molprice_count:,})"
 
         _update_pipeline(sid, 2, "Getting price data...", detail_msg, summary=summary_msg)
 

@@ -442,6 +442,46 @@ class SupervisorTests(unittest.TestCase):
             db.execute("UPDATE jobs SET status='running',started=? WHERE id=?",(time.time(),job))
         Supervisor(self.runtime).tick()
         self.assertEqual(self.runtime.job(job)['status'],'cancelled')
+        self.assertEqual(self.runtime.job(job)['error'],'Computation interrupted by service restart.')
+
+    def test_session_survives_backward_clock_step_but_not_excess_skew(self):
+        from itsdangerous import TimestampSigner
+        from webapp.public.config import CLOCK_SKEW_SECONDS
+        interface=self.app.session_interface
+        serializer=interface.get_signing_serializer(self.app)
+        name=interface.get_cookie_name(self.app)
+        for ahead,kept in ((5,True),(CLOCK_SKEW_SECONDS+60,False)):
+            with self.subTest(ahead=ahead):
+                with patch.object(TimestampSigner,'get_timestamp',return_value=int(time.time())+ahead):
+                    cookie=serializer.dumps({'sid':self.sid})
+                client=self.app.test_client()
+                client.set_cookie(name,cookie)
+                client.get('/api/dataset-info')
+                with client.session_transaction() as session:
+                    self.assertEqual(session['sid']==self.sid,kept)
+        client=self.app.test_client()
+        client.set_cookie(name,serializer.dumps({'sid':self.sid})+'x')
+        client.get('/api/dataset-info')
+        with client.session_transaction() as session:
+            self.assertNotEqual(session['sid'],self.sid)
+
+    def test_job_stopped_while_queued_reports_cancellation(self):
+        job=self.runtime.admit(self.sid,'ip','selection',{},reserve=1)
+        self.runtime.stop(self.sid)
+        Supervisor(self.runtime).tick()
+        self.assertEqual(self.runtime.job(job)['status'],'cancelled')
+        self.assertEqual(self.runtime.job(job)['error'],'Computation cancelled.')
+
+    def test_prune_removes_directories_of_purged_job_records(self):
+        job=self.runtime.admit(self.sid,'ip','selection',{},reserve=1)
+        self.runtime.fail(job)
+        directory=self.runtime.directory(self.sid,job)
+        with self.runtime.connect() as db:
+            db.execute('DELETE FROM jobs WHERE id=?',(job,))
+        old=time.time()-600
+        os.utime(directory,(old,old))
+        self.runtime.prune_artifacts()
+        self.assertFalse(directory.exists())
 
 
 class PublicationAndPolicyTests(unittest.TestCase):

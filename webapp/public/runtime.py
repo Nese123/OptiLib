@@ -258,7 +258,9 @@ class Runtime:
                     except Rejected:
                         continue
                     job = db.execute('SELECT status,created FROM jobs WHERE id=?',(candidate.name,)).fetchone()
-                    if job and job['status'] not in ACTIVE and time.time()-candidate.stat().st_mtime>120:
+                    # A missing record is an old job already purged below; its
+                    # directory is unreferenced and must not leak forever.
+                    if (job is None or job['status'] not in ACTIVE) and time.time()-candidate.stat().st_mtime>120:
                         shutil.rmtree(candidate)
                 # Keep current artifact jobs and active tasks; old completed
                 # status/history records must not grow forever in live sessions.

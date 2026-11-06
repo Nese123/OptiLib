@@ -126,7 +126,10 @@ class Supervisor:
                 continue
             process = self.children.get(job_id)
             if process is None:
-                self.runtime.fail(job_id,'Computation interrupted by service restart.','cancelled')
+                # A job stopped while still queued never had a process.
+                message = ('Computation cancelled.' if job['started'] is None
+                           else 'Computation interrupted by service restart.')
+                self.runtime.fail(job_id,message,'cancelled')
                 continue
             if not process.is_alive():
                 process.join(); self.children.pop(job_id,None)
